@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'sbs_cli'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=sbs_cli",
+                    "--package=sbs_cli"
+                ],
+                "filter": {
+                    "name": "sbs_cli",
+                    "kind": "bin"
+                }
+            },
+            "args": ["fetch", "artemis-sbs", "legendarymissions"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'sbs_cli'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=sbs_cli",
+                    "--package=sbs_cli"
+                ],
+                "filter": {
+                    "name": "sbs_cli",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
