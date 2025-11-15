@@ -1,0 +1,5 @@
+/__build__/
+/dist/
+**/__pycache__/**
+.vscode/
+/.vs
