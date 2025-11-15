@@ -10,7 +10,7 @@ def cli():
 @click.option('-r', '--repo', default="LegendaryMissions")
 @click.option('-b', '--branch', default="main")
 def fetch(user, repo, branch):
-    click.echo(f'Hello {user}!')
+    click.echo(f'Fetching {repo}')
     url = f"https://github.com/{user}/{repo}/zipball/{branch}/"
     try:
         urlretrieve(url, "rel.zip")

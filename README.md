@@ -7,7 +7,7 @@ This is a re-write of the fetch command for Artemis Cosmos using python for more
 
 ## Running
 
-The result of this will crete a file sbs_cli.pyz. This file is a python zip app, that can be run from the command line. The file will be placed in the missions directory.
+The result of this will create a file sbs_cli.pyz. This file is a python zip app, that can be run from the command line. The file will be placed in the missions directory.
 
 - type `sbs_cli.pyz --help` for help
 - type `sbs_cli.pyz fetch --help` for help with fetch
