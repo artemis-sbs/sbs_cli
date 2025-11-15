@@ -5,13 +5,22 @@ import shutil
 import os
 
 
-
+#
+# This removes the PIP info folders
+# and any pycache files
+# These are not needed for the pyz and waste space
+# also bin
+#
 def exclude_unnecessary(path):
     """Excludes __pycache__ directories and their contents."""
-    if "__pycache__" in str(path):
+    path = str(path)
+    if "__pycache__\\" in path or path.endswith("\\__pycache__") or path == "__pycache__":
         #print(f"Excluding: {path}")
         return False
-    if ".dist-info" in str(path):
+    if ".dist-info\\" in path:
+        #print(f"Excluding: {path}")
+        return False
+    if "bin\\" in path or path.endswith("\\bin") or path=="bin":
         #print(f"Excluding: {path}")
         return False
     return True
@@ -28,7 +37,7 @@ def create_app():
         zipapp.create_archive("__build__", target=output_file, main="main:cli", filter=exclude_unnecessary, compressed=True)
         print(f"Created app {output_file}")
     except Exception as e:
-        print("Failed to create app")
+        print(f"Failed to create app {e}")
 
 
 def install_cmd(dev):

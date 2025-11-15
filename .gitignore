@@ -1,4 +1,7 @@
 /__build__/
+/__lib__/
+/LegendaryMissions/
+/SecretMeeting/
 /dist/
 **/__pycache__/**
 .vscode/
