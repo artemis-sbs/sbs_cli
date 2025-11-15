@@ -1,4 +1,4 @@
-# NOTE: This is a work in progress noy fully functional
+# NOTE: This is a work in progress not fully functional
 
 
 # Fetch for Artemis Cosmos
