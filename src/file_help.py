@@ -51,33 +51,20 @@ def unzip_exclude(zip_path, extract_dir, exclude_files=None):
                 with open(target_path, 'wb') as f:
                     f.write(zf.read(member.filename))
 
-# # Example Usage:
-# zip_file_path = 'my_archive.zip'
-# destination_directory = 'extracted_content'
-# files_to_exclude = ['secret_data.txt', 'temp_files/', 'log_file.log']
-
-# # Create a dummy zip file for demonstration
-# with zipfile.ZipFile(zip_file_path, 'w') as zf:
-#     zf.writestr('file1.txt', 'Content of file 1')
-#     zf.writestr('secret_data.txt', 'This should not be extracted')
-#     zf.writestr('temp_files/temp.log', 'Temporary log')
-#     zf.writestr('log_file.log', 'Another log file')
-#     zf.writestr('another_dir/another_file.py', 'Python script')
-
-# unzip_exclude(zip_file_path, destination_directory, files_to_exclude)
-
-# Clean up the dummy zip file and extracted directory
-# import shutil
-# os.remove(zip_file_path)
-# shutil.rmtree(destination_directory)
 
 
 def fetch_deps(dep_libs, is_sbs_lib):
+    """ This will fetch the dependencies from a github release
+
+    Args:
+        dep_libs ([str]]): The list of dependencies
+        is_sbs_lib (bool): If this is a list of sbslibs they have different naming conventions
+    """
     for dep_lib in dep_libs:
         parts = dep_lib.split(".", 2)
         #print(parts)
         if len(parts) != 3:
-            print(f"unsupported dependency format {dep_lib}")
+            print(f"ERROR: unsupported dependency format {dep_lib}")
             continue
         user = parts[0]
         repo = parts[1]
@@ -85,7 +72,7 @@ def fetch_deps(dep_libs, is_sbs_lib):
         
         version = file.split(".")
         if len(version) < 3:
-            print(f"unsupported dependency format {dep_lib}")
+            print(f"ERROR: unsupported dependency format {dep_lib}")
             continue
         # remove front
         if not is_sbs_lib:

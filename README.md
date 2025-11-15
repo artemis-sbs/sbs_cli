@@ -1,5 +1,7 @@
 # NOTE: This is a work in progress not fully functional
 
+Current functionality fetch does work and will install all dependencies from story.json
+So it CAN replace the existing fetch batch files.
 
 # Fetch for Artemis Cosmos
 
@@ -11,6 +13,8 @@ The result of this will create a file sbs_cli.pyz. This file is a python zip app
 
 - type `sbs_cli.pyz --help` for help
 - type `sbs_cli.pyz fetch --help` for help with fetch
+
+- type `sbs_cli.pyz fetch ` for help with fetch
 
 ## Running using python in directory for cosmos
 If python is installed on the machine windows should recognize .pyz file as python and run them.
@@ -31,6 +35,7 @@ To use development mode
 - type `dev.pyz install` to install the needed libraries for the app
 - type `dev.pyz install --dev` to install the needed libraries for development
 - type `dev.pyz build` to build sbs_cli.pyz the app
+- type `dev.pyz build --install` to do an install then build sbs_cli.pyz the app
 
 
 
