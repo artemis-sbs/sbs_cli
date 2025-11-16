@@ -28,7 +28,7 @@ def exclude_unnecessary(path):
 def create_app():
     try:
         output_dir = 'dist'
-        output_file = os.path.join(output_dir, 'sbs_cli.pyz')
+        output_file = os.path.join(output_dir, 'sbs.pyz')
 
         # Ensure the output directory exists
         if not os.path.exists(output_dir):
@@ -62,6 +62,7 @@ def build(install):
             install_cmd(False)
         #subprocess.run(["copy", "main.py", "fetch\\main.py"])
         shutil.copytree("src", "__build__", dirs_exist_ok=True)
+        shutil.copytree("bat", "dist", dirs_exist_ok=True)
         create_app()
     except Exception as e:
         print(f"oops {e}")
