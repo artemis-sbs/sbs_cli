@@ -9,21 +9,23 @@ This is a re-write of the fetch command for Artemis Cosmos using python for more
 
 ## Running
 
-The result of this will create a file sbs.pyz. This file is a python zip app, that can be run from the command line. The file will be placed in the missions directory.
+The result of this will create a file sbs.pyz. This file is a python zip app, that can be run from the command line. The file will be placed in the missions directory. Also user the sbs.bat file to bootstrap the zip app.
 
-- type `sbs.pyz --help` for help
-- type `sbs.pyz fetch --help` for help with fetch
+> [!NOTE]
+> If you do not have the sbs.bat file you can created with the following code. place it in the missions folder.
+> ``` batch
+> @echo off
+> ..\..\PythonRuntime\python sbs.pyz %*
+> ```
 
-- type `sbs.pyz fetch ` for help with fetch
 
-## Running using python in directory for cosmos
-If python is installed on the machine windows should recognize .pyz file as python and run them.
 
-Without python installed you can use the sbs.bat file to run using the python in Artemis Cosmos.
+- type `sbs --help` for help
+- type `sbs fetch --help` for help with fetch
 
-``` batch
-..\..\PythonRuntime\python sbs.pyz %*
-```
+- type `sbs fetch SecretMeeting` to fetch the Secret Meeting mission
+- type `sbs fetch SomeMission --user a_github_user` to fetch the a mission from a user other tan artemis-sbs
+
 
 ## Developer
 
