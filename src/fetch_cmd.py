@@ -116,6 +116,9 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
 def fetch_repos(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, overwrite_sbs_libs):
     """Fetch command"""
     repos = repo.split(",")
+    if len(repos)>1 and folder is not None:
+        print("ERROR: You cannot set the folder with multiple missions.")
+        return
     for repo_item in repos:
         fetch_cmd(repo_item, user, branch, folder, overwrite_libs, skip_libs, skip_clean, overwrite_sbs_libs)
 
