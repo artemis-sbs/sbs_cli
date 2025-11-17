@@ -3,11 +3,11 @@
 Current functionality fetch does work and will install all dependencies from story.json
 So it CAN replace the existing fetch batch files.
 
-# Fetch for Artemis Cosmos
+## Fetch for Artemis Cosmos
 
 This is a re-write of the fetch command for Artemis Cosmos using python for more control
 
-## Running
+### Running
 
 The result of this will create a file sbs.pyz. This file is a python zip app, that can be run from the command line. The file will be placed in the missions directory. Also user the sbs.bat file to bootstrap the zip app.
 
@@ -26,6 +26,12 @@ The result of this will create a file sbs.pyz. This file is a python zip app, th
 - type `sbs fetch SecretMeeting` to fetch the Secret Meeting mission
 - type `sbs fetch SomeMission --user a_github_user` to fetch the a mission from a user other tan artemis-sbs
 
+## Updating
+The sbs tool is capable of updating itself to the latest version.
+
+- type `sbs update` to update the sbs.pyz and sbs.bat to the latest on github
+
+Since this updates the running files, this occasionally fail.
 
 ## Developer
 

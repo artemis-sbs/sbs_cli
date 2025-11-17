@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 from urllib.request import urlretrieve
 from file_help import unzip_exclude, fetch_deps
+from version import VERSION
 
 zipapp_dir = Path(__file__).resolve().parent
 working_directory = os.curdir
@@ -110,4 +111,8 @@ def update():
         print(f"ERROR: BAD MISSION URL: {url}\n{e}")
         return
     
+
+@cli.command("version")
+def version():
+    print(f"{VERSION}")
     

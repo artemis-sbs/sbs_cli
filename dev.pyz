@@ -3,6 +3,7 @@ import click
 import subprocess
 import shutil
 import os
+from src.version import VERSION
 
 
 def run_cmd(cmd):
@@ -84,7 +85,11 @@ def build(install):
 def install(dev):
     install_cmd(dev)
 
-VERSION = "0.1"
+
+@cli.command("version")
+def version():
+    print(f"{VERSION}")
+
 
 @cli.command("release")
 @click.argument('message', required=False)
