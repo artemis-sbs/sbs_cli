@@ -1,6 +1,26 @@
 import zipfile
 import os
+import pathlib
 from urllib.request import urlretrieve
+
+
+skip =  {"__pycache__"}
+
+
+def zipdir(folder_path, zip_file_name):
+    with zipfile.ZipFile(zip_file_name, "w") as zf:
+        for root, subdirs, files in os.walk(folder_path):
+            p = pathlib.Path(root)
+            arc_dirname = str(pathlib.Path(*p.parts[1:]))
+            if arc_dirname in skip:
+                continue
+
+            for file in files:
+                file_path = os.path.join(root, file)
+                archive_path = os.path.relpath(file_path, folder_path)
+                zf.write(file_path, archive_path)
+
+
 
 def unzip_exclude(zip_path, extract_dir, exclude_files=None):
     """
@@ -53,7 +73,7 @@ def unzip_exclude(zip_path, extract_dir, exclude_files=None):
 
 
 
-def fetch_deps(dep_libs, is_sbs_lib):
+def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
     """ This will fetch the dependencies from a github release
 
     Args:
@@ -81,15 +101,19 @@ def fetch_deps(dep_libs, is_sbs_lib):
         version = version[:-1]
         # put back
         version = ".".join(version)
+
+        target = f"__lib__/{dep_lib}"
+        if not overwrite_libs and os.path.exists(target):
+            #print("SKIPPING")
+            continue
         
         if is_sbs_lib:
             url = f"https://github.com/{user}/{repo}/releases/download/{version}/{user}.{repo}.{file}"
         else:
             url = f"https://github.com/{user}/{repo}/releases/download/{version}/{file}"
-        print(f"Fetching {dep_lib} from {url} to __lib__/{dep_lib}")
+        print(f"Fetching {dep_lib} from {url} to {target}")
         os.makedirs("__lib__", exist_ok=True)
         try:
-            target = f"__lib__/{dep_lib}"
             urlretrieve(url, target)
         except Exception as e:
             print(f"ERROR: Fetching {dep_lib}\n{e}")

@@ -26,6 +26,25 @@ The result of this will create a file sbs.pyz. This file is a python zip app, th
 - type `sbs fetch SecretMeeting` to fetch the Secret Meeting mission
 - type `sbs fetch SomeMission --user a_github_user` to fetch the a mission from a user other tan artemis-sbs
 
+### Fetch and downloading dependencies
+
+Fetch will automatically download dependent libs from github if they do not exist local. sbslib files are always downloaded. mastlib and zip will not be downloaded 
+
+To force the download of dependencies (mastlib and zip)
+
+- type `sbs fetch SecretMeeting -o` to fetch the Secret Meeting mission and redownload dependencies
+- type `sbs fetch SecretMeeting --overwrite_libs` to fetch the Secret Meeting mission and redownload dependencies
+
+### Fetch building addons etc.
+
+Fetch will automatically build the libraries and addons specified in the \__lib__.json file in the mission
+
+To skip building addons (mastlib and zip). This seems like it is not something that will be used much.
+
+- type `sbs fetch LegendaryMissions -sl` to fetch the Secret Meeting mission and not build addons
+- type `sbs fetch LegendaryMissions -sl` to fetch the Secret Meeting mission and not build addons
+
+
 ## Updating
 The sbs tool is capable of updating itself to the latest version.
 
