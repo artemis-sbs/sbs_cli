@@ -15,12 +15,6 @@ def cli():
     pass
 
 
-# @click.argument("repo", default="LegendaryMissions", help="The mission name. i.e. the github repository name")
-# @click.option('-u', '--user', default="artemis-sbs", help="Specify The github user/organization. Default artemis-sbs")
-# @click.option('-b', '--branch', default="main", help="Specify The github branch/tag. Default main")
-# @click.option('-f', '--folder', help="Specify the local folder for mission. Defaults to the same as the repository name.")
-
-
 @cli.command(short_help="Fetch missions from git repositories.")
 @click.argument("repo", default="LegendaryMissions")
 @click.option('-u', '--user', default="artemis-sbs", show_default=True, help="Specify The github user/organization.")
@@ -100,3 +94,20 @@ def fetch(repo, user, branch, folder):
         print(f"ERROR: Could not load {deps_file}\n{e}")
     
 
+
+@cli.command(short_help="Update the sbs tool.")
+def update():
+    try:
+        url = "https://github.com/artemis-sbs/sbs_cli/releases/latest/download/sbs.bat"
+        urlretrieve(url, "sbs.bat")
+        url = "https://github.com/artemis-sbs/sbs_cli/releases/latest/download/sbs.pyz"
+        urlretrieve(url, "sbs.pyz")
+        # Note: You can't do much after this
+        # since it updated the running zip file
+        # so you can no longer call code in the zip
+        print("Updated sbs")
+    except Exception as e:
+        print(f"ERROR: BAD MISSION URL: {url}\n{e}")
+        return
+    
+    

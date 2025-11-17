@@ -75,6 +75,40 @@ def build(install):
 def install(dev):
     install_cmd(dev)
 
+VERSION = "0.1"
+
+@cli.command("release")
+@click.argument('message')
+@click.option('-v', '--version', default=VERSION)
+@click.option('-u', '--unrelease', is_flag=True)
+def release(version, message, unrelease):
+    try:
+        cmd = "none"
+        if unrelease:
+            cmd = f"git tag --delete {version}"
+            if os.system(cmd)!=0:
+                print(f"ERROR: running {cmd}")
+                return
+            cmd = f"git push --delete origin {version}"
+            if os.system(cmd)!=0:
+                print(f"ERROR: running {cmd}")
+                return
+
+        if message is not None:
+            # git tag -a %VERSION% -m %2
+            cmd = f"git tag -a {version} -m \"{message}\""
+            if os.system(cmd)!=0:
+                print(f"ERROR: running {cmd}")
+                return
+            # git push --tags
+            cmd = f"git push --tags"
+            if os.system(cmd)!=0:
+                print(f"ERROR: running {cmd}")
+                return
+    except Exception as e:
+        print(f"ERROR: running {cmd} {e}")
+
+
 
 if __name__ == '__main__':
     cli()
