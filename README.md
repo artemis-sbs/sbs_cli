@@ -31,13 +31,20 @@ The result of this will create a file sbs.pyz. This file is a python zip app, th
 
 To use development mode
 
-- retrieve the repository
+## retrieve the repository
+
 - type `dev.pyz --help` for help
 - type `dev.pyz install --dev` to install the needed libraries for development
 - type `dev.pyz install` to install the needed libraries for the app
 - type `dev.pyz install --dev` to install the needed libraries for development
 - type `dev.pyz build` to build sbs.pyz the app
 - type `dev.pyz build --install` to do an install then build sbs.pyz the app
+
+### To build releases on github
+- type `dev.pyz build [MESSAGE]` to create a new release
+- type `dev.pyz build --unrelease [MESSAGE]` to create a update release
+- type `dev.pyz build -u [MESSAGE]` to create a update release
+- type `dev.pyz build -u [MESSAGE]` --version 1.1 to create specific version update release
 
 
 
