@@ -131,20 +131,34 @@ def fetch_repos(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clea
 @click.option('-o', '--overwrite_libs', is_flag=True, help="Force getting libraries from github if they exist local i.e. overwrite the local copy.")
 @click.option('-sl', '--skip_libs', is_flag=True, help="This will skip the building of libraries/addons.")
 @click.option('-sc', '--skip_clean', is_flag=True, help="This will skip the clearing the target folder.")
-def fetch(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean):
+@click.option('-q', '--quiet', is_flag=True, help="Suppress the confirm for cleaning directories.")
+def fetch(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, quiet):
     """Fetch command"""
+    if not skip_clean and not quiet:
+        click.echo('This will remove the existing folder(s) prior fetching the new version.')
+        answer = click.prompt('Continue?', default="N")
+        if not (answer[0] == "y" or answer[0] == "Y"):
+            return
+
     fetch_repos(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, True)
 
 
 @cli.command(short_help="Fetch all the missions that ship with Artemis Cosmos from git repositories.")
 @click.option('-b', '--branch', default="main", show_default=True, help="Specify The github branch/tag.")
-def production(branch):
+@click.option('-q', '--quiet', is_flag=True, help="Suppress the confirm for cleaning directories.")
+def production(branch, quiet):
     """Production command
 
     branch defaults to 'main' this is the current development.
     using branch 'latest' will get the latest tagged version
     using any other tagged branch will attempt to get the version e.g. 'v1.0.6'
     """
+    if not quiet:
+        click.echo('This will remove the existing folder(s) prior fetching the new version.')
+        answer = click.prompt('Continue?', default="N")
+        if not (answer[0] == "y" or answer[0] == "Y"):
+            return
+
 
     repo  = "LegendaryMissions"
     # This should NO grab the latest sbslib, but rebuild the addons
