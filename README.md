@@ -2,6 +2,15 @@
 
 This has the functionality desired for the first release. It needs testing and cleanup.
 
+New Feature Ideas
+- add support for a -latest to allow for better handling of hot fixes
+e.g. v1.3.0 ships library and missions can have v.1.3.0-fix1, v.1.3.0-fix2, v.1.3.0-fix3 v.1.3.0-latest should point to v1.3.0-fix3
+When generating it should add -latest if it is not on the version. story.json should point to -latest in the future.
+A version file should be placed into library/addons
+sbs tool could grab the actual version out of latest
+
+
+
 
 Commands:
 
@@ -230,7 +239,19 @@ This version is what the release command uses by default
 
 `sbs fetch LegendaryMissions,SecretMeeting,WalkTheLine`
 
+> I am messed around with LegendaryMissions script, but now I just want the version that shipped with my version of Artemis Cosmos. I use v1.3.0
+
+`sbs fetch LegendaryMissions --version v1.3.0`
+
+> But what if it has some bug fixes?
+
+`sbs fetch LegendaryMissions --version v1.3.0-latest`
+
+NOTE: Some older version may not have the -latest version. It is a new concept not yet tried.
+
+
 > I'm the guy creating the install for ArtemisCosmos, what do I do
+
 Well you can delete or move everything out of missions except sbs.bat and sbs.pyz and then type. (Also, if you change dmx,py put update here https://github.com/artemis-sbs/sbs_common)
 
 `sbs production -q`
@@ -241,16 +262,20 @@ Well you can delete or move everything out of missions except sbs.bat and sbs.py
 
 > I'm the kind of person that works on my own scripts, but changes Legendary Missions and use its addons and I want to stay up to date while I do that
 
- get the latest, and then start a watcher to rebuild add on when anything changes
+get the latest, and then start a watcher to rebuild add on when anything changes
+
 You should git clone LegendaryMissions
 
 `sbs watch LegendaryMissions`
 
 > But I also change sbs_utils
+
 You should git clone LegendaryMissions and sbs_utils
+
 sbs watch LegendaryMissions,sbs_utils
 
 > But I but I have my own fork (user named western_back) and even use that in story.json
+
 You should git clone LegendaryMissions and sbs_utils
 
 `sbs watch western_back:LegendaryMissions,western_back:sbs_utils`
