@@ -15,6 +15,7 @@ Commands:
 - production - This will fetch all the missions that ship with Artemis Cosmos
 
 ## Running
+
 The code will create a file sbs.pyz. This file is a python zip app, that can be run from the command line. The file will be placed in the missions directory. Also use the sbs.bat file to bootstrap the zip app. The batch file will use the version of python that ships with Artemis Cosmos.
 
 - type `sbs --help` 
@@ -65,6 +66,7 @@ To skip building addons (mastlib and zip). This seems like it is not something t
 - type `sbs fetch LegendaryMissions -sl` to fetch the Secret Meeting mission and not build addons
 
 ## run
+
 The run command is useful to run multiple copies of Artemis Cosmos for whatever reason.
 
 Usage: sbs run [OPTIONS] [CONSOLES]
@@ -75,6 +77,7 @@ Usage: sbs run [OPTIONS] [CONSOLES]
 
 
 ## update
+
 The sbs tool is capable of updating itself to the latest version.
 
 - type `sbs update` to update the sbs.pyz and sbs.bat to the latest on github
@@ -83,6 +86,7 @@ Since this updates the running files, this occasionally fail.
 
 
 ## lib 
+
 This will build any sbslib, mastlib zip, etc. specified in a \__lib__.json file
 
 Usage: sbs lib [OPTIONS] [FOLDER]
@@ -99,7 +103,8 @@ Options:
 - type `sbs watch sbs_utils,my_user:LegendaryMissions` to build multiple folders with mixed users ids
 
 
-## watch - this will watch for changes in a mission and automatically rebuild libraries and addons
+## watch 
+
 This will watch for any changes in a folder and build any addons or libraries when changes occur.
 
 
@@ -122,7 +127,9 @@ The folder argument an also be a list of these
 - type `sbs watch LegendaryMissions --interval 2` to set the interval the default is 5 seconds
 
 
-## release - Used by development, it triggers the update or creation of a release on github
+## release
+Used by development, it triggers the update or creation of a release on github
+
 This will add or remove tags on github. This will trigger a github action to create a new release
 
 The version is determined by the value in version.py unless specified with --version
@@ -141,7 +148,9 @@ Options:
 - type `sbs release [FOLDER] -u [MESSAGE] --version 1.1` to create specific version update release
 
 
-## production - This will fetch all the missions that ship with Artemis Cosmos
+## production 
+
+This will fetch all the missions that ship with Artemis Cosmos
 This command will fetch the missions that ship with artemis cosmos.
 The existing missions folders will be removed and fresh copies will be retrieved.
 
@@ -167,6 +176,7 @@ Commands:
 - type `dev.pyz --help` for help
 
 ## install
+
 The install command will call pip install for working with the tool and gathering the tools dependencies
 ```
 Options:
