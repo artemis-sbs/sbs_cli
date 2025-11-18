@@ -14,7 +14,7 @@ GetWindowRect = ctypes.windll.user32.GetWindowRect
 
 
 @cli.command("run")
-@click.argument("consoles")
+@click.argument("consoles", default="")
 def run(consoles):
     
     #
@@ -36,7 +36,7 @@ def run(consoles):
     cl_contents =f.read()
     f.close()
     #
-    if consoles is None:
+    if consoles is None or consoles == "":
         windows = ["Server", "comms", "weapons", "science", "engineering", "cinematic" ] 
     else:
         windows = consoles.split(",")
