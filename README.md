@@ -214,7 +214,47 @@ This version is what the release command uses by default
 
 
 
+## Scenarios
 
+> I am an operator who likes to be on the edge and always wants to have the latest. How do I update?
+
+`sbs fetch LegendaryMissions,SecretMeeting,WalkTheLine`
+
+> I'm the guy creating the install for ArtemisCosmos, what do I do
+Well you can delete or move everything out of missions except sbs.bat and sbs.pyz and then type. (Also, if you change dmx,py put update here https://github.com/artemis-sbs/sbs_common)
+
+`sbs production -q`
+
+> I'm someone who wants to run a mainscreen and a station
+
+`sbs run mainscreen,helm`
+
+> I'm the kind of person that works on my own scripts, but changes Legendary Missions and use its addons and I want to stay up to date while I do that
+
+ get the latest, and then start a watcher to rebuild add on when anything changes
+You should git clone LegendaryMissions
+
+`sbs watch LegendaryMissions`
+
+> But I also change sbs_utils
+You should git clone LegendaryMissions and sbs_utils
+sbs watch LegendaryMissions,sbs_utils
+
+> But I but I have my own fork (user named western_back) and even use that in story.json
+You should git clone LegendaryMissions and sbs_utils
+
+`sbs watch western_back:LegendaryMissions,western_back:sbs_utils`
+
+This will build libraries with that user name.
+
+
+> I'm someone who wants to burnin test cosmos using autoplay
+
+set up the mission settings.yaml for autoplay and auto start
+
+`sbs run`
+
+Start the server and the clients, let it run forever
 
 
 
