@@ -4,20 +4,29 @@ import pathlib
 from urllib.request import urlretrieve
 
 
-skip =  {"__pycache__"}
 
 
-def zipdir(folder_path, zip_file_name):
-    with zipfile.ZipFile(zip_file_name, "w") as zf:
+
+def zipdir(folder_path, zip_file_name, first_folder=None):
+    
+    skips =  {"__pycache__"}
+    #
+    with zipfile.ZipFile(zip_file_name, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=8) as zf:
         for root, subdirs, files in os.walk(folder_path):
-            p = pathlib.Path(root)
-            arc_dirname = str(pathlib.Path(*p.parts[1:]))
-            if arc_dirname in skip:
+            s = False
+            for skip in skips:
+                if skip in root:
+                    s = True
+            if s:
                 continue
 
             for file in files:
                 file_path = os.path.join(root, file)
-                archive_path = os.path.relpath(file_path, folder_path)
+
+                archive_path = str(os.path.relpath(file_path, folder_path))
+
+                if first_folder is not None:
+                    archive_path = f"{first_folder}\\{archive_path}"
                 zf.write(file_path, archive_path)
 
 
