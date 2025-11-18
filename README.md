@@ -254,6 +254,9 @@ NOTE: Some older version may not have the -latest version. It is a new concept n
 
 Well you can delete or move everything out of missions except sbs.bat and sbs.pyz and then type. (Also, if you change dmx,py put update here https://github.com/artemis-sbs/sbs_common)
 
+It is good idea to update sbs, then run production.
+
+`sbs update`
 `sbs production -q`
 
 > I'm someone who wants to run a mainscreen and a station
