@@ -6,6 +6,7 @@ from lib_cmd import lib
 from release_cmd import release
 from run_cmd import run
 from watch_cmd import watch
+from compile_cmd import compile
 
 
 
