@@ -18,7 +18,7 @@ Commands:
 - run - run multiple copies of Artemis Cosmos
 - version - tells the version of the tool
 - update - updates the tool to the latest released version
-- lib - this will build any sbslib, mastlib zip, etc. specified in a \__lib__.json file
+- lib - this will build any sbslib, mastlib zip, etc. specified in a `__lib__.json` file
 - watch - this will watch for changes in a mission and automatically rebuild libraries and addons
 - release - Used by development, it triggers the update or creation of a release on github
 - production - This will fetch all the missions that ship with Artemis Cosmos
@@ -67,7 +67,7 @@ To force the download of dependencies (mastlib and zip)
 
 ### Fetch building addons etc.
 
-Fetch will automatically build the libraries and addons specified in the \__lib__.json file in the mission
+Fetch will automatically build the libraries and addons specified in the `__lib__.json` file in the mission
 
 To skip building addons (mastlib and zip). This seems like it is not something that will be used much.
 
@@ -96,7 +96,7 @@ Since this updates the running files, this occasionally fail.
 
 ## lib 
 
-This will build any sbslib, mastlib zip, etc. specified in a \__lib__.json file
+This will build any sbslib, mastlib zip, etc. specified in a `__lib__.json` file
 
 Usage: sbs lib [OPTIONS] [FOLDER]
 
