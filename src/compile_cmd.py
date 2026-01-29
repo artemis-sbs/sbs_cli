@@ -88,7 +88,6 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
 
 
     except Exception as e:
-        print ("EXP")
         print (e)
 
 
@@ -96,14 +95,7 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
 @cli.command(short_help="MAST Compile")
 @click.argument("folder", default="LegendaryMissions")
 @click.option('-t', '--terminal', is_flag=True)
-def compile(folder, terminal):
-    compile_impl(folder, True, not terminal)
+@click.option('-r', '--run', is_flag=True)
+def compile(folder, run, terminal):
+    compile_impl(folder, not run, not terminal)
     
-
-@cli.command(short_help="MAST Run not fully supported")
-@click.argument("folder", default="LegendaryMissions")
-@click.option('-t', '--terminal', is_flag=True)
-def run(folder, terminal):
-    compile_impl(folder, False, not terminal)
-
-

@@ -22,6 +22,7 @@ Commands:
 - watch - this will watch for changes in a mission and automatically rebuild libraries and addons
 - release - Used by development, it triggers the update or creation of a release on github
 - production - This will fetch all the missions that ship with Artemis Cosmos
+- compile - Compile the MAST 
 
 ## Running
 
@@ -168,6 +169,21 @@ Options:
   -b, --branch TEXT  Specify The github branch/tag.  [default: main]
   -q, --quiet        Suppress the confirm for cleaning directories.
 ```  
+
+## Compile
+This will compile the MAST project and output errors.
+This can be done on a Artemis Cosmos project by default additionally it can compile a MAST project that is just core nodes (for commandline terminal)
+
+It can also run the project Artemis Cosmos is not used, but a small subset of the sbs API is supported, just to general test mission startup.
+
+
+Usage: sbs compile [OPTIONS] [FOLDER]
+
+Options:
+  -t, --terminal
+  -r, --run
+  -h, --help      Show this message and exit.
+
 
 
 ## Developer tool
