@@ -10,10 +10,10 @@ from file_help import unzip_exclude, fetch_deps
 from pathlib import Path
 from lib_cmd import lib_impl
 
-
+# https://github.com/artemis-sbs/LegendaryMissions/archive/refs/heads/main.zip
 
 def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, overwrite_sbs_libs):
-    url = f"https://github.com/{user}/{repo}/zipball/{branch}/"
+    url = f"https://github.com/{user}/{repo}/archive/refs/heads/{branch}.zip"
     zip_file_path = "rel.zip"
     click.echo(f'Fetching {repo} at {url}')
 
