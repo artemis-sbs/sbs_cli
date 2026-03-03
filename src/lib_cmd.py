@@ -47,12 +47,12 @@ def lib_impl(folder, user):
     repo = folder
     for key, values in libs.items():
         if key == "version":
-            v = version_file_contents(values)
-            if v is None:
-                continue
-            version_file = Path(working_directory).resolve() / folder / folder / "version__.py"
-            with open(version_file, "w") as f:
-                f.write(v)
+            # v = version_file_contents(values)
+            # if v is None:
+            #     continue
+            # version_file = Path(working_directory).resolve() / folder / folder / "version__.py"
+            # with open(version_file, "w") as f:
+            #     f.write(v)
             continue
         ext = key
         for folder_path in values:
