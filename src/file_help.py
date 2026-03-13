@@ -2,8 +2,11 @@ import zipfile
 import os
 # from urllib.request import urlretrieve
 
-
-
+#https://github.com/DizzyKungFu/Lucky_13/archive/refs/heads/main.zip
+#https://github.com/DizzyKungFu/Lucky_13/archive/refs/heads/main.zip
+#https://github.com/DizzyKungFu/Lucky_13/archive/refs/heads/main.zip
+###curl
+# "https://github.com/%USER%/%REPO%/zipball/%BRANCH%/"
 
 def curlretrieve(url, localname):
     """Usew curl to retreive the files
@@ -17,7 +20,7 @@ def curlretrieve(url, localname):
     # Recommended way to run a command and capture output
     try:
         result = subprocess.run(
-            ["curl", "-L", "-max-redirs", "5", url, "--output", localname],  # Command and arguments as a list
+            ["curl","-L", "--max-redirs", "5", f"{url}", "--output", localname],  # Command and arguments as a list
             capture_output=True,   # Capture stdout and stderr
             text=True,             # Return strings instead of bytes
             check=True             # Raise exception on non-zero exit

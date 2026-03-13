@@ -1,5 +1,5 @@
 
-from cli_cmd import cli, zipapp_dir,curlretrieve
+from cli_cmd import cli, zipapp_dir
 # Import needed to properly see commands
 from fetch_cmd import fetch
 from lib_cmd import lib
