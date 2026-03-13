@@ -5,8 +5,8 @@ import shutil
 import pathlib
 
 from cli_cmd import cli, zipapp_dir
-from urllib.request import urlretrieve
-from file_help import unzip_exclude, fetch_deps
+#from urllib.request import urlretrieve
+from file_help import unzip_exclude, fetch_deps, curlretrieve
 from pathlib import Path
 from lib_cmd import lib_impl
 
@@ -28,7 +28,7 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
     # Retrieve the file from github
     try:
         if not skip_repo:
-            urlretrieve(url, zip_file_path)
+            curlretrieve(url, zip_file_path)
     except Exception as e:
         print(f"ERROR: BAD MISSION URL: {url}")
         return

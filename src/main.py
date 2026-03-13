@@ -1,5 +1,5 @@
 
-from cli_cmd import cli, zipapp_dir
+from cli_cmd import cli, zipapp_dir,curlretrieve
 # Import needed to properly see commands
 from fetch_cmd import fetch
 from lib_cmd import lib
@@ -7,11 +7,13 @@ from release_cmd import release
 from run_cmd import run
 from watch_cmd import watch
 from compile_cmd import compile
-
+import click
 
 
 from urllib.request import urlretrieve
 from version import VERSION
+from file_help import curlretrieve
+
 
 
 
@@ -19,9 +21,9 @@ from version import VERSION
 def update():
     try:
         url = "https://github.com/artemis-sbs/sbs_cli/releases/latest/download/sbs.bat"
-        urlretrieve(url, "sbs.bat")
+        curlretrieve(url, "sbs.bat")
         url = "https://github.com/artemis-sbs/sbs_cli/releases/latest/download/sbs.pyz"
-        urlretrieve(url, "sbs.pyz")
+        curlretrieve(url, "sbs.pyz")
         # Note: You can't do much after this
         # since it updated the running zip file
         # so you can no longer call code in the zip

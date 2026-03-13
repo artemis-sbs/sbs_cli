@@ -1,10 +1,34 @@
 import zipfile
 import os
-import pathlib
-from urllib.request import urlretrieve
+# from urllib.request import urlretrieve
 
 
 
+
+def curlretrieve(url, localname):
+    """Usew curl to retreive the files
+
+    Args:
+        url (str): the url
+        localname (str): The local filename
+    """
+    import subprocess
+
+    # Recommended way to run a command and capture output
+    try:
+        result = subprocess.run(
+            ["curl", "-L", "-max-redirs", "5", url, "--output", localname],  # Command and arguments as a list
+            capture_output=True,   # Capture stdout and stderr
+            text=True,             # Return strings instead of bytes
+            check=True             # Raise exception on non-zero exit
+        )
+        print("Command ran successfully.")
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"Command failed with return code {e.returncode}")
+        print(e.stderr)
+    except FileNotFoundError:
+        print("Command not found.")
 
 
 def zipdir(folder_path, zip_file_name, first_folder=None):
@@ -123,7 +147,7 @@ def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
         print(f"Fetching {dep_lib} from {url} to {target}")
         os.makedirs("__lib__", exist_ok=True)
         try:
-            urlretrieve(url, target)
+            curlretrieve(url, target)
         except Exception as e:
             print(f"ERROR: Fetching {dep_lib}\n{e}")
 
