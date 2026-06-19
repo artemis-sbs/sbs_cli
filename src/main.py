@@ -1,6 +1,7 @@
 
 from cli_cmd import cli, zipapp_dir
 # Import needed to properly see commands
+from debug_cmd import debug
 from fetch_cmd import fetch
 from lib_cmd import lib
 from release_cmd import release
