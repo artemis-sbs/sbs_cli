@@ -153,25 +153,39 @@ def _required_assets(mission_path, packaged_mode):
     return [a for a in assets if not (a in seen or seen.add(a))]
 
 
-def _ensure_libs(mission_path, packaged_mode, do_fetch=True):
+def _safe_remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _ensure_libs(mission_path, packaged_mode, do_fetch=True, refresh=False):
     """Make sure every required lib is in __lib__, downloading any missing ones
-    from the matching GitHub release (curl follows the CDN redirect). A 404 body
-    isn't a zip, so downloads are validated."""
+    from the matching GitHub release (curl follows the CDN redirect; a 404 body
+    isn't a zip, so downloads are validated).
+
+    With ``refresh`` every required lib is re-downloaded and overwritten -- for
+    an in-place re-release under the same tag, where a same-named file on disk is
+    stale. Downloads go to a temp file and only replace the existing copy once
+    validated, so a release missing an asset leaves the existing copy intact.
+    """
     lib_dir = os.path.join(_missions_dir(), "__lib__")
     os.makedirs(lib_dir, exist_ok=True)
-    missing = [a for a in _required_assets(mission_path, packaged_mode)
-               if not os.path.isfile(os.path.join(lib_dir, a))]
-    if not missing:
+    required = _required_assets(mission_path, packaged_mode)
+    targets = required if refresh else [
+        a for a in required if not os.path.isfile(os.path.join(lib_dir, a))]
+    if not targets:
         return
-    if not do_fetch:
+    if not do_fetch and not refresh:
         raise RuntimeError(
-            "Missing libraries in __lib__:\n  " + "\n  ".join(missing)
+            "Missing libraries in __lib__:\n  " + "\n  ".join(targets)
             + "\n(remove --no-fetch to download them from the GitHub release)")
 
     import zipfile
     from file_help import curlretrieve
     failed = []
-    for asset in missing:
+    for asset in targets:
         parsed = _parse_asset(asset)
         if parsed is None:
             failed.append(f"{asset} (unrecognized name)")
@@ -179,18 +193,22 @@ def _ensure_libs(mission_path, packaged_mode, do_fetch=True):
         user, repo, tag = parsed
         url = f"https://github.com/{user}/{repo}/releases/download/{tag}/{asset}"
         dest = os.path.join(lib_dir, asset)
+        tmp = dest + ".download"
         click.echo(f"fetching {asset}  <-  {url}")
         try:
-            curlretrieve(url, dest)
+            curlretrieve(url, tmp)
         except Exception as e:
+            _safe_remove(tmp)
             failed.append(f"{asset} ({e})")
             continue
-        if not (os.path.isfile(dest) and zipfile.is_zipfile(dest)):
-            try:
-                os.remove(dest)
-            except OSError:
-                pass
-            failed.append(f"{asset} (not found on release {repo}@{tag})")
+        if os.path.isfile(tmp) and zipfile.is_zipfile(tmp):
+            os.replace(tmp, dest)                      # atomic overwrite
+        else:
+            _safe_remove(tmp)
+            if os.path.isfile(dest):
+                click.echo(f"  kept existing {asset} (not on release {repo}@{tag})")
+            else:
+                failed.append(f"{asset} (not found on release {repo}@{tag})")
     if failed:
         raise RuntimeError("Could not fetch from GitHub releases:\n  " + "\n  ".join(failed))
 
@@ -207,6 +225,9 @@ def _ensure_libs(mission_path, packaged_mode, do_fetch=True):
               help="Ticks per second")
 @click.option("--no-fetch", is_flag=True, default=False,
               help="Don't download missing libs from GitHub releases; error instead")
+@click.option("--refresh-libs", is_flag=True, default=False,
+              help="Re-download all required libs from GitHub releases, overwriting "
+                   "stale same-version files (use after an in-place re-release)")
 @click.option("--set", "set_opts", multiple=True, metavar="KEY=VALUE",
               help="Override a setting (repeatable); VALUE is parsed as JSON, "
                    "e.g. --set AUTO_START=true --set PLAYER_COUNT=1")
@@ -216,7 +237,7 @@ def _ensure_libs(mission_path, packaged_mode, do_fetch=True):
               help="Enable autoplay (sets AUTO_PLAY.enable=true)")
 @click.option("--players", type=int, default=None,
               help="Shortcut for --set PLAYER_COUNT=N")
-def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch,
+def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs,
           set_opts, auto_start, autoplay, players):
     """Run MISSION_PATH in debug mode using the cosmos_dev mission runner.
 
@@ -263,7 +284,8 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch,
 
     # Pull any missing libs (story.json's sbslib/mastlib/resources + the
     # cosmos_dev tooling sbslib when there's no source) from GitHub releases.
-    _ensure_libs(mission_abs, _find_sbs_utils() is None, do_fetch=not no_fetch)
+    _ensure_libs(mission_abs, _find_sbs_utils() is None,
+                 do_fetch=not no_fetch, refresh=refresh_libs)
     _prepare_runner_path(mission_abs)
 
     from cosmos_dev.mission_runner import _run
