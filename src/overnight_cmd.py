@@ -8,6 +8,18 @@ import subprocess
 from debug_cmd import (_ensure_libs, _find_sbs_utils, _runner_lib_paths,
                        build_settings_override)
 
+# Bootstrap to launch on PYTHONPATH-deaf embedded Python (PyRuntime's
+# python._pth makes it ignore PYTHONPATH). Lib paths come via COSMOS_DEV_LIBS
+# (os.environ is still honored) and are injected into sys.path before running
+# the module -- for the soak AND, via overnight_runner, its child runners.
+_BOOT = (
+    "import sys,os,runpy;"
+    "L=os.environ.get('COSMOS_DEV_LIBS','');"
+    "sys.path[:0]=[p for p in L.split(os.pathsep) if p];"
+    "m=sys.argv[1];sys.argv=[m]+sys.argv[2:];"
+    "runpy.run_module(m,run_name='__main__')"
+)
+
 
 @cli.command("overnight",
              context_settings=dict(ignore_unknown_options=True),
@@ -47,14 +59,12 @@ def overnight(mission_path, refresh_libs, no_fetch,
     _ensure_libs(mission_abs, _find_sbs_utils() is None,
                  do_fetch=not no_fetch, refresh=refresh_libs)
 
-    # overnight_runner spawns child mission_runner processes, which import
-    # cosmos_dev.* -- children inherit PYTHONPATH, not this process's sys.path,
-    # so the libs must go on PYTHONPATH.
+    # The soak and its child mission_runner processes import cosmos_dev.*.
+    # PyRuntime (embedded Python) ignores PYTHONPATH, so pass the lib paths via
+    # COSMOS_DEV_LIBS and launch through a sys.path-injecting bootstrap (the
+    # children inherit COSMOS_DEV_LIBS and bootstrap themselves the same way).
     env = dict(os.environ)
-    paths = _runner_lib_paths(mission_abs)
-    if env.get("PYTHONPATH"):
-        paths = paths + [env["PYTHONPATH"]]
-    env["PYTHONPATH"] = os.pathsep.join(paths)
+    env["COSMOS_DEV_LIBS"] = os.pathsep.join(_runner_lib_paths(mission_abs))
 
     # Settings overrides reach the mission via COSMOS_SETTINGS; children inherit
     # the env, so this applies to every soak cycle without editing settings.yaml.
@@ -63,6 +73,6 @@ def overnight(mission_path, refresh_libs, no_fetch,
         env["COSMOS_SETTINGS"] = json.dumps(override)
         click.echo(f"settings override: {override}")
 
-    cmd = [sys.executable, "-u", "-m", "cosmos_dev.overnight_runner",
-           mission_abs, *runner_args]
+    cmd = [sys.executable, "-u", "-c", _BOOT,
+           "cosmos_dev.overnight_runner", mission_abs, *runner_args]
     raise SystemExit(subprocess.call(cmd, env=env))
