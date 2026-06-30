@@ -57,18 +57,17 @@ def lib_impl(folder, user):
         ext = key
         for folder_path in values:
             lib_dir = Path(working_directory).resolve() / folder / folder_path
-            zip_file_name = f"{working_directory}/__lib__/{user}.{repo}.{folder_path}.{version}.{ext}"
-            # Special case for sbs_utils, because history: sbs libs whose folder
-            # matches the repo drop the repo from the filename.
-            if folder == folder_path and key == "sbslib":
-                zip_file_name = f"{working_directory}/__lib__/{user}.{folder_path}.{version}.{ext}"
-            # sbslibs must keep their package dir at the zip root so they import
-            # (zipimport has no namespace packages). A nested sbslib like
-            # cosmos_dev would otherwise unzip contents-at-root and fail to
-            # import as `cosmos_dev`. mastlib / resource zips stay flat.
             if key == "sbslib":
+                # sbslibs are named by package (folder_path) with the repo
+                # dropped, to match the GitHub release assets (e.g.
+                # artemis-sbs.cosmos_dev.<ver>.sbslib), and they keep the package
+                # dir at the zip root so they import (zipimport has no namespace
+                # packages; contents-at-root would fail to import).
+                zip_file_name = f"{working_directory}/__lib__/{user}.{folder_path}.{version}.{ext}"
                 zipdir(lib_dir, zip_file_name, folder_path)
             else:
+                # mastlib / resource zips are repo-namespaced and flat.
+                zip_file_name = f"{working_directory}/__lib__/{user}.{repo}.{folder_path}.{version}.{ext}"
                 zipdir(lib_dir, zip_file_name)
             
             

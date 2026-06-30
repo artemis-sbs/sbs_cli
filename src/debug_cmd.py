@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import glob
+import re
 
 
 def _missions_dir():
@@ -105,6 +106,95 @@ def _find_cosmos_dev_sbslib(lib_dir, sbs_name):
     return hits[-1] if hits else None
 
 
+def _parse_asset(asset):
+    """Map a lib asset filename to (user, repo, tag) for its GitHub release.
+
+    \b
+    artemis-sbs.sbs_utils.v1.4.0.sbslib                 -> (artemis-sbs, sbs_utils, v1.4.0)
+    artemis-sbs.cosmos_dev.v1.4.0.sbslib                -> (artemis-sbs, sbs_utils, v1.4.0)  # on sbs_utils' release
+    artemis-sbs.LegendaryMissions.hangar.v1.4.0.mastlib -> (artemis-sbs, LegendaryMissions, v1.4.0)
+    artemis-sbs.LegendaryMissions.media.v1.4.0.zip      -> (artemis-sbs, LegendaryMissions, v1.4.0)
+    """
+    m = re.search(r"\.(v[\w.]+?)\.(sbslib|mastlib|zip)$", asset)
+    if not m:
+        return None
+    tag, ext = m.group(1), m.group(2)
+    head = asset[:m.start()].split(".")
+    if len(head) < 2:
+        return None
+    user = head[0]
+    if ext == "sbslib":
+        pkg = head[-1]                       # package name (sbs_utils / cosmos_dev)
+        repo = "sbs_utils" if pkg in ("sbs_utils", "cosmos_dev") else pkg
+    else:
+        repo = head[1]                       # repo-namespaced (e.g. LegendaryMissions)
+    return user, repo, tag
+
+
+def _required_assets(mission_path, packaged_mode):
+    """Lib filenames the mission needs in __lib__: its story.json sbslib +
+    mastlib + resources, plus (packaged mode) the cosmos_dev tooling sbslib."""
+    data = {}
+    story = os.path.join(mission_path, "story.json")
+    if os.path.isfile(story):
+        try:
+            with open(story) as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    assets = list(data.get("sbslib", [])) + list(data.get("mastlib", []))
+    assets += list(data.get("resources", {}).values())
+    if packaged_mode:
+        sbs_name = _sbs_utils_sbslib_from_story(mission_path)
+        m = re.search(r"\.(v[\w.]+?)\.sbslib$", sbs_name) if sbs_name else None
+        if m:
+            assets.append(f"artemis-sbs.cosmos_dev.{m.group(1)}.sbslib")
+    seen = set()
+    return [a for a in assets if not (a in seen or seen.add(a))]
+
+
+def _ensure_libs(mission_path, packaged_mode, do_fetch=True):
+    """Make sure every required lib is in __lib__, downloading any missing ones
+    from the matching GitHub release (curl follows the CDN redirect). A 404 body
+    isn't a zip, so downloads are validated."""
+    lib_dir = os.path.join(_missions_dir(), "__lib__")
+    os.makedirs(lib_dir, exist_ok=True)
+    missing = [a for a in _required_assets(mission_path, packaged_mode)
+               if not os.path.isfile(os.path.join(lib_dir, a))]
+    if not missing:
+        return
+    if not do_fetch:
+        raise RuntimeError(
+            "Missing libraries in __lib__:\n  " + "\n  ".join(missing)
+            + "\n(remove --no-fetch to download them from the GitHub release)")
+
+    import zipfile
+    from file_help import curlretrieve
+    failed = []
+    for asset in missing:
+        parsed = _parse_asset(asset)
+        if parsed is None:
+            failed.append(f"{asset} (unrecognized name)")
+            continue
+        user, repo, tag = parsed
+        url = f"https://github.com/{user}/{repo}/releases/download/{tag}/{asset}"
+        dest = os.path.join(lib_dir, asset)
+        click.echo(f"fetching {asset}  <-  {url}")
+        try:
+            curlretrieve(url, dest)
+        except Exception as e:
+            failed.append(f"{asset} ({e})")
+            continue
+        if not (os.path.isfile(dest) and zipfile.is_zipfile(dest)):
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            failed.append(f"{asset} (not found on release {repo}@{tag})")
+    if failed:
+        raise RuntimeError("Could not fetch from GitHub releases:\n  " + "\n  ".join(failed))
+
+
 @cli.command("debug", short_help="Run a mission in debug mode with browser GUI.")
 @click.argument("mission_path", default=".", required=False)
 @click.option("--map", "map_arg", default=None,
@@ -115,7 +205,9 @@ def _find_cosmos_dev_sbslib(lib_dir, sbs_name):
               help="WebSocket port for the browser GUI")
 @click.option("--tick-rate", default=60, show_default=True,
               help="Ticks per second")
-def debug(mission_path, map_arg, no_gui, port, tick_rate):
+@click.option("--no-fetch", is_flag=True, default=False,
+              help="Don't download missing libs from GitHub releases; error instead")
+def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch):
     """Run MISSION_PATH in debug mode using the cosmos_dev mission runner.
 
     MISSION_PATH defaults to the current directory.
@@ -132,7 +224,11 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate):
       sbs debug . --no-gui --map 0         # headless
       sbs debug . --port 9000              # custom port
     """
-    _prepare_runner_path(os.path.abspath(mission_path))
+    mission_abs = os.path.abspath(mission_path)
+    # Pull any missing libs (story.json's sbslib/mastlib/resources + the
+    # cosmos_dev tooling sbslib when there's no source) from GitHub releases.
+    _ensure_libs(mission_abs, _find_sbs_utils() is None, do_fetch=not no_fetch)
+    _prepare_runner_path(mission_abs)
 
     from cosmos_dev.mission_runner import _run
 
@@ -145,7 +241,7 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate):
         map_val = None
 
     _run(
-        mission_folder=os.path.abspath(mission_path),
+        mission_folder=mission_abs,
         map_arg=map_val,
         gui=not no_gui,
         port=port,
