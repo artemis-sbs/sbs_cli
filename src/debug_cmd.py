@@ -41,18 +41,15 @@ def _sbs_utils_sbslib_from_story(mission_path):
     return None
 
 
-def _prepare_runner_path(mission_path):
-    """Make ``cosmos_dev.mission_runner`` importable.
-
-    Prefers the sbs_utils source folder (dev). Without it, falls back to the
-    packaged sbslibs in ``__lib__`` -- the sbs_utils sbslib plus the matching
-    cosmos_dev sbslib -- so ``sbs debug`` works from libs alone, no source.
+def _runner_lib_paths(mission_path):
+    """Paths that make ``cosmos_dev.*`` importable: the sbs_utils source folder
+    if present, else the packaged sbslibs in ``__lib__`` (the sbs_utils sbslib +
+    the matching cosmos_dev sbslib). Used for sys.path (debug, in-process) and
+    PYTHONPATH (overnight, which spawns child processes).
     """
     src = _find_sbs_utils()
     if src is not None:
-        if src not in sys.path:
-            sys.path.insert(0, src)
-        return
+        return [src]
 
     lib_dir = os.path.join(_missions_dir(), "__lib__")
     sbs_name = _sbs_utils_sbslib_from_story(mission_path)
@@ -80,7 +77,12 @@ def _prepare_runner_path(mission_path):
             + "\n  ".join(missing)
             + "\nGet them from the GitHub release, e.g.:\n"
             "  gh release download <version> -R artemis-sbs/sbs_utils -D __lib__")
-    for p in (sbs_path, cosmos_path):
+    return [sbs_path, cosmos_path]
+
+
+def _prepare_runner_path(mission_path):
+    """Put the runner libs on this process's sys.path (in-process use)."""
+    for p in _runner_lib_paths(mission_path):
         if p not in sys.path:
             sys.path.insert(0, p)
 
