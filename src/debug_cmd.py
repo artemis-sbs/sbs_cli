@@ -207,7 +207,17 @@ def _ensure_libs(mission_path, packaged_mode, do_fetch=True):
               help="Ticks per second")
 @click.option("--no-fetch", is_flag=True, default=False,
               help="Don't download missing libs from GitHub releases; error instead")
-def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch):
+@click.option("--set", "set_opts", multiple=True, metavar="KEY=VALUE",
+              help="Override a setting (repeatable); VALUE is parsed as JSON, "
+                   "e.g. --set AUTO_START=true --set PLAYER_COUNT=1")
+@click.option("--auto-start", is_flag=True, default=False,
+              help="Shortcut for --set AUTO_START=true")
+@click.option("--autoplay", is_flag=True, default=False,
+              help="Enable autoplay (sets AUTO_PLAY.enable=true)")
+@click.option("--players", type=int, default=None,
+              help="Shortcut for --set PLAYER_COUNT=N")
+def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch,
+          set_opts, auto_start, autoplay, players):
     """Run MISSION_PATH in debug mode using the cosmos_dev mission runner.
 
     MISSION_PATH defaults to the current directory.
@@ -215,16 +225,42 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch):
     Without --map the server GUI is shown (map selection screen).
     Use --map to auto-start a specific map by index or name.
 
+    Settings overrides (--set / --auto-start / --autoplay / --players) are passed
+    to the mission via the COSMOS_SETTINGS env var and win over settings.yaml
+    WITHOUT editing it.
+
     \b
     Examples:
       sbs debug .                          # GUI map picker, current dir
-      sbs debug ../LegendaryMissions       # GUI map picker, explicit path
       sbs debug . --map 0                  # auto-start first map
-      sbs debug . --map SecretMeeting      # auto-start by name
       sbs debug . --no-gui --map 0         # headless
-      sbs debug . --port 9000              # custom port
+      sbs debug . --auto-start --autoplay --players 1
+      sbs debug . --set DIFFICULTY=8 --set AUTO_START=true
     """
     mission_abs = os.path.abspath(mission_path)
+
+    # Build settings overrides and hand them to the mission via COSMOS_SETTINGS
+    # (settings_get_defaults merges it, highest priority, no settings.yaml edit).
+    override = {}
+    for kv in set_opts:
+        if "=" not in kv:
+            continue
+        key, val = kv.split("=", 1)
+        try:
+            val = json.loads(val)            # true/1/"x"/[...] etc.
+        except Exception:
+            pass                             # leave as a string
+        override[key.strip()] = val
+    if auto_start:
+        override["AUTO_START"] = True
+    if players is not None:
+        override["PLAYER_COUNT"] = players
+    if autoplay:
+        override["AUTO_PLAY"] = {"enable": True}
+    if override:
+        os.environ["COSMOS_SETTINGS"] = json.dumps(override)
+        click.echo(f"settings override: {override}")
+
     # Pull any missing libs (story.json's sbslib/mastlib/resources + the
     # cosmos_dev tooling sbslib when there's no source) from GitHub releases.
     _ensure_libs(mission_abs, _find_sbs_utils() is None, do_fetch=not no_fetch)
