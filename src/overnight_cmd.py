@@ -2,9 +2,11 @@ from cli_cmd import cli
 import click
 import os
 import sys
+import json
 import subprocess
 
-from debug_cmd import _ensure_libs, _find_sbs_utils, _runner_lib_paths
+from debug_cmd import (_ensure_libs, _find_sbs_utils, _runner_lib_paths,
+                       build_settings_override)
 
 
 @cli.command("overnight",
@@ -16,8 +18,17 @@ from debug_cmd import _ensure_libs, _find_sbs_utils, _runner_lib_paths
                    "(after an in-place re-release)")
 @click.option("--no-fetch", is_flag=True, default=False,
               help="Don't download missing libs from GitHub releases; error instead")
+@click.option("--set", "set_opts", multiple=True, metavar="KEY=VALUE",
+              help="Override a setting (repeatable); VALUE is parsed as JSON")
+@click.option("--auto-start", is_flag=True, default=False,
+              help="Shortcut for --set AUTO_START=true")
+@click.option("--autoplay", is_flag=True, default=False,
+              help="Enable autoplay (sets AUTO_PLAY.enable=true)")
+@click.option("--players", type=int, default=None,
+              help="Shortcut for --set PLAYER_COUNT=N")
 @click.argument("runner_args", nargs=-1, type=click.UNPROCESSED)
-def overnight(mission_path, refresh_libs, no_fetch, runner_args):
+def overnight(mission_path, refresh_libs, no_fetch,
+              set_opts, auto_start, autoplay, players, runner_args):
     """Soak-test MISSION_PATH under autoplay via cosmos_dev.overnight_runner.
 
     MISSION_PATH is relative to the current directory (run from the missions
@@ -44,6 +55,13 @@ def overnight(mission_path, refresh_libs, no_fetch, runner_args):
     if env.get("PYTHONPATH"):
         paths = paths + [env["PYTHONPATH"]]
     env["PYTHONPATH"] = os.pathsep.join(paths)
+
+    # Settings overrides reach the mission via COSMOS_SETTINGS; children inherit
+    # the env, so this applies to every soak cycle without editing settings.yaml.
+    override = build_settings_override(set_opts, auto_start, autoplay, players)
+    if override:
+        env["COSMOS_SETTINGS"] = json.dumps(override)
+        click.echo(f"settings override: {override}")
 
     cmd = [sys.executable, "-u", "-m", "cosmos_dev.overnight_runner",
            mission_abs, *runner_args]

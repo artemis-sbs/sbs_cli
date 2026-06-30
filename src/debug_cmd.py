@@ -215,6 +215,30 @@ def _ensure_libs(mission_path, packaged_mode, do_fetch=True, refresh=False):
         raise RuntimeError("Could not fetch from GitHub releases:\n  " + "\n  ".join(failed))
 
 
+def build_settings_override(set_opts, auto_start, autoplay, players):
+    """Build a settings-override dict from the CLI flags shared by debug and
+    overnight. Passed to the mission via COSMOS_SETTINGS (merged by
+    settings_get_defaults), so it wins over settings.yaml without editing it.
+    """
+    override = {}
+    for kv in set_opts:
+        if "=" not in kv:
+            continue
+        key, val = kv.split("=", 1)
+        try:
+            val = json.loads(val)            # true/1/"x"/[...] etc.
+        except Exception:
+            pass                             # leave as a string
+        override[key.strip()] = val
+    if auto_start:
+        override["AUTO_START"] = True
+    if players is not None:
+        override["PLAYER_COUNT"] = players
+    if autoplay:
+        override["AUTO_PLAY"] = {"enable": True}
+    return override
+
+
 @cli.command("debug", short_help="Run a mission in debug mode with browser GUI.")
 @click.argument("mission_path", default=".", required=False)
 @click.option("--map", "map_arg", default=None,
@@ -264,22 +288,7 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs
 
     # Build settings overrides and hand them to the mission via COSMOS_SETTINGS
     # (settings_get_defaults merges it, highest priority, no settings.yaml edit).
-    override = {}
-    for kv in set_opts:
-        if "=" not in kv:
-            continue
-        key, val = kv.split("=", 1)
-        try:
-            val = json.loads(val)            # true/1/"x"/[...] etc.
-        except Exception:
-            pass                             # leave as a string
-        override[key.strip()] = val
-    if auto_start:
-        override["AUTO_START"] = True
-    if players is not None:
-        override["PLAYER_COUNT"] = players
-    if autoplay:
-        override["AUTO_PLAY"] = {"enable": True}
+    override = build_settings_override(set_opts, auto_start, autoplay, players)
     if override:
         os.environ["COSMOS_SETTINGS"] = json.dumps(override)
         click.echo(f"settings override: {override}")
