@@ -1,316 +1,337 @@
-# NOTE: This is a beta release
+# sbs — the Artemis Cosmos command-line helper
 
-This has the functionality desired for the first release. It needs testing and cleanup.
+`sbs` is a small tool that lives next to your Artemis Cosmos missions. It does the
+chores around missions so you don't have to: **downloading** missions from the
+internet, **launching** the game (one window or a whole bridge full of them),
+**test-flying** a mission in your web browser, and — if you write missions —
+**packaging** them up to share.
 
-New Feature Ideas
-- add support for a -latest to allow for better handling of hot fixes
-e.g. v1.3.0 ships library and missions can have v.1.3.0-fix1, v.1.3.0-fix2, v.1.3.0-fix3 v.1.3.0-latest should point to v1.3.0-fix3
-When generating it should add -latest if it is not on the version. story.json should point to -latest in the future.
-A version file should be placed into library/addons
-sbs tool could grab the actual version out of latest
+You type commands like `sbs fetch SecretMeeting` or `sbs run helm,comms`. That's
+the whole idea.
 
+> **New here?** You only need three commands to start: `sbs production` (get the
+> stock missions), `sbs fetch <name>` (get one specific mission), and `sbs run`
+> (play). Everything below that is for people who *make* missions.
 
+---
 
+## Getting the tool running
 
-Commands:
+The tool ships as a single file, `sbs.pyz` (a self-contained Python program),
+that sits in your `missions` folder. A companion `sbs.bat` runs it using the
+copy of Python that comes with Artemis Cosmos, so you don't have to install
+anything.
 
-- fetch - retrieve missions from github
-- run - run multiple copies of Artemis Cosmos
-- version - tells the version of the tool
-- update - updates the tool to the latest released version
-- lib - this will build any sbslib, mastlib zip, etc. specified in a `__lib__.json` file
-- watch - this will watch for changes in a mission and automatically rebuild libraries and addons
-- release - Used by development, it triggers the update or creation of a release on github
-- production - This will fetch all the missions that ship with Artemis Cosmos
-- compile - Compile the MAST 
+- Open a command prompt in your `missions` folder.
+- Type **`sbs --help`** to see every command.
+- Type **`sbs <command> --help`** to see the options for one command
+  (e.g. `sbs fetch --help`).
 
-## Running
+*(If you happen to have your own Python installed, `sbs.pyz --help` works too.)*
 
-The code will create a file sbs.pyz. This file is a python zip app, that can be run from the command line. The file will be placed in the missions directory. Also use the sbs.bat file to bootstrap the zip app. The batch file will use the version of python that ships with Artemis Cosmos.
-
-- type `sbs --help` 
-- type `sbs.pyz --help` If you have python install and in your path you can run the pyz directly
-
-
-## Fetch 
-
-This is a re-write of the fetch command for Artemis Cosmos using python for more control. The old system used batch files and was very limited in features.
-
-- type `sbs fetch --help` for help with fetch
-
-Usage: sbs.pyz fetch [OPTIONS] [REPO]
-
-  Fetch command
-
-Options:
+To update the tool itself to the newest version:
 
 ```
-   -u, --user TEXT       Specify The github user/organization.  [default: >rtemis-sbs]
-  -b, --branch TEXT     Specify The github branch/tag.  [default: main]
-  -f, --folder TEXT     Specify the local folder for mission. Defaults to >he same as the repository name.
-  -o, --overwrite_libs  Force getting libraries from github if they exist  >ocal i.e. overwrite the local copy.
-  -sl, --skip_libs      This will skip the building of libraries/addons.
-  -sc, --skip_clean     This will skip the clearing the target folder.
-  -q, --quiet           Suppress the confirm for cleaning directories.
+sbs update
 ```
 
-- type `sbs fetch SecretMeeting` to fetch the Secret Meeting mission
-- type `sbs fetch SomeMission --user a_github_user` to fetch the a mission from a user other tan artemis-sbs
-
-### Fetch and downloading dependencies
-
-Fetch will automatically download dependent libs from github if they do not exist local. sbslib files are always downloaded. mastlib and zip will not be downloaded 
-
-To force the download of dependencies (mastlib and zip)
-
-- type `sbs fetch SecretMeeting -o` to fetch the Secret Meeting mission and redownload dependencies
-- type `sbs fetch SecretMeeting --overwrite_libs` to fetch the Secret Meeting mission and redownload dependencies
-
-### Fetch building addons etc.
-
-Fetch will automatically build the libraries and addons specified in the `__lib__.json` file in the mission
-
-To skip building addons (mastlib and zip). This seems like it is not something that will be used much.
-
-- type `sbs fetch LegendaryMissions -sl` to fetch the Secret Meeting mission and not build addons
-- type `sbs fetch LegendaryMissions -sl` to fetch the Secret Meeting mission and not build addons
-
-## run
-
-The run command is useful to run multiple copies of Artemis Cosmos for whatever reason.
-
-Usage: sbs run [OPTIONS] [CONSOLES]
-
-- type `sbs run helm,comms` to run two copies of cosmos one as helm and the other as comms
-- type `sbs run server,helm,comms` 
-- type `sbs run` to run six copies of cosmos. This is used by development in testing.
-
-
-## update
-
-The sbs tool is capable of updating itself to the latest version.
-
-- type `sbs update` to update the sbs.pyz and sbs.bat to the latest on github
-
-Since this updates the running files, this occasionally fail.
-
-
-## lib 
-
-This will build any sbslib, mastlib zip, etc. specified in a `__lib__.json` file
-
-Usage: sbs lib [OPTIONS] [FOLDER]
-
-Options:
+To see which version you have:
 
 ```
-  -u, --user TEXT  Specify The github user/organization.  [default: artemis-sbs]
+sbs version
 ```
 
-- type `sbs watch LegendaryMissions` to build 
-- type `sbs watch LegendaryMissions -u my_user` to build specifying a user other than artemis-sbs
-- type `sbs watch sbs_utils,LegendaryMissions` to build multiple folders
-- type `sbs watch sbs_utils,my_user:LegendaryMissions` to build multiple folders with mixed users ids
+---
 
+## For players — getting and running missions
 
-## watch 
+### `sbs production` — get everything that ships with Cosmos
 
-This will watch for any changes in a folder and build any addons or libraries when changes occur.
-
-
-```
-Usage: sbs watch \[OPTIONS] FOLDER
-
-  Watch Watch for changes in things in __lib__.json and build libs on change
-
-Options:
-  -i, --interval INTEGER
-```
-
-You can specify multiple folders. If your have your own fork or addon and need to specify the the user.
-The folder option can take the user:
-The folder argument an also be a list of these
-
-- type `sbs watch LegendaryMissions` to watch and build 
-- type `sbs watch my_user:LegendaryMissions` to watch and build specifying a user other than artemis-sbs
-- type `sbs watch sbs_utils,LegendaryMissions` to watch and build multiple folders
-- type `sbs watch LegendaryMissions --interval 2` to set the interval the default is 5 seconds
-
-
-## release
-Used by development, it triggers the update or creation of a release on github
-
-This will add or remove tags on github. This will trigger a github action to create a new release
-
-The version is determined by the value in version.py unless specified with --version
-
-This can only be used by maintainer of the github repository
+Downloads a fresh copy of all the missions that come with Artemis Cosmos
+(Legendary Missions, Secret Meeting, Walk The Line, and friends). It **replaces**
+your existing copies with clean ones.
 
 ```
-Options:
-  -v, --version TEXT
-  -u, --unrelease
+sbs production          # asks before wiping your mission folders
+sbs production -q       # "quiet" — skips the "are you sure?" question
 ```
 
-- type `sbs release [FOLDER] [MESSAGE]` to create a new release
-- type `sbs release [FOLDER]--unrelease [MESSAGE]` to create a update release
-- type `sbs release [FOLDER] -u [MESSAGE]` to create a update release
-- type `sbs release [FOLDER] -u [MESSAGE] --version 1.1` to create specific version update release
+> **Heads up:** this removes your current mission folders and re-downloads them.
+> If you've been editing a mission, copy it somewhere safe first.
 
+### `sbs fetch` — get one specific mission
 
-## production 
-
-This will fetch all the missions that ship with Artemis Cosmos
-This command will fetch the missions that ship with artemis cosmos.
-The existing missions folders will be removed and fresh copies will be retrieved.
+Downloads a single mission (and anything it depends on) from GitHub.
 
 ```
-Options:
-  -b, --branch TEXT  Specify The github branch/tag.  [default: main]
-  -q, --quiet        Suppress the confirm for cleaning directories.
-```  
-
-## Compile
-This will compile the MAST project and output errors.
-This can be done on a Artemis Cosmos project by default additionally it can compile a MAST project that is just core nodes (for commandline terminal)
-
-It can also run the project Artemis Cosmos is not used, but a small subset of the sbs API is supported, just to general test mission startup.
-
-
-Usage: sbs compile [OPTIONS] [FOLDER]
-
-Options:
-  -t, --terminal
-  -r, --run
-  -h, --help      Show this message and exit.
-
-
-
-## Developer tool
-
-The github repository for this tool has tools to help with developing the sbs tool.
-
-Commands:
--  build
--  install
--  release
--  version
-
-## help
-
-- type `dev.pyz --help` for help
-
-## install
-
-The install command will call pip install for working with the tool and gathering the tools dependencies
-```
-Options:
-  -d, --dev
+sbs fetch SecretMeeting                    # grab the Secret Meeting mission
+sbs fetch WalkTheLine,SecretMeeting        # grab several at once (comma-separated)
+sbs fetch SomeMission --user their_name     # grab a mission from someone other than artemis-sbs
+sbs fetch LegendaryMissions --branch v1.3.0 # grab a specific version (tag) instead of the latest
 ```
 
-- type `dev.pyz install --dev` to install the needed libraries for development
-- type `dev.pyz install` to install the needed libraries for the app
-- type `dev.pyz install --dev` to install the needed libraries for development
+By default `fetch` pulls from the official `artemis-sbs` account and the newest
+(`main`) version. Common options:
 
-### build
+| Option | What it does |
+|---|---|
+| `-u`, `--user` | Whose GitHub account to download from (default `artemis-sbs`) |
+| `-b`, `--branch` | Which version/branch to download (default `main` = latest) |
+| `-o`, `--overwrite_libs` | Re-download the shared library files even if you already have them |
+| `-q`, `--quiet` | Don't ask before replacing existing folders |
+
+Fetch is smart about dependencies: it looks inside the mission for a list of the
+shared libraries it needs and downloads any you're missing.
+
+### `sbs run` — launch the game
+
+Opens one or more copies of Artemis Cosmos, each set to a specific console, and
+tidily arranges the windows on your screen. Great for playing solo across
+several stations, or for testing.
 
 ```
-Options:
-  -i, --install
+sbs run helm,comms              # two windows: one Helm, one Comms
+sbs run server,helm,comms       # a server plus two consoles
+sbs run mainscreen,helm         # a main screen and a helm station
+sbs run                         # six windows (server + comms/weapons/science/
+                                # engineering/cinematic) — a full test bridge
 ```
 
-- type `dev.pyz build` to build sbs.pyz the app
-- type `dev.pyz build --install` to do an install then build sbs.pyz the app
+Just list the consoles you want, separated by commas.
 
-### release
+---
 
-This will add or remove tags on github. This will trigger a github action to create a new release
+## For mission writers — try your mission without a full crew
 
-The version is determined by the value in version.py unless specified with --version
+You don't need a room full of bridge stations (or even the game itself running)
+to see your mission come to life. These commands run a mission in a lightweight
+simulator and show it **in your web browser**.
+
+### `sbs debug` — test-fly a mission in the browser
+
+Runs a mission and opens a browser-based view of it. You can watch the story
+play out, click buttons, and see the map — all from one window.
 
 ```
-Options:
-  -v, --version TEXT
-  -u, --unrelease
+sbs debug .                     # run the mission in the current folder; show the map picker
+sbs debug . --map 0             # skip the picker and jump straight into the first map
+sbs debug . --map SecretMeeting # jump into a map by name
+sbs debug . --no-gui            # run it with no browser window (just checks it works)
 ```
 
-- type `dev.pyz release [MESSAGE]` to create a new release
-- type `dev.pyz release --unrelease [MESSAGE]` to create a update release
-- type `dev.pyz release -u [MESSAGE]` to create a update release
-- type `dev.pyz release -u [MESSAGE] --version 1.1` to create specific version update release
+Once it's running, open **http://localhost:8765/** in your browser.
 
-### version 
-Will display the version. The value is in version.py
-This version is what the release command uses by default
+You can also nudge the mission's settings from the command line without editing
+any files — handy for quickly trying "what if there were 3 players?" or "what if
+the difficulty were maxed?":
 
-- type `dev.pyz version` to see the version that the tool is for
+```
+sbs debug . --players 1 --auto-start          # 1 player, start immediately
+sbs debug . --set DIFFICULTY=8                 # crank difficulty to 8
+sbs debug . --auto-start --autoplay --players 1 # let the mission play itself
+```
 
+| Option | What it does |
+|---|---|
+| `--map <n or name>` | Jump straight into a map instead of showing the picker |
+| `--no-gui` | Run without the browser view (a quiet "does it start?" check) |
+| `--players N` | Pretend there are N player ships |
+| `--auto-start` | Begin the mission right away |
+| `--autoplay` | Let the mission drive itself (no human needed) |
+| `--set KEY=VALUE` | Override any setting (repeatable), e.g. `--set DIFFICULTY=8` |
+| `--port` | Which browser port to use (default 8765) |
 
+### `sbs web` — show a mission's web pages in a browser
 
+Some missions publish live pages — a scoreboard, a captain's log, a status
+dashboard — meant to be viewed in a browser while the game runs. `sbs web`
+serves those pages. Start it, then open the page in any browser or on another
+device on your network.
 
+```
+sbs web .                       # serve the current mission's pages
+sbs web LegendaryMissions       # serve a specific mission's pages
+```
 
-## Scenarios
+Then visit **http://127.0.0.1:8770/web/<page-name>**. This connects to a game
+that's *already running* with debugging turned on — start `sbs web` before or
+after the game; it reconnects on its own.
 
-> I am an operator who likes to be on the edge and always wants to have the latest. How do I update?
+### `sbs web-static` — save a page as a plain HTML file
 
-`sbs fetch LegendaryMissions,SecretMeeting,WalkTheLine`
+Takes one of those web pages and saves it as a single, self-contained `.html`
+file you can email, post, or open later — a snapshot, frozen in time.
 
-> I am messed around with LegendaryMissions script, but now I just want the version that shipped with my version of Artemis Cosmos. I use v1.3.0
+```
+sbs web-static . scores -o scores.html
+```
 
-`sbs fetch LegendaryMissions --version v1.3.0`
+### `sbs overnight` — leave a mission running to shake out bugs
 
-> But what if it has some bug fixes?
+Runs a mission over and over by itself for hours ("soak testing"), which
+surfaces the rare problems that only show up after a long play session. Mostly
+used by developers, but simple to start:
 
-`sbs fetch LegendaryMissions --version v1.3.0-latest`
+```
+sbs overnight LegendaryMissions --hours 8      # run itself for 8 hours
+sbs overnight LegendaryMissions --map 0 --gui  # watch it in the browser as it goes
+```
 
-NOTE: Some older version may not have the -latest version. It is a new concept not yet tried.
+---
 
+## For mission makers — building and packaging
 
-> I'm the guy creating the install for ArtemisCosmos, what do I do
+When you edit a mission, some parts (shared libraries and add-ons) need to be
+"packaged" into zip files before the game will pick up your changes. These
+commands handle that.
 
-Well you can delete or move everything out of missions except sbs.bat and sbs.pyz and then type. (Also, if you change dmx,py put update here https://github.com/artemis-sbs/sbs_common)
+### `sbs lib` — build a mission's libraries/add-ons once
 
-It is good idea to update sbs, then run production.
+Looks for a `__lib__.json` file describing what to package, and builds it.
 
-`sbs update`
-`sbs production -q`
+```
+sbs lib LegendaryMissions
+sbs lib LegendaryMissions -u my_name    # package under your own GitHub name
+```
 
+### `sbs watch` — rebuild automatically as you edit
 
-> I'm someone who wants to run a mainscreen and a station
+The friendliest option: leave it running, and every time you save a change it
+rebuilds the affected libraries for you. No more "did I forget to rebuild?"
 
-`sbs run mainscreen,helm`
+```
+sbs watch LegendaryMissions                     # watch and rebuild one mission
+sbs watch sbs_utils,LegendaryMissions           # watch several at once
+sbs watch my_name:LegendaryMissions             # build under a different GitHub name
+sbs watch LegendaryMissions --interval 2        # check for changes every 2 seconds (default 5)
+```
 
-> I'm the kind of person that works on my own scripts, but changes Legendary Missions and use its addons and I want to stay up to date while I do that
+Use `name:` before a folder (like `my_name:LegendaryMissions`) when you have your
+own fork and your mission's `story.json` refers to it by that name.
 
-get the latest, and then start a watcher to rebuild add on when anything changes
+### `sbs compile` — check a mission for script errors
 
-You should git clone LegendaryMissions
+Reads through a mission's script and reports any mistakes, without launching the
+whole game.
 
-`sbs watch LegendaryMissions`
+```
+sbs compile LegendaryMissions           # check for errors
+sbs compile LegendaryMissions --run      # also try starting it (a quick smoke test)
+sbs compile MyTerminalThing --terminal   # for command-line-only MAST projects
+```
 
-> But I also change sbs_utils
+---
 
-You should git clone LegendaryMissions and sbs_utils
+## For maintainers — publishing releases
 
+These are for the people who publish the official libraries. Most users never
+touch them.
+
+### `sbs release` — tag a new release on GitHub
+
+Adds (or removes) a version tag, which triggers GitHub to build and publish a
+release. The version comes from the project's `__lib__.json` unless you override
+it with `--version`. **Only works if you have publish rights to the repository.**
+
+```
+sbs release LegendaryMissions "My release notes"           # publish a release
+sbs release LegendaryMissions -u "Notes"                    # un-publish (remove the tag)
+sbs release LegendaryMissions --version v1.4.1 "Notes"      # publish a specific version
+```
+
+### Working on the `sbs` tool itself
+
+The repository also has a `dev.pyz` helper for people developing the `sbs` tool:
+
+```
+dev.pyz install --dev    # install the pieces needed to work on the tool
+dev.pyz build            # build sbs.pyz
+dev.pyz build --install  # install, then build
+dev.pyz release "Notes"  # publish a new release of the tool
+dev.pyz version          # show the tool's version
+```
+
+---
+
+## Recipes — "I want to…"
+
+**"I always want the very latest missions."**
+```
+sbs fetch LegendaryMissions,SecretMeeting,WalkTheLine
+```
+
+**"I messed with a mission's script and just want the clean version back."**
+```
+sbs fetch LegendaryMissions --branch v1.3.0
+```
+
+**"I'm setting up a fresh Artemis Cosmos install."**
+Update the tool first, then grab all the stock missions:
+```
+sbs update
+sbs production -q
+```
+
+**"I want to play across a main screen and a helm station."**
+```
+sbs run mainscreen,helm
+```
+
+**"I'm writing a mission and want to see it without a full crew."**
+```
+sbs debug . --map 0
+```
+Then open http://localhost:8765/ in your browser.
+
+**"I keep changing Legendary Missions and want my changes picked up automatically."**
+Clone the mission from GitHub, then leave a watcher running:
+```
+sbs watch LegendaryMissions
+```
+
+**"…and I also edit the shared `sbs_utils` library."**
+```
 sbs watch LegendaryMissions,sbs_utils
+```
 
-> But I but I have my own fork (user named western_back) and even use that in story.json
+**"…and I use my own fork (say, `western_back`) in the mission's story.json."**
+```
+sbs watch western_back:LegendaryMissions,western_back:sbs_utils
+```
 
-You should git clone LegendaryMissions and sbs_utils
+**"I want to burn-in test Cosmos by letting it play itself."**
+Set up the mission's `settings.yaml` for autoplay and auto-start, then:
+```
+sbs run
+```
+Start the server and clients and let it run.
 
-`sbs watch western_back:LegendaryMissions,western_back:sbs_utils`
+---
 
-This will build libraries with that user name.
+## Command cheat sheet
 
+| Command | What it's for |
+|---|---|
+| `sbs fetch <name>` | Download one (or several) missions |
+| `sbs production` | Download all the missions that ship with Cosmos |
+| `sbs run <consoles>` | Launch the game — one window or many |
+| `sbs debug <folder>` | Test-fly a mission in your browser |
+| `sbs web <folder>` | Serve a mission's live web pages |
+| `sbs web-static <folder> <page>` | Save a web page as a standalone HTML file |
+| `sbs overnight <folder>` | Long, self-playing soak test |
+| `sbs lib <folder>` | Package a mission's libraries/add-ons |
+| `sbs watch <folder>` | Auto-rebuild libraries as you edit |
+| `sbs compile <folder>` | Check a mission's script for errors |
+| `sbs release <folder>` | Publish a release (maintainers only) |
+| `sbs update` | Update the `sbs` tool itself |
+| `sbs version` | Show the tool's version |
 
-> I'm someone who wants to burnin test cosmos using autoplay
+Type `sbs <command> --help` for the full details on any of these.
 
-set up the mission settings.yaml for autoplay and auto start
+---
 
-`sbs run`
+## Still cooking
 
-Start the server and the clients, let it run forever
-
-
-
-
+A `-latest` version scheme is planned, so hot-fixes (like `v1.3.0-fix2`) can be
+picked up automatically. It isn't wired up yet — older versions won't have a
+`-latest` to point at.
