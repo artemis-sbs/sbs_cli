@@ -9,29 +9,37 @@ import os
 # "https://github.com/%USER%/%REPO%/zipball/%BRANCH%/"
 
 def curlretrieve(url, localname):
-    """Usew curl to retreive the files
+    """Use curl to retrieve the files
 
     Args:
         url (str): the url
         localname (str): The local filename
+
+    Returns:
+        bool: True if the file was downloaded successfully, False otherwise.
     """
     import subprocess
 
     # Recommended way to run a command and capture output
     try:
+        # -f/--fail makes curl exit non-zero on HTTP errors (e.g. 404) instead
+        # of quietly writing the error page (like GitHub's 404 HTML) to disk.
         result = subprocess.run(
-            ["curl","-L", "--max-redirs", "5", f"{url}", "--output", localname],  # Command and arguments as a list
+            ["curl", "-f", "-L", "--max-redirs", "5", f"{url}", "--output", localname],  # Command and arguments as a list
             capture_output=True,   # Capture stdout and stderr
             text=True,             # Return strings instead of bytes
             check=True             # Raise exception on non-zero exit
         )
         print("Command ran successfully.")
         print(result.stdout)
+        return True
     except subprocess.CalledProcessError as e:
         print(f"Command failed with return code {e.returncode}")
         print(e.stderr)
+        return False
     except FileNotFoundError:
         print("Command not found.")
+        return False
 
 
 def zipdir(folder_path, zip_file_name, first_folder=None):

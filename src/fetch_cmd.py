@@ -3,6 +3,7 @@ import os
 import json
 import shutil
 import pathlib
+import zipfile
 
 from cli_cmd import cli, zipapp_dir
 #from urllib.request import urlretrieve
@@ -25,15 +26,24 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
     skip_unzip = False
     skip_remove = False
 
-    # Retrieve the file from github
-    try:
-        if not skip_repo:
-            curlretrieve(url, zip_file_path)
-    except Exception as e:
-        print(f"ERROR: BAD MISSION URL: {url}")
-        return
-    
-    # If we got here we have a folder
+    # Retrieve the file from github.
+    # Do NOT create/clean any destination folder until we are sure we actually
+    # downloaded a real zip -- a typo in the repo name must not leave an empty
+    # folder behind (issue #1).
+    if not skip_repo:
+        ok = False
+        try:
+            ok = curlretrieve(url, zip_file_path)
+        except Exception as e:
+            ok = False
+        if not ok or not zipfile.is_zipfile(zip_file_path):
+            print(f"ERROR: BAD MISSION URL: {url}")
+            print(f"       Could not find repository '{repo}' for user '{user}' (branch '{branch}').")
+            if os.path.exists(zip_file_path):
+                os.remove(zip_file_path)
+            return
+
+    # If we got here we have a valid zip
     # Get dependencies by processing story.json
     destination_directory = folder if folder is not None else repo
     working_directory = zipapp_dir
