@@ -8,9 +8,10 @@ python -m unittest discover -s tests -v      # verbose
 python -m unittest tests.test_fetch_cmd      # one module
 ```
 
-`tests/_bootstrap.py` puts `src/` on `sys.path` (the modules use flat absolute
-imports like `from file_help import curlretrieve`); import it first in every
-test file.
+`tests/__init__.py` puts `src/` on `sys.path` (the modules use flat absolute
+imports like `from file_help import curlretrieve`). It runs automatically when
+the `tests` package is discovered, so discovery works from the folder root
+(`-s .`) and the tests nest under the `sbs_cli` node in VS Code's Test Explorer.
 
 ## Mocking instead of real downloads
 

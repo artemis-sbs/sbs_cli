@@ -3,8 +3,6 @@
 No real network / no real curl is invoked -- subprocess.run is mocked, and
 unzip_exclude is exercised against an in-memory zip written to a temp dir.
 """
-import _bootstrap  # noqa: F401  (adds ../src to sys.path)
-
 import io
 import os
 import subprocess

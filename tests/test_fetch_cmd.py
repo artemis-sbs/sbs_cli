@@ -6,8 +6,6 @@ Mocking strategy: ``curlretrieve`` is patched *in the fetch_cmd namespace*
 download happens. ``zipapp_dir`` is redirected to a temp dir and the CWD is set
 there too, because fetch cleans/creates folders relative to both.
 """
-import _bootstrap  # noqa: F401  (adds ../src to sys.path)
-
 import io
 import os
 import shutil
