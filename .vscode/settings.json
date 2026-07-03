@@ -1,0 +1,18 @@
+{
+  // These tests use stdlib unittest (pytest is not installed).
+  "python.testing.unittestEnabled": true,
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestArgs": [
+    "-v",
+    "-s",
+    "tests",
+    "-p",
+    "test_*.py"
+  ],
+  "python.testing.cwd": "${workspaceFolder}",
+  // src uses flat absolute imports (from file_help import ...); put it on the
+  // analysis path so Pylance resolves them (mirrors sbs_utils' extraPaths).
+  "python.analysis.extraPaths": [
+    "./src"
+  ]
+}

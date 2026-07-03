@@ -4,6 +4,7 @@
 /SecretMeeting/
 /dist/
 **/__pycache__/**
-.vscode/
+.vscode/*
+!.vscode/settings.json
 /.vs
 rel.zip
