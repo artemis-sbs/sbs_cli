@@ -49,14 +49,15 @@ def _read_all(mission, pattern):
     return out
 
 
-def _mastlib_route_source(missions, mission):
-    """The `//signal/...` route lines declared in the mission's mastlibs.
+def _mastlib_signal_source(missions, mission):
+    """The signal-relevant lines from the mission's mastlibs: `//signal/...` route
+    declarations AND emit sites (`signal_emit(...)` / `SIGNAL_NAME`).
 
-    So the cross-file signal check knows about signals routed in LM/OU addons
-    (not just the mission's own .mast) and doesn't flag them. Reads story.json's
-    `mastlib` list and scans those zips in the shared `__lib__` folder; returns a
-    single source string of the route lines (or None). Best-effort - missing
-    story.json / unbuilt libs are skipped silently."""
+    So the cross-file checks know about signals routed *or* emitted in LM/OU addons
+    (not just the mission's own source) and don't false-positive. Reads story.json's
+    `mastlib` list and scans those zips (.mast + .py) in the shared `__lib__`
+    folder; returns one source string of the relevant lines (or None). Best-effort -
+    missing story.json / unbuilt libs are skipped silently."""
     story = os.path.join(mission, "story.json")
     if not os.path.isfile(story):
         return None
@@ -67,6 +68,11 @@ def _mastlib_route_source(missions, mission):
         return None
     lib_dirs = [os.path.join(missions, "__lib__"),
                 os.path.join(os.path.dirname(os.path.abspath(mission)), "__lib__")]
+
+    def relevant(ln):
+        s = ln.lstrip()
+        return s.startswith("//signal/") or "signal_emit" in ln or "SIGNAL_NAME" in ln
+
     lines = []
     for name in (data.get("mastlib") or []):
         for lib_dir in lib_dirs:
@@ -76,11 +82,10 @@ def _mastlib_route_source(missions, mission):
             try:
                 with zipfile.ZipFile(zpath) as z:
                     for entry in z.namelist():
-                        if not entry.endswith(".mast"):
+                        if not (entry.endswith(".mast") or entry.endswith(".py")):
                             continue
                         text = z.read(entry).decode("utf-8", "replace")
-                        lines += [ln for ln in text.splitlines()
-                                  if ln.lstrip().startswith("//signal/")]
+                        lines += [ln for ln in text.splitlines() if relevant(ln)]
             except Exception:
                 continue
             break  # found this lib; don't re-read from the other dir
@@ -145,10 +150,10 @@ def lint(folder, strict, no_cross, fmt, lsp):
 
     mast_sources = None
     if not no_cross:
-        mast_sources = _read_all(mission, "*.mast")
-        mastlib_routes = _mastlib_route_source(missions, mission)
-        if mastlib_routes:
-            mast_sources.append(mastlib_routes)
+        mast_sources = _read_all(mission, "*.mast") + _read_all(mission, "*.py")
+        mastlib_sig = _mastlib_signal_source(missions, mission)
+        if mastlib_sig:
+            mast_sources.append(mastlib_sig)
 
     total_err = total_warn = 0
     bundle = []
