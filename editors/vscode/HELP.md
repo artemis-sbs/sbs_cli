@@ -114,9 +114,11 @@ the window (`Ctrl+Shift+P → Developer: Reload Window`).
 the language indicator in the status bar (bottom-right) should say **AMD**. If not,
 click it and pick AMD, or check the file really ends in `.amd`.
 
-**A cross-file reference is flagged but it's valid.** The editor checks the file
-you're editing; whole-mission resolution is strongest through `sbs lint` on the
-command line. Running `sbs lint <mission>` validates every `.amd` together.
+**A cross-file reference is flagged but it's valid.** The server resolves across
+the whole mission when it can find the mission root (a folder with `story.json` /
+`story.mast` / `__lib__.json` above the file). If a `.amd` lives outside any such
+folder it's checked on its own, so cross-file targets show as dangling — open it
+within its mission, or run `sbs lint <mission>` to validate every `.amd` together.
 
 **"After I edit a `.mast` file the `.amd` warnings are stale."** The server
 re-reads `.mast` on the next `.amd` edit — make any edit in the `.amd` (or reload
