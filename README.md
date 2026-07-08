@@ -244,7 +244,9 @@ For **CI or editors**, add `--format json` (structured findings) or `--format
 compact` (`file:line:col:` lines for editor problem-matchers). And for **live
 squiggles as you type**, `sbs lint --lsp` runs an AMD language server (LSP over
 stdio) that any editor — VSCode, Neovim, Emacs — can connect to (it also does
-go-to-definition, outline, hover, completion, and format-on-save).
+go-to-definition, outline, hover, completion, and format-on-save). A ready-to-build
+**VSCode extension** (syntax highlighting + a client for this server) lives in
+[`editors/vscode/`](editors/vscode/).
 
 ### `sbs fmt` — tidy up a mission's AMD files
 

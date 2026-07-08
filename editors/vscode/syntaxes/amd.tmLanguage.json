@@ -1,0 +1,53 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "AMD",
+  "scopeName": "source.amd",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#fence" },
+    { "include": "#heading" },
+    { "include": "#choice" },
+    { "include": "#dialogue" },
+    { "include": "#color" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "//.*$",
+      "name": "comment.line.double-slash.amd"
+    },
+    "fence": {
+      "match": "^\\s*-{3,}\\s*$",
+      "name": "punctuation.definition.metadata.amd"
+    },
+    "heading": {
+      "match": "^(#+)[ \\t]+(?:(\\[)([^\\]]*)(\\])(\\()([^)]*)(\\)))?[ \\t]*(.*)$",
+      "captures": {
+        "1": { "name": "punctuation.definition.heading.amd" },
+        "3": { "name": "entity.name.section.amd" },
+        "6": { "name": "support.constant.property-value.amd" },
+        "8": { "name": "markup.heading.amd" }
+      },
+      "name": "markup.heading.amd"
+    },
+    "choice": {
+      "match": "^([ \\t]*-[ \\t]*)(\\[)([^\\]]*)(\\])(\\()([^)]*)(\\))(.*)$",
+      "captures": {
+        "1": { "name": "punctuation.definition.list.begin.amd" },
+        "3": { "name": "string.other.link.title.amd" },
+        "6": { "name": "support.constant.property-value.amd" },
+        "8": { "name": "meta.outcome.amd" }
+      }
+    },
+    "dialogue": {
+      "match": "^([ \\t]*%)(.*)$",
+      "captures": {
+        "1": { "name": "punctuation.definition.quote.amd" },
+        "2": { "name": "string.quoted.other.amd" }
+      }
+    },
+    "color": {
+      "match": "#[0-9A-Fa-f]{3,8}\\b",
+      "name": "constant.other.color.amd"
+    }
+  }
+}

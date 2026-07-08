@@ -1,0 +1,61 @@
+{
+  "name": "amd-language",
+  "displayName": "Artemis AMD",
+  "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, plus diagnostics/navigation/formatting via the sbs AMD language server.",
+  "version": "0.1.0",
+  "publisher": "artemis-sbs",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/artemis-sbs/sbs_cli" },
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages", "Linters", "Formatters"],
+  "activationEvents": ["onLanguage:amd"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "amd",
+        "aliases": ["AMD", "amd"],
+        "extensions": [".amd"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "amd",
+        "scopeName": "source.amd",
+        "path": "./syntaxes/amd.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Artemis AMD",
+      "properties": {
+        "amd.server.command": {
+          "type": "string",
+          "default": "sbs",
+          "description": "Command that launches the AMD language server (invoked as `<command> lint --lsp`). Use a full path to sbs / sbs.bat if it isn't on PATH."
+        },
+        "amd.server.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["lint", "--lsp"],
+          "description": "Arguments passed to amd.server.command to start the LSP server on stdio. Override to run the module directly, e.g. python -m sbs_utils.procedural.amd_lsp."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.4.0"
+  }
+}
