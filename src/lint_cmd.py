@@ -49,6 +49,20 @@ def _read_all(mission, pattern):
     return out
 
 
+def _mission_amd_keys(amd_files):
+    """Union of every node key across all of a mission's .amd files - the symbol
+    table cross-file references resolve against."""
+    from sbs_utils.procedural.amd_core import parse
+    keys = set()
+    for path in amd_files:
+        try:
+            with open(path, "r") as f:
+                keys |= parse(f.read()).keys
+        except Exception:
+            pass
+    return keys
+
+
 def _mastlib_signal_source(missions, mission):
     """The signal-relevant lines from the mission's mastlibs: `//signal/...` route
     declarations AND emit sites (`signal_emit(...)` / `SIGNAL_NAME`).
@@ -155,11 +169,15 @@ def lint(folder, strict, no_cross, fmt, lsp):
         if mastlib_sig:
             mast_sources.append(mastlib_sig)
 
+    # Mission-wide symbol table so cross-file references (a Scene/choice/reveal in
+    # one .amd pointing at a node in another) don't false-positive as dangling.
+    known_keys = _mission_amd_keys(amd_files)
+
     total_err = total_warn = 0
     bundle = []
     for path in amd_files:
         findings = amd_lint(file_path=path, mast_sources=mast_sources,
-                            cross_file=not no_cross)
+                            cross_file=not no_cross, known_keys=known_keys)
         rel = os.path.relpath(path, mission)
         for f in findings:
             if f.is_error():
