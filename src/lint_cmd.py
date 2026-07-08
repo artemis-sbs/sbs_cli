@@ -52,7 +52,10 @@ def _read_all(mission, pattern):
 @click.option("--strict", is_flag=True, help="Exit non-zero on warnings too (not just errors).")
 @click.option("--no-cross", is_flag=True,
               help="Skip cross-file checks (signal->//signal route, reach->landmark).")
-def lint(folder, strict, no_cross):
+@click.option("--format", "fmt", type=click.Choice(["text", "compact", "json"]),
+              default="text", help="Output format: text (human), compact "
+              "(file:line:col: for editor problem-matchers), or json (tools/CI).")
+def lint(folder, strict, no_cross, fmt):
     """Lint the .amd files in a mission FOLDER.
 
     Structural problems (broken headings, unclosed `---` fences, heading-level
@@ -76,26 +79,42 @@ def lint(folder, strict, no_cross):
 
     amd_files = sorted(glob.glob(os.path.join(mission, "**", "*.amd"), recursive=True))
     if not amd_files:
-        print(f"No .amd files under {mission}")
+        if fmt == "json":
+            print("[]")
+        else:
+            print(f"No .amd files under {mission}")
         return
 
     mast_sources = None if no_cross else _read_all(mission, "*.mast")
 
     total_err = total_warn = 0
+    bundle = []
     for path in amd_files:
         findings = amd_lint(file_path=path, mast_sources=mast_sources,
                             cross_file=not no_cross)
         rel = os.path.relpath(path, mission)
-        print(f"== {rel} ==")
-        if not findings:
-            print("  clean")
         for f in findings:
-            print(f"  {f}")
             if f.is_error():
                 total_err += 1
             else:
                 total_warn += 1
+        if fmt == "text":
+            print(f"== {rel} ==")
+            if not findings:
+                print("  clean")
+            for f in findings:
+                print(f"  {f}")
+        elif fmt == "compact":
+            for f in findings:
+                print(f.compact(rel))
+        else:  # json
+            bundle.extend(f.to_dict(file=rel) for f in findings)
 
-    print(f"\n{len(amd_files)} file(s): {total_err} error(s), {total_warn} warning(s)")
+    if fmt == "json":
+        import json
+        print(json.dumps(bundle, indent=2))
+    elif fmt == "text":
+        print(f"\n{len(amd_files)} file(s): {total_err} error(s), {total_warn} warning(s)")
+
     if total_err or (strict and total_warn):
         raise SystemExit(1)
