@@ -240,6 +240,11 @@ heading level) are **errors** and fail the check. Dangling references are
 **warnings**. The exit code is `0` when clean and `1` when there are errors (or any
 warnings under `--strict`), so it drops straight into a build script.
 
+For **CI or editors**, add `--format json` (structured findings) or `--format
+compact` (`file:line:col:` lines for editor problem-matchers). And for **live
+squiggles as you type**, `sbs lint --lsp` runs an AMD language server (LSP over
+stdio) that any editor — VSCode, Neovim, Emacs — can connect to.
+
 ---
 
 ## For maintainers — publishing releases

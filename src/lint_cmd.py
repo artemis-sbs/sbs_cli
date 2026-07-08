@@ -55,15 +55,33 @@ def _read_all(mission, pattern):
 @click.option("--format", "fmt", type=click.Choice(["text", "compact", "json"]),
               default="text", help="Output format: text (human), compact "
               "(file:line:col: for editor problem-matchers), or json (tools/CI).")
-def lint(folder, strict, no_cross, fmt):
+@click.option("--lsp", is_flag=True,
+              help="Run as an AMD language server (LSP over stdio) for editors.")
+def lint(folder, strict, no_cross, fmt, lsp):
     """Lint the .amd files in a mission FOLDER.
 
     Structural problems (broken headings, unclosed `---` fences, heading-level
     jumps) are ERRORs and fail the run. Dangling references (choice/Scene/reveal
     targets, emitted signals with no route, reach cells with no landmark) are
     WARNINGs. Exit code: 1 if any error (or any finding under --strict), else 0.
+
+    With --lsp, run an editor language server on stdin/stdout instead (VSCode,
+    Neovim, Emacs, ...): live diagnostics as you type.
     """
     missions = zipapp_dir
+
+    if lsp:
+        # The server lives in sbs_utils; make sure the (working-tree) copy is
+        # importable, then hand stdio over to it.
+        _prefer_working_tree_sbs_utils(missions, missions)
+        sys.path.insert(0, missions)
+        try:
+            from sbs_utils.procedural.amd_lsp import serve
+        except Exception as e:
+            print(f"ERROR: could not load the AMD language server ({e})")
+            raise SystemExit(2)
+        raise SystemExit(serve())
+
     mission = os.path.join(missions, folder)
     if not os.path.isdir(mission):
         mission = folder  # allow an absolute or cwd-relative path
