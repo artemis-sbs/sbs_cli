@@ -220,6 +220,26 @@ sbs compile LegendaryMissions --run      # also try starting it (a quick smoke t
 sbs compile MyTerminalThing --terminal   # for command-line-only MAST projects
 ```
 
+### `sbs lint` — check a mission's AMD files for broken links
+
+Where `compile` checks the mission's *script*, `lint` checks its *content* — the
+`.amd` files that hold quest logs, dialogue, cast, and maps. AMD's mistakes tend to
+fail **silently**: a mistyped heading can make a whole quest vanish with no error, a
+menu choice or "reveal" can point at nothing, a comms line can fire a signal no
+script listens for, or a quest can send the player to an empty spot on the map.
+`lint` finds all of that without launching the game.
+
+```
+sbs lint MyMission              # check the mission's .amd files
+sbs lint MyMission --strict     # also fail on warnings (good for CI)
+sbs lint MyMission --no-cross   # skip the signal-route and map-cell checks
+```
+
+Structural mistakes (a heading that won't parse, an unclosed `---` block, a skipped
+heading level) are **errors** and fail the check. Dangling references are
+**warnings**. The exit code is `0` when clean and `1` when there are errors (or any
+warnings under `--strict`), so it drops straight into a build script.
+
 ---
 
 ## For maintainers — publishing releases
@@ -322,6 +342,7 @@ Start the server and clients and let it run.
 | `sbs lib <folder>` | Package a mission's libraries/add-ons |
 | `sbs watch <folder>` | Auto-rebuild libraries as you edit |
 | `sbs compile <folder>` | Check a mission's script for errors |
+| `sbs lint <folder>` | Check a mission's AMD (.amd) files for broken links |
 | `sbs release <folder>` | Publish a release (maintainers only) |
 | `sbs update` | Update the `sbs` tool itself |
 | `sbs version` | Show the tool's version |
