@@ -11,6 +11,7 @@ from run_cmd import run
 from watch_cmd import watch
 from compile_cmd import compile
 from lint_cmd import lint
+from fmt_cmd import fmt
 import click
 
 

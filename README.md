@@ -243,7 +243,19 @@ warnings under `--strict`), so it drops straight into a build script.
 For **CI or editors**, add `--format json` (structured findings) or `--format
 compact` (`file:line:col:` lines for editor problem-matchers). And for **live
 squiggles as you type**, `sbs lint --lsp` runs an AMD language server (LSP over
-stdio) that any editor — VSCode, Neovim, Emacs — can connect to.
+stdio) that any editor — VSCode, Neovim, Emacs — can connect to (it also does
+go-to-definition, outline, hover, completion, and format-on-save).
+
+### `sbs fmt` — tidy up a mission's AMD files
+
+Canonically formats `.amd` files: trailing whitespace, heading spacing, `---`
+fences, and blank-line runs. It's **prose-safe** — it never reflows your writing —
+and idempotent, so it's safe to run any time (or on save via the language server).
+
+```
+sbs fmt MyMission              # format the .amd files in place
+sbs fmt MyMission --check      # report + fail if anything isn't formatted (CI)
+```
 
 ---
 
@@ -348,6 +360,7 @@ Start the server and clients and let it run.
 | `sbs watch <folder>` | Auto-rebuild libraries as you edit |
 | `sbs compile <folder>` | Check a mission's script for errors |
 | `sbs lint <folder>` | Check a mission's AMD (.amd) files for broken links |
+| `sbs fmt <folder>` | Canonically format a mission's AMD (.amd) files |
 | `sbs release <folder>` | Publish a release (maintainers only) |
 | `sbs update` | Update the `sbs` tool itself |
 | `sbs version` | Show the tool's version |
