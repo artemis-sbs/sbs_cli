@@ -10,6 +10,7 @@ from release_cmd import release
 from run_cmd import run
 from watch_cmd import watch
 from compile_cmd import compile
+from lint_cmd import lint
 import click
 
 
