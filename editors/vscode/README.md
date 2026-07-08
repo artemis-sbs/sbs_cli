@@ -38,7 +38,8 @@ Python and `amd.server.args` to `["-m", "sbs_utils.procedural.amd_lsp"]` (with
 
 ## Build / install (not prebuilt)
 
-This folder is source only — no compiled `out/` or `.vsix` is committed.
+This folder is source only — no compiled `out/` or `.vsix` is committed. The build
+below is verified to compile (`tsc`) and package (`vsce`) cleanly on Node 24 / npm 10.
 
 ```
 cd editors/vscode
