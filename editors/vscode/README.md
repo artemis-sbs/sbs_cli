@@ -2,6 +2,10 @@
 
 Language support for Artemis Cosmos **AMD (`.amd`)** files.
 
+> **Using the extension?** See **[HELP.md](HELP.md)** for the full usage guide —
+> features, settings, the diagnostic codes, and troubleshooting. This README is
+> about building/installing it.
+
 This extension is **thin by design**. It contributes:
 
 - **Syntax highlighting** for `.amd` (a TextMate grammar) — the one thing done in
