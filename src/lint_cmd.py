@@ -2,6 +2,8 @@ import click
 import os
 import sys
 import glob
+import json
+import zipfile
 
 from cli_cmd import cli, zipapp_dir
 from compile_cmd import sbs_lib_import
@@ -45,6 +47,44 @@ def _read_all(mission, pattern):
         except Exception:
             pass
     return out
+
+
+def _mastlib_route_source(missions, mission):
+    """The `//signal/...` route lines declared in the mission's mastlibs.
+
+    So the cross-file signal check knows about signals routed in LM/OU addons
+    (not just the mission's own .mast) and doesn't flag them. Reads story.json's
+    `mastlib` list and scans those zips in the shared `__lib__` folder; returns a
+    single source string of the route lines (or None). Best-effort - missing
+    story.json / unbuilt libs are skipped silently."""
+    story = os.path.join(mission, "story.json")
+    if not os.path.isfile(story):
+        return None
+    try:
+        with open(story) as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    lib_dirs = [os.path.join(missions, "__lib__"),
+                os.path.join(os.path.dirname(os.path.abspath(mission)), "__lib__")]
+    lines = []
+    for name in (data.get("mastlib") or []):
+        for lib_dir in lib_dirs:
+            zpath = os.path.join(lib_dir, name)
+            if not os.path.isfile(zpath):
+                continue
+            try:
+                with zipfile.ZipFile(zpath) as z:
+                    for entry in z.namelist():
+                        if not entry.endswith(".mast"):
+                            continue
+                        text = z.read(entry).decode("utf-8", "replace")
+                        lines += [ln for ln in text.splitlines()
+                                  if ln.lstrip().startswith("//signal/")]
+            except Exception:
+                continue
+            break  # found this lib; don't re-read from the other dir
+    return "\n".join(lines) if lines else None
 
 
 @cli.command(short_help="Validate a mission's AMD (.amd) files")
@@ -103,7 +143,12 @@ def lint(folder, strict, no_cross, fmt, lsp):
             print(f"No .amd files under {mission}")
         return
 
-    mast_sources = None if no_cross else _read_all(mission, "*.mast")
+    mast_sources = None
+    if not no_cross:
+        mast_sources = _read_all(mission, "*.mast")
+        mastlib_routes = _mastlib_route_source(missions, mission)
+        if mastlib_routes:
+            mast_sources.append(mastlib_routes)
 
     total_err = total_warn = 0
     bundle = []
