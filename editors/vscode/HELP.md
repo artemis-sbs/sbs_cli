@@ -58,6 +58,14 @@ title bar on a `.amd` file) to see your mission's geography: every landmark
 disc in its `Color:`. **Click a landmark** to jump to its node. The map spans the
 whole mission's `.amd` files, so a landmark defined in any file shows up.
 
+### Story graph
+
+Run **Artemis AMD: Show Story Graph** to see how your content connects: every node
+and the links between them — choices, `Scene:`, `Then: reveal`, and `Parent:` — laid
+out left-to-right, colored by kind, and grouped by section. **Click a node** to jump
+to it. Great for spotting dead-end dialogue, unreachable quests, and the overall
+shape of a conversation.
+
 ### Format on save
 
 The extension provides a formatter (whitespace, heading spacing, `---` fences,

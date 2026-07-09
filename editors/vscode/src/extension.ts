@@ -216,6 +216,118 @@ async function openLocation(uriStr: string, line: number): Promise<void> {
   }
 }
 
+// --- Story graph preview ----------------------------------------------------
+interface GraphNode { key: string; display: string; section: string; uri: string; line: number; }
+interface GraphEdge { from: string; to: string; kind: string; }
+interface MissionGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
+
+function sectionHue(s: string): number {
+  let h = 0;
+  for (const c of s) { h = (h * 31 + c.charCodeAt(0)) % 360; }
+  return h;
+}
+
+const EDGE_COLOR: Record<string, string> = {
+  choice: '#7aa2f7', scene: '#9ece6a', reveal: '#e0af68', parent: '#bb9af7',
+};
+
+function renderGraph(graph: MissionGraph, nonce: string): string {
+  const NW = 190, NH = 30, HGAP = 90, VGAP = 16;
+  // depth = longest-path layer (cycle-safe: relax at most N times)
+  const depth = new Map<string, number>(graph.nodes.map((n) => [n.key, 0]));
+  for (let it = 0; it < graph.nodes.length; it++) {
+    let changed = false;
+    for (const e of graph.edges) {
+      const nd = (depth.get(e.from) ?? 0) + 1;
+      if ((depth.get(e.to) ?? 0) < nd) { depth.set(e.to, nd); changed = true; }
+    }
+    if (!changed) { break; }
+  }
+  const cols = new Map<number, GraphNode[]>();
+  for (const n of graph.nodes) {
+    const d = depth.get(n.key) ?? 0;
+    if (!cols.has(d)) { cols.set(d, []); }
+    cols.get(d)!.push(n);
+  }
+  const pos = new Map<string, { x: number; y: number }>();
+  const depths = [...cols.keys()].sort((a, b) => a - b);
+  let maxRows = 0;
+  depths.forEach((d, ci) => {
+    const arr = cols.get(d)!;
+    arr.forEach((n, r) => pos.set(n.key, { x: ci * (NW + HGAP) + 20, y: r * (NH + VGAP) + 40 }));
+    maxRows = Math.max(maxRows, arr.length);
+  });
+  const W = depths.length * (NW + HGAP) + 40;
+  const H = Math.max(maxRows * (NH + VGAP) + 60, 120);
+
+  const clip = (s: string) => (s.length > 26 ? s.slice(0, 25) + '…' : s);
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  for (const e of graph.edges) {
+    const a = pos.get(e.from), b = pos.get(e.to);
+    if (!a || !b) { continue; }
+    const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
+    svg += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${EDGE_COLOR[e.kind] || '#888'}" stroke-width="1.5" opacity="0.65"/>`;
+  }
+  for (const n of graph.nodes) {
+    const p = pos.get(n.key)!;
+    const h = sectionHue(n.section);
+    svg += `<g class="nd" data-uri="${esc(n.uri)}" data-line="${n.line}">`
+      + `<rect x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="6" fill="hsl(${h},45%,28%)" stroke="hsl(${h},60%,55%)"/>`
+      + `<text x="${p.x + 8}" y="${p.y + 19}" class="nlabel">${esc(clip(n.display))}</text>`
+      + `</g>`;
+  }
+  svg += `</svg>`;
+
+  const legend = Object.entries(EDGE_COLOR)
+    .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join(' ');
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { margin: 0; padding: 10px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
+  h3 { margin: 0 0 4px; font-weight: 600; }
+  .nlabel { fill: #fff; font-size: 11px; }
+  .nd { cursor: pointer; }
+  .nd:hover rect { stroke-width: 2.5; }
+  .leg { margin-right: 12px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+  .leg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .empty { color: var(--vscode-descriptionForeground); }
+</style></head><body>
+<h3>Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)</h3>
+<div>${legend}</div>
+${graph.nodes.length ? `<div style="overflow:auto; margin-top:8px">${svg}</div>` : '<p class="empty">No nodes found.</p>'}
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  for (const g of document.querySelectorAll('.nd')) {
+    g.addEventListener('click', () => vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) }));
+  }
+</script></body></html>`;
+}
+
+async function showGraph(): Promise<void> {
+  if (!client) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
+    return;
+  }
+  const uri = vscode.window.activeTextEditor?.document.uri.toString();
+  if (!uri) { return; }
+  let graph: MissionGraph;
+  try {
+    graph = await client.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+  } catch (e) {
+    vscode.window.showErrorMessage(`Artemis AMD: could not build the graph (${e}).`);
+    return;
+  }
+  const panel = vscode.window.createWebviewPanel(
+    'amdGraph', 'AMD Story Graph', vscode.ViewColumn.Beside, { enableScripts: true },
+  );
+  const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+  panel.webview.html = renderGraph(graph, nonce);
+  panel.webview.onDidReceiveMessage((msg) => {
+    if (msg?.type === 'goto') { openLocation(msg.uri, msg.line); }
+  });
+}
+
 async function showMap(): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
@@ -248,6 +360,7 @@ export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('Artemis AMD');
 
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
 
   // Restart the server when the relevant settings change.
   context.subscriptions.push(

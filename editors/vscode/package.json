@@ -15,14 +15,21 @@
         "command": "amd.showMap",
         "title": "Show Mission Map",
         "category": "Artemis AMD"
+      },
+      {
+        "command": "amd.showGraph",
+        "title": "Show Story Graph",
+        "category": "Artemis AMD"
       }
     ],
     "menus": {
       "commandPalette": [
-        { "command": "amd.showMap", "when": "editorLangId == amd" }
+        { "command": "amd.showMap", "when": "editorLangId == amd" },
+        { "command": "amd.showGraph", "when": "editorLangId == amd" }
       ],
       "editor/title": [
-        { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation" }
+        { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation" },
+        { "command": "amd.showGraph", "when": "editorLangId == amd", "group": "navigation" }
       ]
     },
     "languages": [
