@@ -335,6 +335,15 @@ function renderMap(map: MissionMap, nonce: string): string {
       if (ni !== i0 || nj !== j0) { vscode.postMessage({ type: 'setAt', uri: g.dataset.uri, range: JSON.parse(g.dataset.atrange), i: ni, j: nj }); }
     });
   }
+  // Double-click an empty cell to create a landmark there.
+  scroll.addEventListener('dblclick', (e) => {
+    if (!svg || (e.target && e.target.closest && e.target.closest('.lm'))) { return; }
+    const r = svg.getBoundingClientRect();
+    const ux = (e.clientX - r.left) / zoom, uy = (e.clientY - r.top) / zoom;
+    const i = Math.round((ux - GRID.cell / 2) / GRID.cell) + GRID.minI;
+    const j = Math.round((uy - GRID.cell / 2) / GRID.cell) + GRID.minJ;
+    vscode.postMessage({ type: 'addLandmark', i: i, j: j });
+  });
   `;
   return webviewPage(title, '', styles, body, nonce, extraScript);
 }
@@ -352,7 +361,7 @@ async function openLocation(uriStr: string, line: number): Promise<void> {
 }
 
 // --- Story graph preview ----------------------------------------------------
-interface GraphNode { key: string; display: string; section: string; uri: string; line: number; }
+interface GraphNode { key: string; display: string; section: string; uri: string; line: number; addLine: number; }
 interface GraphEdge { from: string; to: string; kind: string; }
 interface MissionGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
 
@@ -406,7 +415,7 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
   for (const n of graph.nodes) {
     const p = pos.get(n.key)!;
     const h = sectionHue(n.section);
-    svg += `<g class="nd" data-key="${esc(n.key)}" data-section="${esc(n.section)}" data-uri="${esc(n.uri)}" data-line="${n.line}">`
+    svg += `<g class="nd" data-key="${esc(n.key)}" data-display="${esc(n.display)}" data-section="${esc(n.section)}" data-uri="${esc(n.uri)}" data-line="${n.line}" data-addline="${n.addLine}" data-cx="${p.x + NW}" data-cy="${p.y + NH / 2}">`
       + `<rect x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="6" fill="hsl(${h},45%,28%)" stroke="hsl(${h},60%,55%)"/>`
       + `<text x="${p.x + 8}" y="${p.y + 19}" class="nlabel">${esc(clip(n.display))}</text>`
       + `</g>`;
@@ -445,6 +454,35 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
     for (const p of edges) { p.style.display = (hiddenKeys.has(p.dataset.from) || hiddenKeys.has(p.dataset.to)) ? 'none' : ''; }
   }
   for (const c of document.querySelectorAll('.filt input')) { c.addEventListener('change', applyFilter); }
+
+  // Drag from one node to another to add a choice edge (- [display](target)).
+  let connecting = null, tmpLine = null;
+  for (const n of gnodes) {
+    n.addEventListener('mousedown', (e) => {
+      e.stopPropagation(); connecting = n; moved = false;
+      tmpLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      tmpLine.setAttribute('x1', n.dataset.cx); tmpLine.setAttribute('y1', n.dataset.cy);
+      tmpLine.setAttribute('x2', n.dataset.cx); tmpLine.setAttribute('y2', n.dataset.cy);
+      tmpLine.setAttribute('stroke', '#e8c060'); tmpLine.setAttribute('stroke-width', '2'); tmpLine.setAttribute('stroke-dasharray', '5 3'); tmpLine.setAttribute('pointer-events', 'none');
+      svg.appendChild(tmpLine);
+    });
+  }
+  window.addEventListener('mousemove', (e) => {
+    if (!connecting) { return; }
+    moved = true;
+    const r = svg.getBoundingClientRect();
+    tmpLine.setAttribute('x2', (e.clientX - r.left) / zoom); tmpLine.setAttribute('y2', (e.clientY - r.top) / zoom);
+  });
+  window.addEventListener('mouseup', (e) => {
+    if (!connecting) { return; }
+    const src = connecting; connecting = null;
+    if (tmpLine) { tmpLine.remove(); tmpLine = null; }
+    if (!moved) { return; }
+    const tgt = e.target && e.target.closest ? e.target.closest('.nd') : null;
+    if (tgt && tgt !== src) {
+      vscode.postMessage({ type: 'connect', uri: src.dataset.uri, addLine: parseInt(src.dataset.addline, 10), toKey: tgt.dataset.key, toDisplay: tgt.dataset.display });
+    }
+  });
   `;
   return webviewPage(title, legend, styles, body, nonce, extraScript);
 }
@@ -466,10 +504,26 @@ async function showGraph(): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
     'amdGraph', 'AMD Story Graph', vscode.ViewColumn.Beside, { enableScripts: true },
   );
-  const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
-  panel.webview.html = renderGraph(graph, nonce);
-  panel.webview.onDidReceiveMessage((msg) => {
-    if (msg?.type === 'goto') { openLocation(msg.uri, msg.line); }
+  const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
+  panel.webview.html = renderGraph(graph, nonce());
+
+  const refresh = async () => {
+    try {
+      const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+      panel.webview.html = renderGraph(g, nonce());
+    } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
+  };
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg?.type === 'goto') {
+      openLocation(msg.uri, msg.line);
+    } else if (msg?.type === 'connect' && msg.toKey) {
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(vscode.Uri.parse(msg.uri), new vscode.Position(msg.addLine, 0),
+        `- [${msg.toDisplay}](${msg.toKey})\n`);
+      await vscode.workspace.applyEdit(edit);
+      await refresh();
+    }
   });
 }
 
@@ -513,6 +567,14 @@ async function showMap(): Promise<void> {
         `${msg.i}, ${msg.j}`);
       await vscode.workspace.applyEdit(edit);
       await refresh();   // re-render at the new position
+    } else if (msg?.type === 'addLandmark') {
+      const d = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+      const key = `landmark_${msg.i}_${msg.j}`.replace(/-/g, 'm');
+      const stub = `\n### [New Landmark](${key})\n---\nAt: ${msg.i}, ${msg.j}\nKind: derelict\n---\n`;
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(vscode.Uri.parse(uri), new vscode.Position(d.lineCount, 0), stub);
+      await vscode.workspace.applyEdit(edit);
+      await refresh();
     }
   });
 }
