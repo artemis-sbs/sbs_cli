@@ -141,6 +141,56 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Shared webview shell: a fixed toolbar (title, legend, zoom buttons) over a
+// bounded scroll area, so the SVG gets real horizontal/vertical scrollbars, plus
+// zoom via the buttons or Ctrl+wheel. `.lm`/`.nd` elements are click-to-jump.
+function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; display: flex; flex-direction: column; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
+  header { flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid var(--vscode-panel-border, #8883); }
+  header h3 { margin: 0 0 4px; font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .spacer { flex: 1 1 auto; }
+  .zoom button { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); border: none; border-radius: 4px; padding: 2px 9px; margin-left: 4px; cursor: pointer; font-size: 12px; }
+  .zoom button:hover { background: var(--vscode-button-secondaryHoverBackground, #555); }
+  .scroll { flex: 1 1 auto; overflow: auto; }
+  .scroll svg { display: block; }
+  .leg { font-size: 11px; color: var(--vscode-descriptionForeground); margin-right: 10px; }
+  .leg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .empty { color: var(--vscode-descriptionForeground); padding: 10px; }
+  ${styles}
+</style></head><body>
+<header>
+  <h3>${title}</h3>
+  <div class="row">${legend}<span class="spacer"></span>
+    <span class="zoom"><button id="zout" title="Zoom out">&#8722;</button><button id="zreset" title="Reset zoom">100%</button><button id="zin" title="Zoom in">+</button></span>
+  </div>
+</header>
+<div class="scroll" id="scroll">${body}</div>
+<script nonce="${nonce}">
+  const svg = document.querySelector('svg');
+  const baseW = svg ? parseFloat(svg.getAttribute('width')) : 0;
+  const baseH = svg ? parseFloat(svg.getAttribute('height')) : 0;
+  let zoom = 1;
+  const zreset = document.getElementById('zreset');
+  function apply() { if (svg) { svg.setAttribute('width', baseW * zoom); svg.setAttribute('height', baseH * zoom); } if (zreset) zreset.textContent = Math.round(zoom * 100) + '%'; }
+  function setZoom(z) { zoom = Math.max(0.2, Math.min(4, z)); apply(); }
+  const zin = document.getElementById('zin'), zout = document.getElementById('zout');
+  if (zin) zin.onclick = () => setZoom(zoom * 1.2);
+  if (zout) zout.onclick = () => setZoom(zoom / 1.2);
+  if (zreset) zreset.onclick = () => setZoom(1);
+  const scroll = document.getElementById('scroll');
+  scroll.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9)); } }, { passive: false });
+  const vscode = acquireVsCodeApi();
+  for (const g of document.querySelectorAll('.lm, .nd')) {
+    g.addEventListener('click', () => vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) }));
+  }
+</script></body></html>`;
+}
+
 function renderMap(map: MissionMap, nonce: string): string {
   const pts = [
     ...map.landmarks.map((l) => ({ i: l.i, j: l.j })),
@@ -181,27 +231,16 @@ function renderMap(map: MissionMap, nonce: string): string {
   }
   svg += `</svg>`;
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<style>
-  body { margin: 0; padding: 10px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
+  const styles = `
   .grid { stroke: var(--vscode-editorIndentGuide-background, #8884); stroke-width: 1; }
   .dot { fill: var(--vscode-charts-orange, #e8a); stroke: var(--vscode-editor-background); stroke-width: 1.5; }
   .llabel { fill: var(--vscode-foreground); font-size: 11px; }
   .rlabel { fill: var(--vscode-descriptionForeground, #aaa); font-size: 11px; text-anchor: middle; }
   .lm { cursor: pointer; }
-  .lm:hover .dot { fill: var(--vscode-charts-yellow, #fd6); }
-  .empty { color: var(--vscode-descriptionForeground); }
-  h3 { margin: 0 0 8px; font-weight: 600; }
-</style></head><body>
-<h3>Mission Map — ${map.landmarks.length} landmark(s), ${map.regions.length} region(s)</h3>
-${pts.length ? `<div style="overflow:auto">${svg}</div>` : '<p class="empty">No landmarks or regions found in this mission.</p>'}
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  for (const g of document.querySelectorAll('.lm')) {
-    g.addEventListener('click', () => vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) }));
-  }
-</script></body></html>`;
+  .lm:hover .dot { fill: var(--vscode-charts-yellow, #fd6); }`;
+  const title = `Mission Map — ${map.landmarks.length} landmark(s), ${map.regions.length} region(s)`;
+  const body = pts.length ? svg : '<p class="empty">No landmarks or regions found in this mission.</p>';
+  return webviewPage(title, '', styles, body, nonce);
 }
 
 async function openLocation(uriStr: string, line: number): Promise<void> {
@@ -279,29 +318,15 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
   svg += `</svg>`;
 
   const legend = Object.entries(EDGE_COLOR)
-    .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join(' ');
+    .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('');
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<style>
-  body { margin: 0; padding: 10px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
-  h3 { margin: 0 0 4px; font-weight: 600; }
+  const styles = `
   .nlabel { fill: #fff; font-size: 11px; }
   .nd { cursor: pointer; }
-  .nd:hover rect { stroke-width: 2.5; }
-  .leg { margin-right: 12px; font-size: 11px; color: var(--vscode-descriptionForeground); }
-  .leg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
-  .empty { color: var(--vscode-descriptionForeground); }
-</style></head><body>
-<h3>Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)</h3>
-<div>${legend}</div>
-${graph.nodes.length ? `<div style="overflow:auto; margin-top:8px">${svg}</div>` : '<p class="empty">No nodes found.</p>'}
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  for (const g of document.querySelectorAll('.nd')) {
-    g.addEventListener('click', () => vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) }));
-  }
-</script></body></html>`;
+  .nd:hover rect { stroke-width: 2.5; }`;
+  const title = `Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`;
+  const body = graph.nodes.length ? svg : '<p class="empty">No nodes found.</p>';
+  return webviewPage(title, legend, styles, body, nonce);
 }
 
 async function showGraph(): Promise<void> {

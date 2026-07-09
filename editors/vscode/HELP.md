@@ -56,7 +56,8 @@ Run **Artemis AMD: Show Mission Map** (Command Palette, or the button in the edi
 title bar on a `.amd` file) to see your mission's geography: every landmark
 (`At: i,j`) plotted on a grid, each region (`Center:` / `Radius:`) drawn as a tinted
 disc in its `Color:`. **Click a landmark** to jump to its node. The map spans the
-whole mission's `.amd` files, so a landmark defined in any file shows up.
+whole mission's `.amd` files, so a landmark defined in any file shows up. **Zoom**
+with the `+`/`−` buttons or **Ctrl+scroll**, and drag the scrollbars to pan.
 
 ### Story graph
 
@@ -64,7 +65,8 @@ Run **Artemis AMD: Show Story Graph** to see how your content connects: every no
 and the links between them — choices, `Scene:`, `Then: reveal`, and `Parent:` — laid
 out left-to-right, colored by kind, and grouped by section. **Click a node** to jump
 to it. Great for spotting dead-end dialogue, unreachable quests, and the overall
-shape of a conversation.
+shape of a conversation. **Zoom** with the `+`/`−` buttons or **Ctrl+scroll**, and
+drag the scrollbars to pan.
 
 ### Format on save
 
