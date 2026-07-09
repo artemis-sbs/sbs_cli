@@ -20,6 +20,7 @@ import {
 
 let client: LanguageClient | undefined;
 let output: vscode.OutputChannel;
+let extensionUri: vscode.Uri | undefined;
 
 /** The Cosmos install's bundled Python interpreter. */
 function pythonExe(root: string): string {
@@ -431,18 +432,66 @@ const FIELD_ENUMS: Record<string, string[]> = {
   lose: ['true', 'false'],
 };
 
-function renderInspector(d: NodeDetail, nonce: string): string {
+// --- Face preview (reuses the mock's compositor, media/face.js) --------------
+// The atlases live in the Cosmos install's data/graphics/. We expose that folder
+// (and our media/) to the webview and hand FaceRender webview URIs for each sheet.
+const FACE_SHEETS = ['Terran_Big-revised', 'Torgoth_Set', 'Skaraan_Set', 'Krailen_Set', 'Zimni_Set', 'Arvonian'];
+
+function faceGraphicsDir(): string | undefined {
+  const root = detectCosmosRoot();
+  if (!root) { return undefined; }
+  const dir = path.join(root, 'data', 'graphics');
+  return fs.existsSync(dir) ? dir : undefined;
+}
+
+/** localResourceRoots so a face-preview webview can load media/face.js + the atlases. */
+function faceWebviewRoots(): vscode.Uri[] {
+  const roots: vscode.Uri[] = [];
+  if (extensionUri) { roots.push(vscode.Uri.joinPath(extensionUri, 'media')); }
+  const gfx = faceGraphicsDir();
+  if (gfx) { roots.push(vscode.Uri.file(gfx)); }
+  return roots;
+}
+
+/** Script tags + CSP img directive that bring FaceRender online in a webview.
+ *  `available` is false when the Cosmos graphics folder can't be found. */
+function faceInjection(webview: vscode.Webview, nonce: string): { scripts: string; imgCsp: string; available: boolean } {
+  const gfx = faceGraphicsDir();
+  const map: Record<string, string> = {};
+  if (gfx && extensionUri) {
+    for (const s of FACE_SHEETS) {
+      map[s] = webview.asWebviewUri(vscode.Uri.file(path.join(gfx, s + '.png'))).toString();
+    }
+  }
+  const faceJs = extensionUri
+    ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'face.js')).toString()
+    : '';
+  const scripts = `<script nonce="${nonce}" src="${faceJs}"></script>
+<script nonce="${nonce}">
+  (function () {
+    var M = ${JSON.stringify(map)};
+    window.__FACE_READY = !!(window.FaceRender && Object.keys(M).length);
+    if (window.FaceRender) { FaceRender.setSheetResolver(function (fn) { return M[fn] || (fn + '.png'); }); }
+  })();
+</script>`;
+  return { scripts, imgCsp: `img-src ${webview.cspSource};`, available: !!(gfx && extensionUri) };
+}
+
+function renderInspector(d: NodeDetail, nonce: string, inj: { scripts: string; imgCsp: string; available: boolean }): string {
   const valueControl = (f: NodeField) => {
     const opts = FIELD_ENUMS[f.label.toLowerCase()];
     if (!opts) { return `<input class="fval" value="${esc(f.value)}" placeholder="value"/>`; }
     const all = [...new Set([...opts, f.value].filter(Boolean))];
     return `<select class="fval">${all.map((o) => `<option${o === f.value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   };
+  const hasFace = d.fields.some((f) => f.label.toLowerCase() === 'face');
+  const faceVal = d.fields.find((f) => f.label.toLowerCase() === 'face')?.value ?? '';
   const rows = d.fields.map((f) => f.label.toLowerCase() === 'face'
     ? `<div class="frow"><input class="flabel" value="${esc(f.label)}"/><span>:</span><input class="fval facefield" value="${esc(f.value)}" placeholder="face string or female/male"/><button type="button" class="facebtn">Face…</button></div>`
     : `<div class="frow"><input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span>${valueControl(f)}</div>`).join('');
+  const facePreview = hasFace ? `<canvas id="facePreview" width="220" height="220"></canvas>` : '';
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inj.imgCsp} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   body { margin: 0; padding: 12px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
   h3 { margin: 0 0 10px; } h4 { margin: 14px 0 6px; color: var(--vscode-descriptionForeground); font-weight: 600; }
@@ -457,17 +506,24 @@ function renderInspector(d: NodeDetail, nonce: string): string {
   .sec { color: var(--vscode-descriptionForeground); font-size: 11px; }
   #addf, .facebtn { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); padding: 2px 8px; }
   .facebtn { flex: 0 0 auto; margin: 0; }
+  #facePreview { display: block; width: 110px; height: 110px; margin: 6px 0; border: 1px solid var(--vscode-input-border, #8884); border-radius: 4px; background: var(--vscode-input-background); }
 </style></head><body>
 <h3>${esc(d.display || d.key)} <span class="sec">(${esc(d.key)})</span></h3>
 <label class="k">Display</label><input id="display" value="${esc(d.display)}"/>
 <h4>Fields</h4>
 <div id="fields">${rows}</div>
+${facePreview}
 <button id="addf">+ add field</button>
 <h4>Body</h4>
 <textarea id="body" rows="14">${esc(d.bodyText)}</textarea>
 <div><button id="apply">Apply changes</button></div>
+${inj.scripts}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  const _facePreview = document.getElementById('facePreview');
+  const _faceCtx = _facePreview ? _facePreview.getContext('2d') : null;
+  function _drawFacePreview(str) { if (_faceCtx && window.FaceRender) { FaceRender.drawString(_facePreview, _faceCtx, str); } }
+  if (_facePreview) { _drawFacePreview(${JSON.stringify(faceVal)}); }
   document.getElementById('addf').addEventListener('click', () => {
     const div = document.createElement('div'); div.className = 'frow';
     div.innerHTML = '<input class="flabel" placeholder="field"/><span>:</span><input class="fval" placeholder="value"/>';
@@ -483,8 +539,10 @@ function renderInspector(d: NodeDetail, nonce: string): string {
   });
   const facebtn = document.querySelector('.facebtn');
   if (facebtn) { facebtn.addEventListener('click', () => vscode.postMessage({ type: 'buildFace' })); }
+  const _faceField = document.querySelector('.facefield');
+  if (_faceField) { _faceField.addEventListener('input', () => _drawFacePreview(_faceField.value)); }
   window.addEventListener('message', (e) => {
-    if (e.data && e.data.type === 'setFace') { const el = document.querySelector('.facefield'); if (el) { el.value = e.data.value; } }
+    if (e.data && e.data.type === 'setFace') { const el = document.querySelector('.facefield'); if (el) { el.value = e.data.value; } _drawFacePreview(e.data.value); }
   });
 </script></body></html>`;
 }
@@ -493,14 +551,18 @@ function renderInspector(d: NodeDetail, nonce: string): string {
 interface FaceMeta { races: string[]; features: Record<string, { label: string; max: number; optional?: boolean }[]>; }
 let faceBuilderPanel: vscode.WebviewPanel | undefined;
 
-function renderFaceBuilder(meta: FaceMeta, nonce: string): string {
+function renderFaceBuilder(meta: FaceMeta, nonce: string, inj: { scripts: string; imgCsp: string; available: boolean }): string {
+  const note = inj.available
+    ? 'Live preview composited from the Cosmos face atlases.'
+    : 'No preview - set amd.cosmosPath so the face atlases can be found (they live in the Cosmos install\'s data/graphics/).';
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inj.imgCsp} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   body { margin: 0; padding: 12px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
   h3 { margin: 0 0 8px; } label.k { display:block; font-size:11px; color: var(--vscode-descriptionForeground); margin: 10px 0 2px; }
   select, input[readonly] { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #8884); border-radius: 3px; padding: 4px 6px; }
   #out { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family, monospace); }
+  #preview { display: block; width: 180px; height: 180px; margin: 8px 0; border: 1px solid var(--vscode-input-border, #8884); border-radius: 4px; background: var(--vscode-input-background); }
   .srow { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
   .srow label { flex: 0 0 90px; font-size: 12px; }
   .srow input[type=range] { flex: 1 1 auto; }
@@ -512,13 +574,17 @@ function renderFaceBuilder(meta: FaceMeta, nonce: string): string {
 <label class="k">Race</label>
 <select id="race">${meta.races.map((r) => `<option>${esc(r)}</option>`).join('')}</select>
 <div id="sliders"></div>
+<canvas id="preview" width="360" height="360"></canvas>
 <label class="k">Face string</label><input id="out" readonly/>
-<p class="note">No live preview - faces render only in the game. Use the in-engine avatar editor to see it.</p>
+<p class="note">${esc(note)}</p>
 <button id="use">Use this face</button>
+${inj.scripts}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const META = ${JSON.stringify(meta.features)};
   const raceSel = document.getElementById('race'), sliders = document.getElementById('sliders'), out = document.getElementById('out');
+  const previewCanvas = document.getElementById('preview'), previewCtx = previewCanvas.getContext('2d');
+  function drawPreview(str) { if (window.FaceRender) { FaceRender.drawString(previewCanvas, previewCtx, str); } }
   function renderSliders() {
     const feats = META[raceSel.value] || [];
     sliders.innerHTML = feats.map((f, i) => '<div class="srow"><label>' + f.label + '</label>' +
@@ -540,7 +606,7 @@ function renderFaceBuilder(meta: FaceMeta, nonce: string): string {
   }
   raceSel.onchange = renderSliders;
   document.getElementById('use').onclick = () => vscode.postMessage({ type: 'useFace', value: out.value });
-  window.addEventListener('message', (e) => { if (e.data && e.data.type === 'built') { out.value = e.data.value; } });
+  window.addEventListener('message', (e) => { if (e.data && e.data.type === 'built') { out.value = e.data.value; drawPreview(e.data.value); } });
   renderSliders();
 </script></body></html>`;
 }
@@ -553,7 +619,7 @@ async function showFaceBuilder(): Promise<void> {
   if (!meta.races.length) { vscode.window.showWarningMessage('Artemis AMD: face builder unavailable.'); return; }
   if (!faceBuilderPanel) {
     faceBuilderPanel = vscode.window.createWebviewPanel('amdFace', 'AMD Face Builder',
-      vscode.ViewColumn.Beside, { enableScripts: true });
+      vscode.ViewColumn.Beside, { enableScripts: true, localResourceRoots: faceWebviewRoots() });
     faceBuilderPanel.onDidDispose(() => { faceBuilderPanel = undefined; });
     faceBuilderPanel.webview.onDidReceiveMessage(async (m) => {
       if (m?.type === 'faceBuild') {
@@ -564,7 +630,8 @@ async function showFaceBuilder(): Promise<void> {
       }
     });
   }
-  faceBuilderPanel.webview.html = renderFaceBuilder(meta, String(Date.now()) + Math.random().toString(36).slice(2));
+  const fbNonce = String(Date.now()) + Math.random().toString(36).slice(2);
+  faceBuilderPanel.webview.html = renderFaceBuilder(meta, fbNonce, faceInjection(faceBuilderPanel.webview, fbNonce));
   faceBuilderPanel.reveal(vscode.ViewColumn.Beside, true);
 }
 
@@ -579,7 +646,7 @@ async function showInspector(uri: string, key: string): Promise<void> {
   inspectorUri = uri; inspectorDetail = detail;
   if (!inspectorPanel) {
     inspectorPanel = vscode.window.createWebviewPanel('amdInspector', 'AMD Inspector',
-      vscode.ViewColumn.Beside, { enableScripts: true });
+      vscode.ViewColumn.Beside, { enableScripts: true, localResourceRoots: faceWebviewRoots() });
     inspectorPanel.onDidDispose(() => { inspectorPanel = undefined; });
     inspectorPanel.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'buildFace') {
@@ -621,8 +688,8 @@ async function showInspector(uri: string, key: string): Promise<void> {
       await showInspector(inspectorUri, d.key);   // re-fetch fresh ranges
     });
   }
-  inspectorPanel.webview.html = renderInspector(detail,
-    String(Date.now()) + Math.random().toString(36).slice(2));
+  const inspNonce = String(Date.now()) + Math.random().toString(36).slice(2);
+  inspectorPanel.webview.html = renderInspector(detail, inspNonce, faceInjection(inspectorPanel.webview, inspNonce));
   inspectorPanel.reveal(vscode.ViewColumn.Beside, true);
 }
 
@@ -1233,6 +1300,7 @@ async function newContentFile(): Promise<void> {
 
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('Artemis AMD');
+  extensionUri = context.extensionUri;
 
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
