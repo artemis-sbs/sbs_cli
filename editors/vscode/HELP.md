@@ -69,7 +69,10 @@ face per race (Terran / Skaraan / Torgoth / Arvonian / Kralien / Ximni), or **Bu
 custom…** — a **Face Builder** with a slider per feature (eyes, mouth, hair, …) and
 optional-feature toggles; the face string updates live and **Use this face** drops it
 back into the field. (Faces render only in the game, so the builder shows the string,
-not a preview.) Hit **Apply changes** and it rewrites just those parts of the `.amd`
+not a preview.) For a **WYSIWYG** face, design it in the in-game **Avatar Editor** (the
+LegendaryMissions `avatar_editor` addon) — it previews the face live and copies the
+string to your clipboard on every change — then use **Face… → Paste from Avatar
+Editor** to drop that string into the field. Hit **Apply changes** and it rewrites just those parts of the `.amd`
 (undoable). It's the way to author content without editing AMD syntax by hand — the
 map and graph give you the structure and geography; the Inspector fills in the words.
 

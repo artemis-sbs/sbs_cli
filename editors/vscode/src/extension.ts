@@ -589,9 +589,15 @@ async function showInspector(uri: string, key: string): Promise<void> {
           'Random Kralien': 'kralien', 'Random Ximni': 'ximni',
         };
         const pick = await vscode.window.showQuickPick(
-          ['Build custom…', 'female (keyword)', 'male (keyword)', ...Object.keys(RACES)], { placeHolder: 'Face' });
+          ['Build custom…', 'Paste from Avatar Editor', 'female (keyword)', 'male (keyword)', ...Object.keys(RACES)], { placeHolder: 'Face' });
         if (!pick) { return; }
         if (pick === 'Build custom…') { showFaceBuilder(); return; }
+        if (pick === 'Paste from Avatar Editor') {
+          const clip = (await vscode.env.clipboard.readText()).trim();
+          if (!clip) { vscode.window.showWarningMessage('Clipboard is empty — design a face in the in-game Avatar Editor first (it copies the face string on every change).'); return; }
+          inspectorPanel?.webview.postMessage({ type: 'setFace', value: clip });
+          return;
+        }
         let value = pick.startsWith('female') ? 'female' : pick.startsWith('male') ? 'male' : '';
         if (RACES[pick]) {
           const r = await client!.sendRequest<{ face: string }>('amd/faceRandom', { race: RACES[pick] });
