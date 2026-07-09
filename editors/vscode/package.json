@@ -10,6 +10,21 @@
   "categories": ["Programming Languages", "Linters", "Formatters"],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "amd.showMap",
+        "title": "Show Mission Map",
+        "category": "Artemis AMD"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "amd.showMap", "when": "editorLangId == amd" }
+      ],
+      "editor/title": [
+        { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation" }
+      ]
+    },
     "languages": [
       {
         "id": "amd",

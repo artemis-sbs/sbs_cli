@@ -132,8 +132,122 @@ function startClient(): void {
   });
 }
 
+// --- Mission map preview ----------------------------------------------------
+interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; }
+interface MapRegion { key: string; display: string; i: number; j: number; radius: number; color: string; uri: string; line: number; }
+interface MissionMap { landmarks: MapLandmark[]; regions: MapRegion[]; }
+
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderMap(map: MissionMap, nonce: string): string {
+  const pts = [
+    ...map.landmarks.map((l) => ({ i: l.i, j: l.j })),
+    ...map.regions.flatMap((r) => [
+      { i: r.i - r.radius, j: r.j - r.radius }, { i: r.i + r.radius, j: r.j + r.radius },
+    ]),
+  ];
+  const minI = pts.length ? Math.min(...pts.map((p) => p.i)) - 1 : -1;
+  const maxI = pts.length ? Math.max(...pts.map((p) => p.i)) + 1 : 1;
+  const minJ = pts.length ? Math.min(...pts.map((p) => p.j)) - 1 : -1;
+  const maxJ = pts.length ? Math.max(...pts.map((p) => p.j)) + 1 : 1;
+  const cell = 44;
+  const W = (maxI - minI + 1) * cell;
+  const H = (maxJ - minJ + 1) * cell;
+  const x = (i: number) => (i - minI) * cell + cell / 2;
+  const y = (j: number) => (j - minJ) * cell + cell / 2;
+
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  // grid
+  for (let i = minI; i <= maxI; i++) {
+    svg += `<line x1="${x(i)}" y1="0" x2="${x(i)}" y2="${H}" class="grid"/>`;
+  }
+  for (let j = minJ; j <= maxJ; j++) {
+    svg += `<line x1="0" y1="${y(j)}" x2="${W}" y2="${y(j)}" class="grid"/>`;
+  }
+  // regions (translucent discs)
+  for (const r of map.regions) {
+    const col = /^#[0-9a-fA-F]{3,8}$/.test(r.color) ? r.color : '#88aaff';
+    svg += `<circle cx="${x(r.i)}" cy="${y(r.j)}" r="${r.radius * cell}" fill="${col}" fill-opacity="0.15" stroke="${col}" stroke-opacity="0.5"/>`;
+    svg += `<text x="${x(r.i)}" y="${y(r.j) - r.radius * cell + 14}" class="rlabel">${esc(r.display)}</text>`;
+  }
+  // landmarks (clickable)
+  for (const l of map.landmarks) {
+    svg += `<g class="lm" data-uri="${esc(l.uri)}" data-line="${l.line}">`
+      + `<circle cx="${x(l.i)}" cy="${y(l.j)}" r="6" class="dot"/>`
+      + `<text x="${x(l.i) + 9}" y="${y(l.j) + 4}" class="llabel">${esc(l.display)} (${l.i},${l.j})</text>`
+      + `</g>`;
+  }
+  svg += `</svg>`;
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { margin: 0; padding: 10px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
+  .grid { stroke: var(--vscode-editorIndentGuide-background, #8884); stroke-width: 1; }
+  .dot { fill: var(--vscode-charts-orange, #e8a); stroke: var(--vscode-editor-background); stroke-width: 1.5; }
+  .llabel { fill: var(--vscode-foreground); font-size: 11px; }
+  .rlabel { fill: var(--vscode-descriptionForeground, #aaa); font-size: 11px; text-anchor: middle; }
+  .lm { cursor: pointer; }
+  .lm:hover .dot { fill: var(--vscode-charts-yellow, #fd6); }
+  .empty { color: var(--vscode-descriptionForeground); }
+  h3 { margin: 0 0 8px; font-weight: 600; }
+</style></head><body>
+<h3>Mission Map — ${map.landmarks.length} landmark(s), ${map.regions.length} region(s)</h3>
+${pts.length ? `<div style="overflow:auto">${svg}</div>` : '<p class="empty">No landmarks or regions found in this mission.</p>'}
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  for (const g of document.querySelectorAll('.lm')) {
+    g.addEventListener('click', () => vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) }));
+  }
+</script></body></html>`;
+}
+
+async function openLocation(uriStr: string, line: number): Promise<void> {
+  try {
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriStr));
+    const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+    const pos = new vscode.Position(Math.max(0, line), 0);
+    editor.selection = new vscode.Selection(pos, pos);
+    editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+  } catch (e) {
+    output.appendLine(`Could not open ${uriStr}: ${e}`);
+  }
+}
+
+async function showMap(): Promise<void> {
+  if (!client) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
+    return;
+  }
+  const uri = vscode.window.activeTextEditor?.document.uri.toString();
+  if (!uri) {
+    return;
+  }
+  let map: MissionMap;
+  try {
+    map = await client.sendRequest<MissionMap>('amd/map', { textDocument: { uri } });
+  } catch (e) {
+    vscode.window.showErrorMessage(`Artemis AMD: could not build the map (${e}).`);
+    return;
+  }
+  const panel = vscode.window.createWebviewPanel(
+    'amdMap', 'AMD Mission Map', vscode.ViewColumn.Beside, { enableScripts: true },
+  );
+  const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+  panel.webview.html = renderMap(map, nonce);
+  panel.webview.onDidReceiveMessage((msg) => {
+    if (msg?.type === 'goto') {
+      openLocation(msg.uri, msg.line);
+    }
+  });
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('Artemis AMD');
+
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
 
   // Restart the server when the relevant settings change.
   context.subscriptions.push(

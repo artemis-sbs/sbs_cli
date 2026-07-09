@@ -44,7 +44,19 @@ displays what it reports.
 | **Outline / breadcrumbs** | Outline view, or `Ctrl+Shift+O` to jump by heading | yes |
 | **Hover** | hover a reference to preview its target | yes |
 | **Completion** | `Ctrl+Space` — offers node keys | yes |
+| **Quick fixes** | `Ctrl+.` on a warning — "Did you mean `X`?" / "Create node" | yes |
+| **Reference CodeLens** | a clickable "N reference(s)" above each node | yes |
+| **Color swatches** | an inline swatch + picker on any `#rrggbb` | yes |
+| **Inlay hints** | a reference's target display name, ghosted inline | yes |
 | **Format document** | `Shift+Alt+F`, or on save (see below) | yes |
+
+### Mission map
+
+Run **Artemis AMD: Show Mission Map** (Command Palette, or the button in the editor
+title bar on a `.amd` file) to see your mission's geography: every landmark
+(`At: i,j`) plotted on a grid, each region (`Center:` / `Radius:`) drawn as a tinted
+disc in its `Color:`. **Click a landmark** to jump to its node. The map spans the
+whole mission's `.amd` files, so a landmark defined in any file shows up.
 
 ### Format on save
 
