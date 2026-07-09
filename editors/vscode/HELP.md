@@ -73,7 +73,9 @@ Run **Artemis AMD: Show Story Graph** to see how your content connects: every no
 and the links between them — choices, `Scene:`, `Then: reveal`, and `Parent:` — laid
 out left-to-right, colored by kind, and grouped by section. **Click a node** to jump
 to it. **Drag from one node onto another** to add a choice link — it writes
-`- [target](key)` into the source node's body (undoable). **Hover a node** to
+`- [target](key)` into the source node's body (undoable). **Right-click a node** to
+**Rename** it (the key changes across the whole mission — every reference follows),
+**Delete** it, or **Go to** it. **Hover a node** to
 spotlight it and its direct links (everything else dims), and **filter by section**
 with the toolbar checkboxes (focus on just dialogue, or just quests). Great for spotting dead-end dialogue, unreachable quests, and the
 overall shape of a conversation. Same navigation as the map — fit-on-open, zoom, Fit,

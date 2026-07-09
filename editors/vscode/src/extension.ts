@@ -348,6 +348,18 @@ function renderMap(map: MissionMap, nonce: string): string {
   return webviewPage(title, '', styles, body, nonce, extraScript);
 }
 
+function wsEditFromChanges(changes: Record<string, { range: LspRange; newText: string }[]> | undefined): vscode.WorkspaceEdit {
+  const edit = new vscode.WorkspaceEdit();
+  for (const [u, edits] of Object.entries(changes || {})) {
+    for (const e of edits) {
+      edit.replace(vscode.Uri.parse(u),
+        new vscode.Range(e.range.start.line, e.range.start.character, e.range.end.line, e.range.end.character),
+        e.newText);
+    }
+  }
+  return edit;
+}
+
 async function openLocation(uriStr: string, line: number): Promise<void> {
   try {
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriStr));
@@ -483,6 +495,14 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
       vscode.postMessage({ type: 'connect', uri: src.dataset.uri, addLine: parseInt(src.dataset.addline, 10), toKey: tgt.dataset.key, toDisplay: tgt.dataset.display });
     }
   });
+
+  // Right-click a node for Rename / Delete / Go to.
+  for (const n of gnodes) {
+    n.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      vscode.postMessage({ type: 'nodeMenu', key: n.dataset.key, display: n.dataset.display, uri: n.dataset.uri, line: parseInt(n.dataset.line, 10), addLine: parseInt(n.dataset.addline, 10) });
+    });
+  }
   `;
   return webviewPage(title, legend, styles, body, nonce, extraScript);
 }
@@ -523,6 +543,33 @@ async function showGraph(): Promise<void> {
         `- [${msg.toDisplay}](${msg.toKey})\n`);
       await vscode.workspace.applyEdit(edit);
       await refresh();
+    } else if (msg?.type === 'nodeMenu') {
+      const pick = await vscode.window.showQuickPick(['Go to', 'Rename…', 'Delete'],
+        { placeHolder: `${msg.display} (${msg.key})` });
+      if (pick === 'Go to') {
+        openLocation(msg.uri, msg.line);
+      } else if (pick === 'Rename…') {
+        const nn = await vscode.window.showInputBox({
+          prompt: `Rename node key '${msg.key}' across the whole mission`, value: msg.key,
+          validateInput: (v) => /^[A-Za-z0-9_]+$/.test(v) ? null : 'Use letters, digits, or underscore only',
+        });
+        if (nn && nn !== msg.key) {
+          const we = await client!.sendRequest<{ changes: Record<string, { range: LspRange; newText: string }[]> }>(
+            'amd/rename', { textDocument: { uri }, key: msg.key, newName: nn });
+          await vscode.workspace.applyEdit(wsEditFromChanges(we.changes));
+          await refresh();
+        }
+      } else if (pick === 'Delete') {
+        const ok = await vscode.window.showWarningMessage(
+          `Delete node "${msg.display}"? Its content is removed and references to it will dangle.`,
+          { modal: true }, 'Delete');
+        if (ok === 'Delete') {
+          const edit = new vscode.WorkspaceEdit();
+          edit.delete(vscode.Uri.parse(msg.uri), new vscode.Range(msg.line, 0, msg.addLine, 0));
+          await vscode.workspace.applyEdit(edit);
+          await refresh();
+        }
+      }
     }
   });
 }
