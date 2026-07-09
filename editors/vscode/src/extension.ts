@@ -134,7 +134,7 @@ function startClient(): void {
 
 // --- Mission map preview ----------------------------------------------------
 interface LspRange { start: { line: number; character: number }; end: { line: number; character: number }; }
-interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; addLine: number; atRange: LspRange | null; kindRange: LspRange | null; }
+interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; addLine: number; atRange: LspRange | null; kindRange: LspRange | null; problems: Problems | null; }
 interface MapRegion { key: string; display: string; i: number; j: number; radius: number; color: string; uri: string; line: number; centerRange: LspRange | null; radiusRange: LspRange | null; }
 interface MissionMap { landmarks: MapLandmark[]; regions: MapRegion[]; }
 
@@ -309,6 +309,9 @@ function renderMap(map: MissionMap, nonce: string): string {
     svg += `<g class="lm${l.atRange ? ' draggable' : ''}" data-uri="${esc(l.uri)}" data-line="${l.line}"${drag}${menu}>`
       + `<circle cx="${x(l.i)}" cy="${y(l.j)}" r="6" class="dot"/>`
       + `<text x="${x(l.i) + 9}" y="${y(l.j) + 4}" class="llabel">${esc(l.display)} (${l.i},${l.j})</text>`
+      + (l.problems && (l.problems.error || l.problems.warning)
+        ? `<circle cx="${x(l.i) + 5}" cy="${y(l.j) - 5}" r="3.5" fill="${l.problems.error ? '#f55' : '#fc4'}" stroke="#0008" stroke-width="0.5"><title>${l.problems.error} error(s), ${l.problems.warning} warning(s)</title></circle>`
+        : '')
       + `</g>`;
   }
   svg += `</svg>`;
@@ -419,16 +422,33 @@ function rng(r: LspRange): vscode.Range {
   return new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
 }
 
+const FIELD_ENUMS: Record<string, string[]> = {
+  state: ['active', 'secret', 'idle', 'complete', 'failed'],
+  scope: ['shared', 'ship'],
+  kind: ['derelict', 'station', 'worldlet'],
+  mode: ['story', 'sandbox', 'skirmish', 'war', 'campaign'],
+  win: ['true', 'false'],
+  lose: ['true', 'false'],
+  face: ['female', 'male'],
+};
+
 function renderInspector(d: NodeDetail, nonce: string): string {
+  const valueControl = (f: NodeField) => {
+    const opts = FIELD_ENUMS[f.label.toLowerCase()];
+    if (!opts) { return `<input class="fval" value="${esc(f.value)}" placeholder="value"/>`; }
+    const all = [...new Set([...opts, f.value].filter(Boolean))];
+    return `<select class="fval">${all.map((o) => `<option${o === f.value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  };
   const rows = d.fields.map((f) =>
-    `<div class="frow"><input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span><input class="fval" value="${esc(f.value)}" placeholder="value"/></div>`).join('');
+    `<div class="frow"><input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span>${valueControl(f)}</div>`).join('');
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   body { margin: 0; padding: 12px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
   h3 { margin: 0 0 10px; } h4 { margin: 14px 0 6px; color: var(--vscode-descriptionForeground); font-weight: 600; }
   label.k { display: block; font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
-  input, textarea { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #8884); border-radius: 3px; padding: 4px 6px; font-family: inherit; }
+  input, textarea, select { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #8884); border-radius: 3px; padding: 4px 6px; font-family: inherit; }
+  select { background: var(--vscode-dropdown-background, var(--vscode-input-background)); }
   textarea { font-family: var(--vscode-editor-font-family, monospace); }
   .frow { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
   .frow .flabel { flex: 0 0 34%; } .frow .fval { flex: 1 1 auto; }
@@ -522,7 +542,8 @@ async function openLocation(uriStr: string, line: number): Promise<void> {
 }
 
 // --- Story graph preview ----------------------------------------------------
-interface GraphNode { key: string; display: string; section: string; uri: string; line: number; addLine: number; }
+interface Problems { error: number; warning: number; }
+interface GraphNode { key: string; display: string; section: string; uri: string; line: number; addLine: number; problems: Problems | null; }
 interface GraphEdge { from: string; to: string; kind: string; uri: string; line: number; targetRange: LspRange; }
 interface MissionGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
 
@@ -628,6 +649,9 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, focus?: Focus | nul
     svg += `<g class="nd" data-key="${esc(n.key)}" data-display="${esc(n.display)}" data-section="${esc(n.section)}" data-uri="${esc(n.uri)}" data-line="${n.line}" data-addline="${n.addLine}" data-cx="${p.x + NW}" data-cy="${p.y + NH / 2}">`
       + `<rect x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="6" fill="hsl(${h},45%,28%)" stroke="hsl(${h},60%,55%)"/>`
       + `<text x="${p.x + 8}" y="${p.y + 19}" class="nlabel">${esc(clip(n.display))}</text>`
+      + (n.problems && (n.problems.error || n.problems.warning)
+        ? `<circle cx="${p.x + NW - 6}" cy="${p.y + 6}" r="4.5" fill="${n.problems.error ? '#f55' : '#fc4'}" stroke="#0008" stroke-width="0.5"><title>${n.problems.error} error(s), ${n.problems.warning} warning(s)</title></circle>`
+        : '')
       + `</g>`;
   }
   svg += `</svg>`;

@@ -63,9 +63,14 @@ Right-click a graph node or a map landmark and choose **Edit…** to open the
 **Inspector** — a form for that node's **Display** name, its **metadata fields**
 (`State`, `When`, `Speaker`, `Kind`, …, each a labelled input; **+ add field** for
 new ones), and its **Body** text (descriptions, dialogue `%` lines, choices) in a
-text area. Hit **Apply changes** and it rewrites just those parts of the `.amd`
+text area. Common fields (`State`, `Scope`, `Kind`, `Mode`, `Win`, `Face`) render as
+**dropdowns**. Hit **Apply changes** and it rewrites just those parts of the `.amd`
 (undoable). It's the way to author content without editing AMD syntax by hand — the
 map and graph give you the structure and geography; the Inspector fills in the words.
+
+Nodes and landmarks with problems show a **badge** in the Story Graph and Map — **red**
+for an error, **yellow** for a warning; hover it for the count. Fix issues where you see
+them.
 
 ### Mission map
 
