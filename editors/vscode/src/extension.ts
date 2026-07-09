@@ -134,7 +134,7 @@ function startClient(): void {
 
 // --- Mission map preview ----------------------------------------------------
 interface LspRange { start: { line: number; character: number }; end: { line: number; character: number }; }
-interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; atRange: LspRange | null; }
+interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; addLine: number; atRange: LspRange | null; kindRange: LspRange | null; }
 interface MapRegion { key: string; display: string; i: number; j: number; radius: number; color: string; uri: string; line: number; centerRange: LspRange | null; radiusRange: LspRange | null; }
 interface MissionMap { landmarks: MapLandmark[]; regions: MapRegion[]; }
 
@@ -305,7 +305,8 @@ function renderMap(map: MissionMap, nonce: string): string {
   // landmarks (clickable; draggable when we have the editable At: range)
   for (const l of map.landmarks) {
     const drag = l.atRange ? ` data-i="${l.i}" data-j="${l.j}" data-atrange='${JSON.stringify(l.atRange)}'` : '';
-    svg += `<g class="lm${l.atRange ? ' draggable' : ''}" data-uri="${esc(l.uri)}" data-line="${l.line}"${drag}>`
+    const menu = ` data-key="${esc(l.key)}" data-display="${esc(l.display)}" data-addline="${l.addLine}"${l.kindRange ? ` data-kindrange='${JSON.stringify(l.kindRange)}'` : ''}`;
+    svg += `<g class="lm${l.atRange ? ' draggable' : ''}" data-uri="${esc(l.uri)}" data-line="${l.line}"${drag}${menu}>`
       + `<circle cx="${x(l.i)}" cy="${y(l.j)}" r="6" class="dot"/>`
       + `<text x="${x(l.i) + 9}" y="${y(l.j) + 4}" class="llabel">${esc(l.display)} (${l.i},${l.j})</text>`
       + `</g>`;
@@ -333,7 +334,7 @@ function renderMap(map: MissionMap, nonce: string): string {
   const GRID = { minI: ${minI}, minJ: ${minJ}, cell: ${cell} };
   for (const g of scroll.querySelectorAll('.lm.draggable')) {
     let dragging = false, dx0 = 0, dy0 = 0;
-    g.addEventListener('mousedown', (e) => { e.stopPropagation(); dragging = true; moved = false; dx0 = e.clientX; dy0 = e.clientY; });
+    g.addEventListener('mousedown', (e) => { if (e.button !== 0) { return; } e.stopPropagation(); dragging = true; moved = false; dx0 = e.clientX; dy0 = e.clientY; });
     window.addEventListener('mousemove', (e) => { if (!dragging) { return; } const dx = (e.clientX - dx0) / zoom, dy = (e.clientY - dy0) / zoom; if (Math.abs(dx) + Math.abs(dy) > 2) { moved = true; } g.setAttribute('transform', 'translate(' + dx + ',' + dy + ')'); });
     window.addEventListener('mouseup', (e) => {
       if (!dragging) { return; }
@@ -350,8 +351,8 @@ function renderMap(map: MissionMap, nonce: string): string {
   // Regions: drag the centre handle to move, the edge handle to resize.
   let rgActive = null, rgMode = null, rgx = 0, rgy = 0;
   for (const g of scroll.querySelectorAll('.rg.editable')) {
-    g.querySelector('.rmove').addEventListener('mousedown', (e) => { e.stopPropagation(); rgActive = g; rgMode = 'move'; moved = false; rgx = e.clientX; rgy = e.clientY; });
-    g.querySelector('.rhandle').addEventListener('mousedown', (e) => { e.stopPropagation(); rgActive = g; rgMode = 'resize'; moved = false; rgx = e.clientX; rgy = e.clientY; });
+    g.querySelector('.rmove').addEventListener('mousedown', (e) => { if (e.button !== 0) { return; } e.stopPropagation(); rgActive = g; rgMode = 'move'; moved = false; rgx = e.clientX; rgy = e.clientY; });
+    g.querySelector('.rhandle').addEventListener('mousedown', (e) => { if (e.button !== 0) { return; } e.stopPropagation(); rgActive = g; rgMode = 'resize'; moved = false; rgx = e.clientX; rgy = e.clientY; });
   }
   window.addEventListener('mousemove', (e) => {
     if (!rgActive) { return; }
@@ -391,6 +392,13 @@ function renderMap(map: MissionMap, nonce: string): string {
     const j = Math.round((uy - GRID.cell / 2) / GRID.cell) + GRID.minJ;
     vscode.postMessage({ type: 'addLandmark', i: i, j: j });
   });
+  // Right-click a landmark for Rename / Change Kind / Delete / Go to.
+  for (const g of scroll.querySelectorAll('.lm')) {
+    g.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      vscode.postMessage({ type: 'lmMenu', key: g.dataset.key, display: g.dataset.display, uri: g.dataset.uri, line: parseInt(g.dataset.line, 10), addLine: parseInt(g.dataset.addline, 10), kindRange: g.dataset.kindrange ? JSON.parse(g.dataset.kindrange) : null });
+    });
+  }
   `;
   return webviewPage(title, '', styles, body, nonce, extraScript);
 }
@@ -518,6 +526,7 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
   let connecting = null, tmpLine = null;
   for (const n of gnodes) {
     n.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) { return; }
       e.stopPropagation(); connecting = n; moved = false;
       tmpLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       tmpLine.setAttribute('x1', n.dataset.cx); tmpLine.setAttribute('y1', n.dataset.cy);
@@ -676,6 +685,46 @@ async function showMap(): Promise<void> {
       edit.insert(vscode.Uri.parse(uri), new vscode.Position(d.lineCount, 0), stub);
       await vscode.workspace.applyEdit(edit);
       await refresh();
+    } else if (msg?.type === 'lmMenu') {
+      const items = ['Go to', 'Rename…'];
+      if (msg.kindRange) { items.push('Change Kind…'); }
+      items.push('Delete');
+      const pick = await vscode.window.showQuickPick(items, { placeHolder: `${msg.display} (${msg.key})` });
+      if (pick === 'Go to') {
+        openLocation(msg.uri, msg.line);
+      } else if (pick === 'Rename…') {
+        const nn = await vscode.window.showInputBox({
+          prompt: `Rename landmark key '${msg.key}' across the whole mission`, value: msg.key,
+          validateInput: (v) => /^[A-Za-z0-9_]+$/.test(v) ? null : 'Use letters, digits, or underscore only',
+        });
+        if (nn && nn !== msg.key) {
+          const we = await client!.sendRequest<{ changes: Record<string, { range: LspRange; newText: string }[]> }>(
+            'amd/rename', { textDocument: { uri }, key: msg.key, newName: nn });
+          await vscode.workspace.applyEdit(wsEditFromChanges(we.changes));
+          await refresh();
+        }
+      } else if (pick === 'Change Kind…') {
+        const kind = await vscode.window.showQuickPick(['derelict', 'station', 'worldlet'],
+          { placeHolder: 'Landmark kind' });
+        if (kind) {
+          const r = msg.kindRange;
+          const edit = new vscode.WorkspaceEdit();
+          edit.replace(vscode.Uri.parse(msg.uri),
+            new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character), kind);
+          await vscode.workspace.applyEdit(edit);
+          await refresh();
+        }
+      } else if (pick === 'Delete') {
+        const ok = await vscode.window.showWarningMessage(
+          `Delete landmark "${msg.display}"? Its content is removed and references to it will dangle.`,
+          { modal: true }, 'Delete');
+        if (ok === 'Delete') {
+          const edit = new vscode.WorkspaceEdit();
+          edit.delete(vscode.Uri.parse(msg.uri), new vscode.Range(msg.line, 0, msg.addLine, 0));
+          await vscode.workspace.applyEdit(edit);
+          await refresh();
+        }
+      }
     }
   });
 }

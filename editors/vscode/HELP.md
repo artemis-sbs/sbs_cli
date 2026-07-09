@@ -61,8 +61,10 @@ whole mission's `.amd` files, so a landmark defined in any file shows up.
 **Edit:** **drag a landmark** to a new cell to move it — its `At:` is rewritten in
 the `.amd` (undoable with Ctrl+Z, and the map re-renders); a plain click still jumps
 to the node. **Double-click an empty cell** to create a new landmark stub there.
-**Regions** get two handles: drag the **centre dot** to move the region (rewrites
-`Center:`) and the **edge dot** to resize it (rewrites `Radius:`).
+**Right-click a landmark** to **Rename** it (mission-wide — every reference follows),
+**Change Kind**, **Delete**, or **Go to**. **Regions** get two handles: drag the
+**centre dot** to move the region (rewrites `Center:`) and the **edge dot** to resize
+it (rewrites `Radius:`).
 
 Navigation (both this and the graph): the view **opens fitted** to the window;
 **zoom** with the buttons or **Ctrl+scroll**, **Fit** again anytime, **drag the
