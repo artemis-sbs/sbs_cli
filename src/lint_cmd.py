@@ -23,6 +23,22 @@ def _prefer_working_tree_sbs_utils(missions, mission):
             return
 
 
+def _ensure_sbs_utils_importable(missions):
+    """Make `import sbs_utils` work for a standalone launch (e.g. `sbs lint --lsp`,
+    with no mission to declare a sbslib). Prefer a working tree; otherwise add a
+    released `sbs_utils` sbslib from `__lib__` (a zip Python imports directly)."""
+    _prefer_working_tree_sbs_utils(missions, missions)
+    try:
+        import sbs_utils  # noqa: F401
+        return
+    except Exception:
+        pass
+    lib_dir = os.path.join(missions, "__lib__")
+    libs = sorted(glob.glob(os.path.join(lib_dir, "*sbs_utils*.sbslib")), reverse=True)
+    if libs:
+        sys.path.append(libs[0])
+
+
 def _load_amd_lint(missions, mission):
     """Import `amd_lint` - working tree first, else the mission's own sbslib."""
     _prefer_working_tree_sbs_utils(missions, mission)
@@ -130,9 +146,9 @@ def lint(folder, strict, no_cross, fmt, lsp):
     missions = zipapp_dir
 
     if lsp:
-        # The server lives in sbs_utils; make sure the (working-tree) copy is
-        # importable, then hand stdio over to it.
-        _prefer_working_tree_sbs_utils(missions, missions)
+        # The server lives in sbs_utils; make it importable (working tree, else a
+        # released sbslib from __lib__), then hand stdio over to it.
+        _ensure_sbs_utils_importable(missions)
         sys.path.insert(0, missions)
         try:
             from sbs_utils.procedural.amd_lsp import serve

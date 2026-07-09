@@ -11,9 +11,13 @@ displays what it reports.
 
 ## Setup
 
-1. **Install `sbs`** and make sure it's on your `PATH` (the extension runs
-   `sbs lint --lsp`). Check with `sbs version` in a terminal. If it isn't on
-   `PATH`, set `amd.server.command` to its full path (see [Settings](#settings)).
+1. **Point it at Cosmos — usually nothing to do.** The extension finds your
+   Artemis Cosmos install automatically by walking up from the open `.amd` file
+   (missions live inside the Cosmos tree), and runs the language server with that
+   install's **bundled Python** and **`sbs.pyz`**. **`sbs` does not need to be on
+   your PATH.** If your `.amd` files live outside a Cosmos install, set
+   `amd.cosmosPath` to the install folder — the one containing `PyRuntime/` and
+   `data/`.
 2. **Install the extension** — either:
    - open `editors/vscode/` in VS Code and press **F5** (Extension Development
      Host), or
@@ -22,9 +26,9 @@ displays what it reports.
 3. Open any `.amd` file. Syntax highlighting appears immediately; the other
    features come online once the server starts.
 
-> **Syntax highlighting works without `sbs`.** Diagnostics, navigation, and
-> formatting need the server, so if `sbs` isn't found you'll get colors but no
-> squiggles — fix `amd.server.command`.
+> **Highlighting works even before the server starts.** Diagnostics, navigation,
+> and formatting need the server — if it can't find Cosmos you'll get colors but no
+> squiggles; set `amd.cosmosPath` (see [Settings](#settings)).
 
 ---
 
@@ -89,8 +93,13 @@ fine. If the checker can't see a signal you emit dynamically, vouch for it with 
 
 | Setting | Default | What it does |
 |---|---|---|
-| `amd.server.command` | `sbs` | Program that launches the language server. Set to the full path to `sbs` / `sbs.bat` if it isn't on `PATH`. |
-| `amd.server.args` | `["lint", "--lsp"]` | Arguments to start the server on stdio. |
+| `amd.cosmosPath` | `""` (auto) | Your Artemis Cosmos install folder (the one with `PyRuntime/` and `data/`). Empty = auto-detect by walking up from the open file. |
+| `amd.server.command` | `""` | Advanced override for the launch command. Empty = use the detected Cosmos install (its Python + `sbs.pyz`), falling back to `sbs` on PATH. |
+| `amd.server.args` | `["lint", "--lsp"]` | Arguments that start the server on stdio. |
+
+**How the launch is chosen:** an explicit `amd.server.command` wins; otherwise the
+detected Cosmos install (`<cosmos>/PyRuntime/python <cosmos>/data/missions/sbs.pyz
+lint --lsp`); otherwise `sbs` on PATH.
 
 **Run the server directly** (bypassing `sbs`), e.g. for development:
 
@@ -106,9 +115,11 @@ fine. If the checker can't see a signal you emit dynamically, vouch for it with 
 ## Troubleshooting
 
 **Colors but no squiggles / no navigation.** The server isn't starting. Open
-**View → Output**, pick **"Artemis AMD"** from the dropdown, and read the log. Most
-often `sbs` isn't on `PATH` — set `amd.server.command` to its full path and reload
-the window (`Ctrl+Shift+P → Developer: Reload Window`).
+**View → Output**, pick **"Artemis AMD"** from the dropdown, and read the log — it
+prints which Cosmos install (and Python) it found, or why it couldn't. Most often
+the `.amd` file is outside a Cosmos install, so auto-detect fails — set
+`amd.cosmosPath` to the install folder (with `PyRuntime/` and `data/`); the server
+restarts automatically when you save the setting.
 
 **Nothing happens on a `.amd` file at all.** Confirm the file is recognized as AMD:
 the language indicator in the status bar (bottom-right) should say **AMD**. If not,

@@ -25,20 +25,22 @@ Neovim, Emacs, Sublime, JetBrains all point their LSP client at `sbs lint --lsp`
 
 ## Requirements
 
-The `sbs` tool must be on your `PATH` (or set `amd.server.command` to its full
-path). The server ships inside `sbs_utils` (`sbs_utils.procedural.amd_lsp`), so a
-current `sbs.pyz` / rereleased `sbs_utils` is all you need.
+An **Artemis Cosmos install** — that's it. The extension finds it automatically
+(walking up from the open `.amd` file, since missions live inside the Cosmos tree)
+and runs the server with the install's bundled Python and `sbs.pyz`. **`sbs` need
+not be on your PATH.** If your files live outside a Cosmos install, set
+`amd.cosmosPath` to the install folder.
 
 ## Settings
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `amd.server.command` | `sbs` | Program that starts the server |
-| `amd.server.args` | `["lint", "--lsp"]` | Args to start it on stdio |
+| `amd.cosmosPath` | `""` (auto) | Cosmos install folder (with `PyRuntime/` + `data/`); empty = auto-detect |
+| `amd.server.command` | `""` | Advanced override for the launch command; empty = use Cosmos, else `sbs` on PATH |
+| `amd.server.args` | `["lint", "--lsp"]` | Args to start the server on stdio |
 
-To bypass `sbs` and run the module directly, set `amd.server.command` to your
-Python and `amd.server.args` to `["-m", "sbs_utils.procedural.amd_lsp"]` (with
-`sbs_utils` importable).
+Launch order: explicit `amd.server.command` → detected Cosmos (`PyRuntime/python
+sbs.pyz lint --lsp`) → `sbs` on PATH. See [HELP.md](HELP.md) for details.
 
 ## Build / install (not prebuilt)
 
