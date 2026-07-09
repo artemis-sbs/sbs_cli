@@ -100,6 +100,8 @@ it automatically for AMD files, add to your VS Code `settings.json`:
 | `dangling-parent` | A `Parent:` points at a node that doesn't exist. |
 | `signal-no-route` | The file emits `signal X` but nothing handles it (`//signal/X`). |
 | `unfired-signal` | A quest `When: signal X` (or `Fail on signal:`) waits on a signal nothing emits. |
+| `unfired-signal` | A quest `When: signal X` waits on a signal nothing emits. |
+| `non-ascii` | Non-ASCII text (smart quotes, em-dashes, emoji) — the engine renders ASCII only, so it misrenders or crashes. Comments are exempt. |
 | `suspect-heading` | A `#` heading has brackets but no `(key)` — maybe an intended heading missing its key. |
 
 References resolve across **all of a mission's `.amd` files** and against MAST
