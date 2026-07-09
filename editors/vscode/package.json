@@ -20,12 +20,18 @@
         "command": "amd.showGraph",
         "title": "Show Story Graph",
         "category": "Artemis AMD"
+      },
+      {
+        "command": "amd.newFile",
+        "title": "New Content File",
+        "category": "Artemis AMD"
       }
     ],
     "menus": {
       "commandPalette": [
         { "command": "amd.showMap", "when": "editorLangId == amd" },
-        { "command": "amd.showGraph", "when": "editorLangId == amd" }
+        { "command": "amd.showGraph", "when": "editorLangId == amd" },
+        { "command": "amd.newFile" }
       ],
       "editor/title": [
         { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation" },

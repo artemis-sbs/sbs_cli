@@ -50,6 +50,13 @@ displays what it reports.
 | **Inlay hints** | a reference's target display name, ghosted inline | yes |
 | **Format document** | `Shift+Alt+F`, or on save (see below) | yes |
 
+### Starting from scratch
+
+Run **Artemis AMD: New Content File** (Command Palette) to scaffold a starter `.amd`
+with every section stubbed (Scenario, Lifeforms, Dialogue, Narrative, Goals, Regions,
+Landmarks) and one example of each. It opens the file plus the Map and Story Graph, so
+you can start editing visually right away.
+
 ### Inspector (edit a node as a form)
 
 Right-click a graph node or a map landmark and choose **Edit…** to open the
@@ -90,7 +97,8 @@ to it. **Drag from one node onto another** to add a choice link — it writes
 `- [target](key)` into the source node's body (undoable). **Right-click a node** to
 **Focus here** (see just the flow reachable from it), **Rename** it (the key changes
 across the whole mission — every reference follows), **Delete** it, or **Go to** it.
-**Right-click a link** to **Delete** it or **Rewire** it to a different node.
+**Right-click a link** to **Edit** its choice (label + guard/outcomes), **Delete**
+it, or **Rewire** it to a different node.
 
 **Double-click empty canvas** to create a node: pick a **type** (Dialogue scene /
 Quest step / Lifeform / Goal / Generic) and it's scaffolded into the right `##`

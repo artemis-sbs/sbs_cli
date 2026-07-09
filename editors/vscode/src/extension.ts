@@ -810,9 +810,25 @@ async function showGraph(): Promise<void> {
         }
       }
     } else if (msg?.type === 'edgeMenu') {
-      const pick = await vscode.window.showQuickPick(['Delete link', 'Rewire…'],
+      const items = msg.kind === 'choice' ? ['Edit choice…', 'Delete link', 'Rewire…'] : ['Delete link', 'Rewire…'];
+      const pick = await vscode.window.showQuickPick(items,
         { placeHolder: `${msg.from} → ${msg.to} (${msg.kind})` });
-      if (pick === 'Delete link') {
+      if (pick === 'Edit choice…') {
+        const c = await client!.sendRequest<{ label: string; target: string; trailer: string; range: LspRange } | null>(
+          'amd/choice', { textDocument: { uri: msg.uri }, line: msg.line });
+        if (!c) { vscode.window.showWarningMessage('Artemis AMD: that link is not an editable choice.'); return; }
+        const label = await vscode.window.showInputBox({ prompt: 'Choice label (button text)', value: c.label });
+        if (label === undefined) { return; }
+        const trailer = await vscode.window.showInputBox({
+          prompt: 'Guard / outcomes (raw text after the target)', value: c.trailer,
+          placeHolder: ' if credits >= 10 ; costs 10 credits, signal buy',
+        });
+        if (trailer === undefined) { return; }
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(vscode.Uri.parse(msg.uri), rng(c.range), `- [${label}](${c.target})${trailer}`);
+        await vscode.workspace.applyEdit(edit);
+        await refresh();
+      } else if (pick === 'Delete link') {
         const edit = new vscode.WorkspaceEdit();
         edit.delete(vscode.Uri.parse(msg.uri), new vscode.Range(msg.line, 0, msg.line + 1, 0));
         await vscode.workspace.applyEdit(edit);
@@ -971,11 +987,123 @@ async function showMap(): Promise<void> {
   });
 }
 
+const AMD_SCAFFOLD = `# [My Mission](my_mission)
+---
+Display: My Mission
+---
+A short description shown in the quest log.
+
+## [Scenario](scenario)
+---
+Mode: story
+---
+
+## [Lifeforms](lifeforms)
+
+### [Guide](guide)
+---
+Face: female
+Roles: advisor, guide
+Scene: guide_hail
+Color: #6cf
+---
+Your mission advisor - hail on the Ultra-Beam.
+
+## [Dialogue](dialogue)
+
+### [Guide](guide_hail)
+---
+Speaker: guide
+When: comms
+---
+% Hello, captain. What do you need?
+
+- [Tell me the plan](guide_plan)
+
+### [The Plan](guide_plan)
+---
+Speaker: guide
+---
+% Head to the first site and scan it.
+
+## [Narrative](narrative)
+
+### [The Arc](arc)
+---
+Scope: shared
+State: active
+---
+The main quest line.
+
+#### [First Step](step1)
+---
+Scope: shared
+State: secret
+When: reach 2, 0
+---
+Engage the jump drive and follow the heading.
+
+## [Goals](goals)
+
+### [Win](goal_win)
+---
+Scope: shared
+State: active
+When: signal mission_done
+Win: true
+---
+Complete the mission.
+
+## [Regions](regions)
+
+### [Home Region](home)
+---
+Center: 0, 0
+Radius: 8
+Skybox: sky-neb2-rvb
+Color: #86c
+---
+The starting area.
+
+## [Landmarks](landmarks)
+
+### [First Site](site1)
+---
+At: 2, 0
+Kind: derelict
+---
+The first objective, out at (2, 0).
+`;
+
+async function newContentFile(): Promise<void> {
+  const name = await vscode.window.showInputBox({
+    prompt: 'New AMD content file name', value: 'content.amd',
+    validateInput: (v) => v.trim().endsWith('.amd') ? null : 'File name must end in .amd',
+  });
+  if (!name) { return; }
+  const active = vscode.window.activeTextEditor?.document.uri;
+  const baseDir = active && active.scheme === 'file'
+    ? vscode.Uri.joinPath(active, '..')
+    : vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!baseDir) { vscode.window.showErrorMessage('Artemis AMD: open a folder first.'); return; }
+  const target = vscode.Uri.joinPath(baseDir, name.trim());
+  try {
+    await vscode.workspace.fs.stat(target);
+    const ok = await vscode.window.showWarningMessage(`${name} already exists. Overwrite?`, { modal: true }, 'Overwrite');
+    if (ok !== 'Overwrite') { return; }
+  } catch { /* doesn't exist - good */ }
+  await vscode.workspace.fs.writeFile(target, Buffer.from(AMD_SCAFFOLD, 'utf8'));
+  const doc = await vscode.workspace.openTextDocument(target);
+  await vscode.window.showTextDocument(doc);
+  showMap(); showGraph();
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('Artemis AMD');
 
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
 
   // Restart the server when the relevant settings change.
   context.subscriptions.push(
