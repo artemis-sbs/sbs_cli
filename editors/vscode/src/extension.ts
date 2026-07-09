@@ -432,12 +432,29 @@ interface GraphNode { key: string; display: string; section: string; uri: string
 interface GraphEdge { from: string; to: string; kind: string; uri: string; line: number; targetRange: LspRange; }
 interface MissionGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
 
-// Downstream-reachable set from `start` (following edges). Empty if start missing.
-function reachableFrom(graph: MissionGraph, start: string): Set<string> {
-  const adj = new Map<string, string[]>();
-  for (const e of graph.edges) { (adj.get(e.from) ?? adj.set(e.from, []).get(e.from)!).push(e.to); }
-  const seen = new Set<string>([start]), q = [start];
-  while (q.length) { const k = q.shift()!; for (const t of adj.get(k) ?? []) { if (!seen.has(t)) { seen.add(t); q.push(t); } } }
+type FocusDir = 'down' | 'up' | 'both';
+interface Focus { key: string; dir: FocusDir; hops: number; }
+
+// Nodes reachable from `start` within `hops` (Infinity = all), following edges
+// downstream, upstream, or both.
+function reachable(graph: MissionGraph, start: string, dir: FocusDir, hops: number): Set<string> {
+  const down = new Map<string, string[]>(), up = new Map<string, string[]>();
+  for (const e of graph.edges) {
+    (down.get(e.from) ?? down.set(e.from, []).get(e.from)!).push(e.to);
+    (up.get(e.to) ?? up.set(e.to, []).get(e.to)!).push(e.from);
+  }
+  const seen = new Set<string>([start]);
+  let frontier = [start], d = 0;
+  while (frontier.length && d < hops) {
+    const next: string[] = [];
+    for (const k of frontier) {
+      const neigh: string[] = [];
+      if (dir !== 'up') { neigh.push(...(down.get(k) ?? [])); }
+      if (dir !== 'down') { neigh.push(...(up.get(k) ?? [])); }
+      for (const t of neigh) { if (!seen.has(t)) { seen.add(t); next.push(t); } }
+    }
+    frontier = next; d++;
+  }
   return seen;
 }
 
@@ -451,17 +468,17 @@ const EDGE_COLOR: Record<string, string> = {
   choice: '#7aa2f7', scene: '#9ece6a', reveal: '#e0af68', parent: '#bb9af7',
 };
 
-function renderGraph(fullGraph: MissionGraph, nonce: string, focusKey?: string | null): string {
+function renderGraph(fullGraph: MissionGraph, nonce: string, focus?: Focus | null): string {
   // Focus: restrict to the flow reachable from a node, and lay out just that.
   let graph = fullGraph;
   let focusName = '';
-  if (focusKey && fullGraph.nodes.some((n) => n.key === focusKey)) {
-    const keep = reachableFrom(fullGraph, focusKey);
+  if (focus && fullGraph.nodes.some((n) => n.key === focus.key)) {
+    const keep = reachable(fullGraph, focus.key, focus.dir, focus.hops);
     graph = {
       nodes: fullGraph.nodes.filter((n) => keep.has(n.key)),
       edges: fullGraph.edges.filter((e) => keep.has(e.from) && keep.has(e.to)),
     };
-    focusName = fullGraph.nodes.find((n) => n.key === focusKey)?.display ?? focusKey;
+    focusName = fullGraph.nodes.find((n) => n.key === focus.key)?.display ?? focus.key;
   }
   const NW = 190, NH = 30, HGAP = 90, VGAP = 16;
   // depth = longest-path layer (cycle-safe: relax at most N times)
@@ -512,8 +529,17 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, focusKey?: string |
   }
   svg += `</svg>`;
 
+  const dirLabel = focus ? { down: '&#8595; down', up: '&#8593; up', both: '&#8597; both' }[focus.dir] : '';
+  const hopLabel = focus ? (focus.hops === Infinity ? 'all' : String(focus.hops)) : '';
+  const focusBar = focus
+    ? `<button id="showall" class="lbtn">&#8592; Show all</button>`
+      + `<button id="fdir" class="lbtn" title="Direction">${dirLabel}</button>`
+      + `<button id="hdec" class="lbtn" title="Fewer hops">&#8722;</button>`
+      + `<span class="leg">hops: ${hopLabel}</span>`
+      + `<button id="hinc" class="lbtn" title="More hops">+</button>`
+    : '';
   const sections = [...new Set(graph.nodes.map((n) => n.section))].sort();
-  const legend = (focusKey ? `<button id="showall" class="lbtn">&#8592; Show all</button>` : '')
+  const legend = focusBar
     + Object.entries(EDGE_COLOR)
       .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('')
     + sections.map((s) => `<label class="filt"><input type="checkbox" checked data-section="${esc(s)}"> ${esc(s)}</label>`).join('');
@@ -527,7 +553,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, focusKey?: string |
   .nd:hover rect { stroke-width: 2.5; }
   .filt { font-size: 11px; margin-right: 8px; color: var(--vscode-descriptionForeground); cursor: pointer; }
   .filt input { vertical-align: middle; margin-right: 2px; }`;
-  const title = focusKey
+  const title = focus
     ? `Focus: ${esc(focusName)} — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`
     : `Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`;
   const body = graph.nodes.length ? svg : '<p class="empty">No nodes found.</p>';
@@ -597,6 +623,17 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, focusKey?: string |
   }
   const showall = document.getElementById('showall');
   if (showall) { showall.addEventListener('click', () => vscode.postMessage({ type: 'focus', key: null })); }
+  const fdir = document.getElementById('fdir');
+  if (fdir) { fdir.addEventListener('click', () => vscode.postMessage({ type: 'focusDir' })); }
+  const hdec = document.getElementById('hdec');
+  if (hdec) { hdec.addEventListener('click', () => vscode.postMessage({ type: 'focusHops', delta: -1 })); }
+  const hinc = document.getElementById('hinc');
+  if (hinc) { hinc.addEventListener('click', () => vscode.postMessage({ type: 'focusHops', delta: 1 })); }
+  // Double-click empty canvas to create a new node.
+  scroll.addEventListener('dblclick', (e) => {
+    if (e.target && e.target.closest && (e.target.closest('.nd') || e.target.closest('.ehit'))) { return; }
+    vscode.postMessage({ type: 'addNode' });
+  });
   `;
   return webviewPage(title, legend, styles, body, nonce, extraScript);
 }
@@ -619,13 +656,13 @@ async function showGraph(): Promise<void> {
     'amdGraph', 'AMD Story Graph', vscode.ViewColumn.Beside, { enableScripts: true },
   );
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
-  let focusKey: string | null = null;
-  panel.webview.html = renderGraph(graph, nonce(), focusKey);
+  let focus: Focus | null = null;
+  panel.webview.html = renderGraph(graph, nonce(), focus);
 
   const refresh = async () => {
     try {
       const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
-      panel.webview.html = renderGraph(g, nonce(), focusKey);
+      panel.webview.html = renderGraph(g, nonce(), focus);
     } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
   };
 
@@ -642,7 +679,7 @@ async function showGraph(): Promise<void> {
       const pick = await vscode.window.showQuickPick(['Focus here', 'Go to', 'Rename…', 'Delete'],
         { placeHolder: `${msg.display} (${msg.key})` });
       if (pick === 'Focus here') {
-        focusKey = msg.key; await refresh();
+        focus = { key: msg.key, dir: 'down', hops: Infinity }; await refresh();
       } else if (pick === 'Go to') {
         openLocation(msg.uri, msg.line);
       } else if (pick === 'Rename…') {
@@ -689,7 +726,25 @@ async function showGraph(): Promise<void> {
         }
       }
     } else if (msg?.type === 'focus') {
-      focusKey = msg.key ?? null;
+      focus = msg.key ? { key: msg.key, dir: 'down', hops: Infinity } : null;
+      await refresh();
+    } else if (msg?.type === 'focusDir' && focus) {
+      focus.dir = focus.dir === 'down' ? 'up' : focus.dir === 'up' ? 'both' : 'down';
+      await refresh();
+    } else if (msg?.type === 'focusHops' && focus) {
+      focus.hops = msg.delta < 0
+        ? (focus.hops === Infinity ? 5 : Math.max(1, focus.hops - 1))
+        : (focus.hops === Infinity ? Infinity : (focus.hops >= 5 ? Infinity : focus.hops + 1));
+      await refresh();
+    } else if (msg?.type === 'addNode') {
+      const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+      const keys = new Set(g.nodes.map((n) => n.key));
+      let key = 'new_node', i = 2;
+      while (keys.has(key)) { key = `new_node_${i++}`; }
+      const d = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(vscode.Uri.parse(uri), new vscode.Position(d.lineCount, 0), `\n### [New Node](${key})\n% \n`);
+      await vscode.workspace.applyEdit(edit);
       await refresh();
     }
   });

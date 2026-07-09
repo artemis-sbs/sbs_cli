@@ -82,10 +82,14 @@ to it. **Drag from one node onto another** to add a choice link — it writes
 across the whole mission — every reference follows), **Delete** it, or **Go to** it.
 **Right-click a link** to **Delete** it or **Rewire** it to a different node.
 
+**Double-click empty canvas** to create a new node stub.
+
 **Focus mode** trims the overview to one flow: pick **Focus here** on a node and the
 graph re-lays-out only the nodes reachable from it — ideal for following a single
-conversation or quest chain. The **← Show all** button (top-left) returns to the
-whole mission. **Hover a node** to
+conversation or quest chain. While focused, the toolbar shows a **direction** toggle
+(**↓ down** = where it goes · **↑ up** = what leads here · **↕ both**) and a **hops**
+control (**− / +**, up to **all**) to widen or tighten the neighbourhood. **← Show
+all** returns to the whole mission. **Hover a node** to
 spotlight it and its direct links (everything else dims), and **filter by section**
 with the toolbar checkboxes (focus on just dialogue, or just quests). Great for spotting dead-end dialogue, unreachable quests, and the
 overall shape of a conversation. Same navigation as the map — fit-on-open, zoom, Fit,
