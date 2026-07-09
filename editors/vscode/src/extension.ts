@@ -403,6 +403,100 @@ function renderMap(map: MissionMap, nonce: string): string {
   return webviewPage(title, '', styles, body, nonce, extraScript);
 }
 
+// --- Inspector: edit a node's display / fields / body as a form ------------
+interface NodeField { label: string; value: string; }
+interface NodeDetail {
+  key: string; display: string; uri: string;
+  displayRange: LspRange | null; fields: NodeField[]; fenceRange: LspRange | null;
+  bodyText: string; bodyRange: LspRange;
+}
+
+let inspectorPanel: vscode.WebviewPanel | undefined;
+let inspectorUri = '';
+let inspectorDetail: NodeDetail | undefined;
+
+function rng(r: LspRange): vscode.Range {
+  return new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
+}
+
+function renderInspector(d: NodeDetail, nonce: string): string {
+  const rows = d.fields.map((f) =>
+    `<div class="frow"><input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span><input class="fval" value="${esc(f.value)}" placeholder="value"/></div>`).join('');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { margin: 0; padding: 12px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
+  h3 { margin: 0 0 10px; } h4 { margin: 14px 0 6px; color: var(--vscode-descriptionForeground); font-weight: 600; }
+  label.k { display: block; font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
+  input, textarea { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #8884); border-radius: 3px; padding: 4px 6px; font-family: inherit; }
+  textarea { font-family: var(--vscode-editor-font-family, monospace); }
+  .frow { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+  .frow .flabel { flex: 0 0 34%; } .frow .fval { flex: 1 1 auto; }
+  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; padding: 5px 12px; cursor: pointer; margin-top: 10px; }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+  .sec { color: var(--vscode-descriptionForeground); font-size: 11px; }
+  #addf { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); padding: 2px 8px; margin-top: 4px; }
+</style></head><body>
+<h3>${esc(d.display || d.key)} <span class="sec">(${esc(d.key)})</span></h3>
+<label class="k">Display</label><input id="display" value="${esc(d.display)}"/>
+<h4>Fields</h4>
+<div id="fields">${rows}</div>
+<button id="addf">+ add field</button>
+<h4>Body</h4>
+<textarea id="body" rows="14">${esc(d.bodyText)}</textarea>
+<div><button id="apply">Apply changes</button></div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  document.getElementById('addf').addEventListener('click', () => {
+    const div = document.createElement('div'); div.className = 'frow';
+    div.innerHTML = '<input class="flabel" placeholder="field"/><span>:</span><input class="fval" placeholder="value"/>';
+    document.getElementById('fields').appendChild(div);
+  });
+  document.getElementById('apply').addEventListener('click', () => {
+    const display = document.getElementById('display').value;
+    const fields = [...document.querySelectorAll('.frow')].map((r) => ({
+      label: r.querySelector('.flabel').value.trim(), value: r.querySelector('.fval').value.trim(),
+    })).filter((f) => f.label);
+    const body = document.getElementById('body').value;
+    vscode.postMessage({ type: 'applyNode', display, fields, body });
+  });
+</script></body></html>`;
+}
+
+async function showInspector(uri: string, key: string): Promise<void> {
+  if (!client) { return; }
+  let detail: NodeDetail | null;
+  try {
+    detail = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri }, key });
+  } catch (e) { output.appendLine(`Inspector failed: ${e}`); return; }
+  if (!detail) { vscode.window.showWarningMessage(`Artemis AMD: node '${key}' not found.`); return; }
+
+  inspectorUri = uri; inspectorDetail = detail;
+  if (!inspectorPanel) {
+    inspectorPanel = vscode.window.createWebviewPanel('amdInspector', 'AMD Inspector',
+      vscode.ViewColumn.Beside, { enableScripts: true });
+    inspectorPanel.onDidDispose(() => { inspectorPanel = undefined; });
+    inspectorPanel.webview.onDidReceiveMessage(async (msg) => {
+      if (msg?.type !== 'applyNode' || !inspectorDetail) { return; }
+      const d = inspectorDetail;
+      const edit = new vscode.WorkspaceEdit();
+      const u = vscode.Uri.parse(inspectorUri);
+      if (d.displayRange && msg.display !== d.display) { edit.replace(u, rng(d.displayRange), msg.display); }
+      const fieldText = (msg.fields as NodeField[]).map((f) => `${f.label}: ${f.value}`).join('\n');
+      if (d.fenceRange) { edit.replace(u, rng(d.fenceRange), fieldText); }
+      else if (fieldText) { edit.insert(u, new vscode.Position(d.bodyRange.start.line, 0), `---\n${fieldText}\n---\n`); }
+      let body = msg.body as string;
+      if (body && !body.endsWith('\n')) { body += '\n'; }
+      edit.replace(u, rng(d.bodyRange), body);
+      await vscode.workspace.applyEdit(edit);
+      await showInspector(inspectorUri, d.key);   // re-fetch fresh ranges
+    });
+  }
+  inspectorPanel.webview.html = renderInspector(detail,
+    String(Date.now()) + Math.random().toString(36).slice(2));
+  inspectorPanel.reveal(vscode.ViewColumn.Beside, true);
+}
+
 function wsEditFromChanges(changes: Record<string, { range: LspRange; newText: string }[]> | undefined): vscode.WorkspaceEdit {
   const edit = new vscode.WorkspaceEdit();
   for (const [u, edits] of Object.entries(changes || {})) {
@@ -676,9 +770,11 @@ async function showGraph(): Promise<void> {
       await vscode.workspace.applyEdit(edit);
       await refresh();
     } else if (msg?.type === 'nodeMenu') {
-      const pick = await vscode.window.showQuickPick(['Focus here', 'Go to', 'Rename…', 'Delete'],
+      const pick = await vscode.window.showQuickPick(['Edit…', 'Focus here', 'Go to', 'Rename…', 'Delete'],
         { placeHolder: `${msg.display} (${msg.key})` });
-      if (pick === 'Focus here') {
+      if (pick === 'Edit…') {
+        showInspector(uri, msg.key);
+      } else if (pick === 'Focus here') {
         focus = { key: msg.key, dir: 'down', hops: Infinity }; await refresh();
       } else if (pick === 'Go to') {
         openLocation(msg.uri, msg.line);
@@ -806,11 +902,13 @@ async function showMap(): Promise<void> {
       await vscode.workspace.applyEdit(edit);
       await refresh();
     } else if (msg?.type === 'lmMenu') {
-      const items = ['Go to', 'Rename…'];
+      const items = ['Edit…', 'Go to', 'Rename…'];
       if (msg.kindRange) { items.push('Change Kind…'); }
       items.push('Delete');
       const pick = await vscode.window.showQuickPick(items, { placeHolder: `${msg.display} (${msg.key})` });
-      if (pick === 'Go to') {
+      if (pick === 'Edit…') {
+        showInspector(uri, msg.key);
+      } else if (pick === 'Go to') {
         openLocation(msg.uri, msg.line);
       } else if (pick === 'Rename…') {
         const nn = await vscode.window.showInputBox({

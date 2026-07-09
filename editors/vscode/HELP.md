@@ -50,6 +50,16 @@ displays what it reports.
 | **Inlay hints** | a reference's target display name, ghosted inline | yes |
 | **Format document** | `Shift+Alt+F`, or on save (see below) | yes |
 
+### Inspector (edit a node as a form)
+
+Right-click a graph node or a map landmark and choose **Edit…** to open the
+**Inspector** — a form for that node's **Display** name, its **metadata fields**
+(`State`, `When`, `Speaker`, `Kind`, …, each a labelled input; **+ add field** for
+new ones), and its **Body** text (descriptions, dialogue `%` lines, choices) in a
+text area. Hit **Apply changes** and it rewrites just those parts of the `.amd`
+(undoable). It's the way to author content without editing AMD syntax by hand — the
+map and graph give you the structure and geography; the Inspector fills in the words.
+
 ### Mission map
 
 Run **Artemis AMD: Show Mission Map** (Command Palette, or the button in the editor
