@@ -429,7 +429,6 @@ const FIELD_ENUMS: Record<string, string[]> = {
   mode: ['story', 'sandbox', 'skirmish', 'war', 'campaign'],
   win: ['true', 'false'],
   lose: ['true', 'false'],
-  face: ['female', 'male'],
 };
 
 function renderInspector(d: NodeDetail, nonce: string): string {
@@ -439,8 +438,9 @@ function renderInspector(d: NodeDetail, nonce: string): string {
     const all = [...new Set([...opts, f.value].filter(Boolean))];
     return `<select class="fval">${all.map((o) => `<option${o === f.value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   };
-  const rows = d.fields.map((f) =>
-    `<div class="frow"><input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span>${valueControl(f)}</div>`).join('');
+  const rows = d.fields.map((f) => f.label.toLowerCase() === 'face'
+    ? `<div class="frow"><input class="flabel" value="${esc(f.label)}"/><span>:</span><input class="fval facefield" value="${esc(f.value)}" placeholder="face string or female/male"/><button type="button" class="facebtn">Face…</button></div>`
+    : `<div class="frow"><input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span>${valueControl(f)}</div>`).join('');
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
@@ -455,7 +455,8 @@ function renderInspector(d: NodeDetail, nonce: string): string {
   button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; padding: 5px 12px; cursor: pointer; margin-top: 10px; }
   button:hover { background: var(--vscode-button-hoverBackground); }
   .sec { color: var(--vscode-descriptionForeground); font-size: 11px; }
-  #addf { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); padding: 2px 8px; margin-top: 4px; }
+  #addf, .facebtn { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); padding: 2px 8px; }
+  .facebtn { flex: 0 0 auto; margin: 0; }
 </style></head><body>
 <h3>${esc(d.display || d.key)} <span class="sec">(${esc(d.key)})</span></h3>
 <label class="k">Display</label><input id="display" value="${esc(d.display)}"/>
@@ -480,6 +481,11 @@ function renderInspector(d: NodeDetail, nonce: string): string {
     const body = document.getElementById('body').value;
     vscode.postMessage({ type: 'applyNode', display, fields, body });
   });
+  const facebtn = document.querySelector('.facebtn');
+  if (facebtn) { facebtn.addEventListener('click', () => vscode.postMessage({ type: 'buildFace' })); }
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'setFace') { const el = document.querySelector('.facefield'); if (el) { el.value = e.data.value; } }
+  });
 </script></body></html>`;
 }
 
@@ -497,6 +503,23 @@ async function showInspector(uri: string, key: string): Promise<void> {
       vscode.ViewColumn.Beside, { enableScripts: true });
     inspectorPanel.onDidDispose(() => { inspectorPanel = undefined; });
     inspectorPanel.webview.onDidReceiveMessage(async (msg) => {
+      if (msg?.type === 'buildFace') {
+        const RACES: Record<string, string> = {
+          'Random Terran (female)': 'terran female', 'Random Terran (male)': 'terran male',
+          'Random Skaraan': 'skaraan', 'Random Torgoth': 'torgoth', 'Random Arvonian': 'arvonian',
+          'Random Kralien': 'kralien', 'Random Ximni': 'ximni',
+        };
+        const pick = await vscode.window.showQuickPick(
+          ['female (keyword)', 'male (keyword)', ...Object.keys(RACES)], { placeHolder: 'Face' });
+        if (!pick) { return; }
+        let value = pick.startsWith('female') ? 'female' : pick.startsWith('male') ? 'male' : '';
+        if (RACES[pick]) {
+          const r = await client!.sendRequest<{ face: string }>('amd/faceRandom', { race: RACES[pick] });
+          value = r.face;
+        }
+        inspectorPanel?.webview.postMessage({ type: 'setFace', value });
+        return;
+      }
       if (msg?.type !== 'applyNode' || !inspectorDetail) { return; }
       const d = inspectorDetail;
       const edit = new vscode.WorkspaceEdit();

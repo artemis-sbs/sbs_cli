@@ -63,8 +63,11 @@ Right-click a graph node or a map landmark and choose **Edit…** to open the
 **Inspector** — a form for that node's **Display** name, its **metadata fields**
 (`State`, `When`, `Speaker`, `Kind`, …, each a labelled input; **+ add field** for
 new ones), and its **Body** text (descriptions, dialogue `%` lines, choices) in a
-text area. Common fields (`State`, `Scope`, `Kind`, `Mode`, `Win`, `Face`) render as
-**dropdowns**. Hit **Apply changes** and it rewrites just those parts of the `.amd`
+text area. Common fields (`State`, `Scope`, `Kind`, `Mode`, `Win`) render as **dropdowns**. A
+lifeform's **`Face`** field gets a **Face…** button that fills in `female`/`male` or a
+random face per race (Terran / Skaraan / Torgoth / Arvonian / Kralien / Ximni), built
+from the engine's face maps. (Faces render only in the game, so there's no preview in
+the editor — see the note below.) Hit **Apply changes** and it rewrites just those parts of the `.amd`
 (undoable). It's the way to author content without editing AMD syntax by hand — the
 map and graph give you the structure and geography; the Inspector fills in the words.
 
