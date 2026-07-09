@@ -135,7 +135,7 @@ function startClient(): void {
 // --- Mission map preview ----------------------------------------------------
 interface LspRange { start: { line: number; character: number }; end: { line: number; character: number }; }
 interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; atRange: LspRange | null; }
-interface MapRegion { key: string; display: string; i: number; j: number; radius: number; color: string; uri: string; line: number; }
+interface MapRegion { key: string; display: string; i: number; j: number; radius: number; color: string; uri: string; line: number; centerRange: LspRange | null; radiusRange: LspRange | null; }
 interface MissionMap { landmarks: MapLandmark[]; regions: MapRegion[]; }
 
 function esc(s: string): string {
@@ -288,11 +288,19 @@ function renderMap(map: MissionMap, nonce: string): string {
   for (let j = minJ; j <= maxJ; j++) {
     svg += `<line x1="0" y1="${y(j)}" x2="${W}" y2="${y(j)}" class="grid"/>`;
   }
-  // regions (translucent discs)
+  // regions (translucent discs; editable ones get move + resize handles)
   for (const r of map.regions) {
     const col = /^#[0-9a-fA-F]{3,8}$/.test(r.color) ? r.color : '#88aaff';
-    svg += `<circle cx="${x(r.i)}" cy="${y(r.j)}" r="${r.radius * cell}" fill="${col}" fill-opacity="0.15" stroke="${col}" stroke-opacity="0.5"/>`;
-    svg += `<text x="${x(r.i)}" y="${y(r.j) - r.radius * cell + 14}" class="rlabel">${esc(r.display)}</text>`;
+    const cx = x(r.i), cy = y(r.j), rad = r.radius * cell;
+    const editable = r.centerRange && r.radiusRange;
+    const data = editable
+      ? ` data-uri="${esc(r.uri)}" data-i="${r.i}" data-j="${r.j}" data-radius="${r.radius}" data-centerrange='${JSON.stringify(r.centerRange)}' data-radiusrange='${JSON.stringify(r.radiusRange)}'`
+      : '';
+    svg += `<g class="rg${editable ? ' editable' : ''}"${data}>`
+      + `<circle class="disc" cx="${cx}" cy="${cy}" r="${rad}" fill="${col}" fill-opacity="0.15" stroke="${col}" stroke-opacity="0.5"/>`
+      + `<text x="${cx}" y="${cy - rad + 14}" class="rlabel">${esc(r.display)}</text>`
+      + (editable ? `<circle class="rmove" cx="${cx}" cy="${cy}" r="6"/><circle class="rhandle" cx="${cx + rad}" cy="${cy}" r="5"/>` : '')
+      + `</g>`;
   }
   // landmarks (clickable; draggable when we have the editable At: range)
   for (const l of map.landmarks) {
@@ -308,7 +316,11 @@ function renderMap(map: MissionMap, nonce: string): string {
   .grid { stroke: var(--vscode-editorIndentGuide-background, #8884); stroke-width: 1; }
   .dot { fill: var(--vscode-charts-orange, #e8a); stroke: var(--vscode-editor-background); stroke-width: 1.5; }
   .llabel { fill: var(--vscode-foreground); font-size: 11px; }
-  .rlabel { fill: var(--vscode-descriptionForeground, #aaa); font-size: 11px; text-anchor: middle; }
+  .rlabel { fill: var(--vscode-descriptionForeground, #aaa); font-size: 11px; text-anchor: middle; pointer-events: none; }
+  .disc { pointer-events: none; }
+  .rmove { fill: var(--vscode-charts-blue, #58f); stroke: var(--vscode-editor-background); stroke-width: 1.5; cursor: move; }
+  .rhandle { fill: var(--vscode-charts-blue, #58f); stroke: var(--vscode-editor-background); stroke-width: 1.5; cursor: ew-resize; }
+  .rmove:hover, .rhandle:hover { fill: var(--vscode-charts-yellow, #fd6); }
   .lm { cursor: pointer; }
   .lm.draggable { cursor: move; }
   .lm:hover .dot { fill: var(--vscode-charts-yellow, #fd6); }`;
@@ -335,6 +347,41 @@ function renderMap(map: MissionMap, nonce: string): string {
       if (ni !== i0 || nj !== j0) { vscode.postMessage({ type: 'setAt', uri: g.dataset.uri, range: JSON.parse(g.dataset.atrange), i: ni, j: nj }); }
     });
   }
+  // Regions: drag the centre handle to move, the edge handle to resize.
+  let rgActive = null, rgMode = null, rgx = 0, rgy = 0;
+  for (const g of scroll.querySelectorAll('.rg.editable')) {
+    g.querySelector('.rmove').addEventListener('mousedown', (e) => { e.stopPropagation(); rgActive = g; rgMode = 'move'; moved = false; rgx = e.clientX; rgy = e.clientY; });
+    g.querySelector('.rhandle').addEventListener('mousedown', (e) => { e.stopPropagation(); rgActive = g; rgMode = 'resize'; moved = false; rgx = e.clientX; rgy = e.clientY; });
+  }
+  window.addEventListener('mousemove', (e) => {
+    if (!rgActive) { return; }
+    moved = true;
+    const dx = (e.clientX - rgx) / zoom, dy = (e.clientY - rgy) / zoom;
+    if (rgMode === 'move') { rgActive.setAttribute('transform', 'translate(' + dx + ',' + dy + ')'); }
+    else {
+      const disc = rgActive.querySelector('.disc'), handle = rgActive.querySelector('.rhandle');
+      const nr = Math.max(GRID.cell, +rgActive.dataset.radius * GRID.cell + dx);
+      disc.setAttribute('r', nr); handle.setAttribute('cx', +disc.getAttribute('cx') + nr);
+    }
+  });
+  window.addEventListener('mouseup', (e) => {
+    if (!rgActive) { return; }
+    const g = rgActive, mode = rgMode; rgActive = null; rgMode = null;
+    g.removeAttribute('transform');
+    const dx = (e.clientX - rgx) / zoom, dy = (e.clientY - rgy) / zoom;
+    if (!moved) { return; }
+    if (mode === 'move') {
+      const i0 = +g.dataset.i, j0 = +g.dataset.j;
+      const ox = (i0 - GRID.minI) * GRID.cell + GRID.cell / 2, oy = (j0 - GRID.minJ) * GRID.cell + GRID.cell / 2;
+      const ni = Math.round((ox + dx - GRID.cell / 2) / GRID.cell) + GRID.minI, nj = Math.round((oy + dy - GRID.cell / 2) / GRID.cell) + GRID.minJ;
+      if (ni !== i0 || nj !== j0) { vscode.postMessage({ type: 'setRange', uri: g.dataset.uri, range: JSON.parse(g.dataset.centerrange), text: ni + ', ' + nj }); }
+    } else {
+      const baseR = +g.dataset.radius;
+      const nr = Math.max(1, Math.round((baseR * GRID.cell + dx) / GRID.cell));
+      if (nr !== baseR) { vscode.postMessage({ type: 'setRange', uri: g.dataset.uri, range: JSON.parse(g.dataset.radiusrange), text: String(nr) }); }
+      else { const disc = g.querySelector('.disc'), handle = g.querySelector('.rhandle'); disc.setAttribute('r', baseR * GRID.cell); handle.setAttribute('cx', +disc.getAttribute('cx') + baseR * GRID.cell); }
+    }
+  });
   // Double-click an empty cell to create a landmark there.
   scroll.addEventListener('dblclick', (e) => {
     if (!svg || (e.target && e.target.closest && e.target.closest('.lm'))) { return; }
@@ -614,6 +661,13 @@ async function showMap(): Promise<void> {
         `${msg.i}, ${msg.j}`);
       await vscode.workspace.applyEdit(edit);
       await refresh();   // re-render at the new position
+    } else if (msg?.type === 'setRange' && msg.range) {
+      const edit = new vscode.WorkspaceEdit();
+      const r = msg.range;
+      edit.replace(vscode.Uri.parse(msg.uri),
+        new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character), msg.text);
+      await vscode.workspace.applyEdit(edit);
+      await refresh();
     } else if (msg?.type === 'addLandmark') {
       const d = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
       const key = `landmark_${msg.i}_${msg.j}`.replace(/-/g, 'm');
