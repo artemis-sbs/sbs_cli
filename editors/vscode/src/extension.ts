@@ -141,10 +141,11 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Shared webview shell: a fixed toolbar (title, legend, zoom buttons) over a
-// bounded scroll area, so the SVG gets real horizontal/vertical scrollbars, plus
-// zoom via the buttons or Ctrl+wheel. `.lm`/`.nd` elements are click-to-jump.
-function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string): string {
+// Shared webview shell: a fixed toolbar (title, legend, fit/overview/zoom) over a
+// bounded scroll area (real scrollbars), with zoom (buttons + Ctrl+wheel), fit-to-
+// window, drag-to-pan, and a minimap overview. `.lm`/`.nd` are click-to-jump.
+// `extraScript` is appended for view-specific behaviour (e.g. graph highlighting).
+function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string, extraScript = ''): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
@@ -154,40 +155,110 @@ function webviewPage(title: string, legend: string, styles: string, body: string
   header h3 { margin: 0 0 4px; font-weight: 600; }
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .spacer { flex: 1 1 auto; }
-  .zoom button { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); border: none; border-radius: 4px; padding: 2px 9px; margin-left: 4px; cursor: pointer; font-size: 12px; }
-  .zoom button:hover { background: var(--vscode-button-secondaryHoverBackground, #555); }
-  .scroll { flex: 1 1 auto; overflow: auto; }
+  .btns button { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); border: none; border-radius: 4px; padding: 2px 9px; margin-left: 4px; cursor: pointer; font-size: 12px; }
+  .btns button:hover { background: var(--vscode-button-secondaryHoverBackground, #555); }
+  .scroll { flex: 1 1 auto; overflow: auto; cursor: grab; }
+  .scroll.grabbing { cursor: grabbing; }
   .scroll svg { display: block; }
   .leg { font-size: 11px; color: var(--vscode-descriptionForeground); margin-right: 10px; }
   .leg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
   .empty { color: var(--vscode-descriptionForeground); padding: 10px; }
+  #minimap { position: fixed; bottom: 14px; right: 14px; border: 1px solid var(--vscode-panel-border, #888); background: var(--vscode-editor-background); box-shadow: 0 2px 10px #0007; cursor: pointer; z-index: 5; }
+  #minimap svg { pointer-events: none; display: block; }
+  #minirect { position: absolute; border: 1.5px solid var(--vscode-focusBorder, #58f); background: rgba(90,140,255,0.15); pointer-events: none; }
+  #minimap.hidden { display: none; }
   ${styles}
 </style></head><body>
 <header>
   <h3>${title}</h3>
   <div class="row">${legend}<span class="spacer"></span>
-    <span class="zoom"><button id="zout" title="Zoom out">&#8722;</button><button id="zreset" title="Reset zoom">100%</button><button id="zin" title="Zoom in">+</button></span>
+    <span class="btns">
+      <button id="bfit" title="Fit to window">Fit</button>
+      <button id="bmini" title="Toggle overview">Overview</button>
+      <button id="zout" title="Zoom out">&#8722;</button><button id="zreset" title="Reset zoom">100%</button><button id="zin" title="Zoom in">+</button>
+    </span>
   </div>
 </header>
 <div class="scroll" id="scroll">${body}</div>
+<div id="minimap"><div id="minirect"></div></div>
 <script nonce="${nonce}">
-  const svg = document.querySelector('svg');
+  const vscode = acquireVsCodeApi();
+  const scroll = document.getElementById('scroll');
+  const svg = scroll.querySelector('svg');
   const baseW = svg ? parseFloat(svg.getAttribute('width')) : 0;
   const baseH = svg ? parseFloat(svg.getAttribute('height')) : 0;
   let zoom = 1;
-  const zreset = document.getElementById('zreset');
-  function apply() { if (svg) { svg.setAttribute('width', baseW * zoom); svg.setAttribute('height', baseH * zoom); } if (zreset) zreset.textContent = Math.round(zoom * 100) + '%'; }
-  function setZoom(z) { zoom = Math.max(0.2, Math.min(4, z)); apply(); }
-  const zin = document.getElementById('zin'), zout = document.getElementById('zout');
-  if (zin) zin.onclick = () => setZoom(zoom * 1.2);
-  if (zout) zout.onclick = () => setZoom(zoom / 1.2);
-  if (zreset) zreset.onclick = () => setZoom(1);
-  const scroll = document.getElementById('scroll');
-  scroll.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9)); } }, { passive: false });
-  const vscode = acquireVsCodeApi();
-  for (const g of document.querySelectorAll('.lm, .nd')) {
-    g.addEventListener('click', () => vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) }));
+
+  // --- minimap ---
+  const miniWrap = document.getElementById('minimap');
+  const miniRect = document.getElementById('minirect');
+  let mmW = 0, mmH = 0;
+  function buildMini() {
+    if (!svg) { miniWrap.classList.add('hidden'); return; }
+    const MAX = 190;
+    const s = Math.min(MAX / baseW, MAX / baseH, 1);
+    mmW = baseW * s; mmH = baseH * s;
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('width', mmW); clone.setAttribute('height', mmH);
+    miniWrap.insertBefore(clone, miniRect);
+    miniWrap.style.width = mmW + 'px'; miniWrap.style.height = mmH + 'px';
   }
+  function updateMini() {
+    if (!svg || miniWrap.classList.contains('hidden')) { return; }
+    const sw = baseW * zoom, sh = baseH * zoom;
+    miniRect.style.left = (scroll.scrollLeft / sw) * mmW + 'px';
+    miniRect.style.top = (scroll.scrollTop / sh) * mmH + 'px';
+    miniRect.style.width = Math.min(scroll.clientWidth / sw, 1) * mmW + 'px';
+    miniRect.style.height = Math.min(scroll.clientHeight / sh, 1) * mmH + 'px';
+  }
+
+  // --- zoom / fit ---
+  const zreset = document.getElementById('zreset');
+  function apply() { if (svg) { svg.setAttribute('width', baseW * zoom); svg.setAttribute('height', baseH * zoom); } if (zreset) zreset.textContent = Math.round(zoom * 100) + '%'; updateMini(); }
+  function setZoom(z, cx, cy) {
+    const sw = baseW * zoom, sh = baseH * zoom;
+    const fx = sw ? (scroll.scrollLeft + (cx ?? scroll.clientWidth / 2)) / sw : 0;
+    const fy = sh ? (scroll.scrollTop + (cy ?? scroll.clientHeight / 2)) / sh : 0;
+    zoom = Math.max(0.2, Math.min(4, z)); apply();
+    scroll.scrollLeft = fx * baseW * zoom - (cx ?? scroll.clientWidth / 2);
+    scroll.scrollTop = fy * baseH * zoom - (cy ?? scroll.clientHeight / 2);
+    updateMini();
+  }
+  document.getElementById('zin').onclick = () => setZoom(zoom * 1.2);
+  document.getElementById('zout').onclick = () => setZoom(zoom / 1.2);
+  zreset.onclick = () => setZoom(1);
+  document.getElementById('bfit').onclick = () => {
+    if (!svg) { return; }
+    setZoom(Math.min((scroll.clientWidth - 16) / baseW, (scroll.clientHeight - 16) / baseH));
+  };
+  document.getElementById('bmini').onclick = () => { miniWrap.classList.toggle('hidden'); updateMini(); };
+  scroll.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); const r = scroll.getBoundingClientRect(); setZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9), e.clientX - r.left, e.clientY - r.top); } }, { passive: false });
+  scroll.addEventListener('scroll', updateMini);
+  window.addEventListener('resize', updateMini);
+
+  // --- drag to pan ---
+  let panning = false, sx = 0, sy = 0, sl = 0, st = 0, moved = false;
+  scroll.addEventListener('mousedown', (e) => { if (e.button !== 0) { return; } panning = true; moved = false; sx = e.clientX; sy = e.clientY; sl = scroll.scrollLeft; st = scroll.scrollTop; scroll.classList.add('grabbing'); });
+  window.addEventListener('mousemove', (e) => { if (!panning) { return; } const dx = e.clientX - sx, dy = e.clientY - sy; if (Math.abs(dx) + Math.abs(dy) > 3) { moved = true; } scroll.scrollLeft = sl - dx; scroll.scrollTop = st - dy; });
+  window.addEventListener('mouseup', () => { panning = false; scroll.classList.remove('grabbing'); });
+
+  // --- minimap navigation ---
+  miniWrap.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    const r = miniWrap.getBoundingClientRect();
+    const sw = baseW * zoom, sh = baseH * zoom;
+    scroll.scrollLeft = ((e.clientX - r.left) / mmW) * sw - scroll.clientWidth / 2;
+    scroll.scrollTop = ((e.clientY - r.top) / mmH) * sh - scroll.clientHeight / 2;
+    updateMini();
+  });
+
+  // --- click to jump (suppressed after a drag) ---
+  for (const g of scroll.querySelectorAll('.lm, .nd')) {
+    g.addEventListener('click', () => { if (moved) { return; } vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) }); });
+  }
+
+  buildMini(); apply();
+  ${extraScript}
 </script></body></html>`;
 }
 
@@ -305,12 +376,12 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
     const a = pos.get(e.from), b = pos.get(e.to);
     if (!a || !b) { continue; }
     const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
-    svg += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${EDGE_COLOR[e.kind] || '#888'}" stroke-width="1.5" opacity="0.65"/>`;
+    svg += `<path class="edge" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${EDGE_COLOR[e.kind] || '#888'}" stroke-width="1.5" opacity="0.65"/>`;
   }
   for (const n of graph.nodes) {
     const p = pos.get(n.key)!;
     const h = sectionHue(n.section);
-    svg += `<g class="nd" data-uri="${esc(n.uri)}" data-line="${n.line}">`
+    svg += `<g class="nd" data-key="${esc(n.key)}" data-uri="${esc(n.uri)}" data-line="${n.line}">`
       + `<rect x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="6" fill="hsl(${h},45%,28%)" stroke="hsl(${h},60%,55%)"/>`
       + `<text x="${p.x + 8}" y="${p.y + 19}" class="nlabel">${esc(clip(n.display))}</text>`
       + `</g>`;
@@ -326,7 +397,20 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
   .nd:hover rect { stroke-width: 2.5; }`;
   const title = `Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`;
   const body = graph.nodes.length ? svg : '<p class="empty">No nodes found.</p>';
-  return webviewPage(title, legend, styles, body, nonce);
+  // Hovering a node dims all but it and its direct neighbours/links.
+  const extraScript = `
+  const edges = [...scroll.querySelectorAll('path.edge')];
+  const gnodes = [...scroll.querySelectorAll('.nd')];
+  function highlight(key) {
+    if (!key) { for (const p of edges) { p.style.opacity = ''; p.style.strokeWidth = ''; } for (const n of gnodes) { n.style.opacity = ''; } return; }
+    const adj = new Set([key]);
+    for (const p of edges) { if (p.dataset.from === key || p.dataset.to === key) { adj.add(p.dataset.from); adj.add(p.dataset.to); } }
+    for (const p of edges) { const on = p.dataset.from === key || p.dataset.to === key; p.style.opacity = on ? '0.95' : '0.06'; p.style.strokeWidth = on ? '2.5' : '1.5'; }
+    for (const n of gnodes) { n.style.opacity = adj.has(n.dataset.key) ? '1' : '0.2'; }
+  }
+  for (const n of gnodes) { n.addEventListener('mouseenter', () => highlight(n.dataset.key)); n.addEventListener('mouseleave', () => highlight(null)); }
+  `;
+  return webviewPage(title, legend, styles, body, nonce, extraScript);
 }
 
 async function showGraph(): Promise<void> {
