@@ -133,7 +133,8 @@ function startClient(): void {
 }
 
 // --- Mission map preview ----------------------------------------------------
-interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; }
+interface LspRange { start: { line: number; character: number }; end: { line: number; character: number }; }
+interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; atRange: LspRange | null; }
 interface MapRegion { key: string; display: string; i: number; j: number; radius: number; color: string; uri: string; line: number; }
 interface MissionMap { landmarks: MapLandmark[]; regions: MapRegion[]; }
 
@@ -227,10 +228,8 @@ function webviewPage(title: string, legend: string, styles: string, body: string
   document.getElementById('zin').onclick = () => setZoom(zoom * 1.2);
   document.getElementById('zout').onclick = () => setZoom(zoom / 1.2);
   zreset.onclick = () => setZoom(1);
-  document.getElementById('bfit').onclick = () => {
-    if (!svg) { return; }
-    setZoom(Math.min((scroll.clientWidth - 16) / baseW, (scroll.clientHeight - 16) / baseH));
-  };
+  function doFit() { if (svg) { setZoom(Math.min((scroll.clientWidth - 16) / baseW, (scroll.clientHeight - 16) / baseH)); } }
+  document.getElementById('bfit').onclick = doFit;
   document.getElementById('bmini').onclick = () => { miniWrap.classList.toggle('hidden'); updateMini(); };
   scroll.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); const r = scroll.getBoundingClientRect(); setZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9), e.clientX - r.left, e.clientY - r.top); } }, { passive: false });
   scroll.addEventListener('scroll', updateMini);
@@ -258,6 +257,8 @@ function webviewPage(title: string, legend: string, styles: string, body: string
   }
 
   buildMini(); apply();
+  // fit on open if the content is larger than the viewport
+  requestAnimationFrame(() => { if (svg && (baseW > scroll.clientWidth || baseH > scroll.clientHeight)) { doFit(); } });
   ${extraScript}
 </script></body></html>`;
 }
@@ -293,9 +294,10 @@ function renderMap(map: MissionMap, nonce: string): string {
     svg += `<circle cx="${x(r.i)}" cy="${y(r.j)}" r="${r.radius * cell}" fill="${col}" fill-opacity="0.15" stroke="${col}" stroke-opacity="0.5"/>`;
     svg += `<text x="${x(r.i)}" y="${y(r.j) - r.radius * cell + 14}" class="rlabel">${esc(r.display)}</text>`;
   }
-  // landmarks (clickable)
+  // landmarks (clickable; draggable when we have the editable At: range)
   for (const l of map.landmarks) {
-    svg += `<g class="lm" data-uri="${esc(l.uri)}" data-line="${l.line}">`
+    const drag = l.atRange ? ` data-i="${l.i}" data-j="${l.j}" data-atrange='${JSON.stringify(l.atRange)}'` : '';
+    svg += `<g class="lm${l.atRange ? ' draggable' : ''}" data-uri="${esc(l.uri)}" data-line="${l.line}"${drag}>`
       + `<circle cx="${x(l.i)}" cy="${y(l.j)}" r="6" class="dot"/>`
       + `<text x="${x(l.i) + 9}" y="${y(l.j) + 4}" class="llabel">${esc(l.display)} (${l.i},${l.j})</text>`
       + `</g>`;
@@ -308,10 +310,33 @@ function renderMap(map: MissionMap, nonce: string): string {
   .llabel { fill: var(--vscode-foreground); font-size: 11px; }
   .rlabel { fill: var(--vscode-descriptionForeground, #aaa); font-size: 11px; text-anchor: middle; }
   .lm { cursor: pointer; }
+  .lm.draggable { cursor: move; }
   .lm:hover .dot { fill: var(--vscode-charts-yellow, #fd6); }`;
   const title = `Mission Map — ${map.landmarks.length} landmark(s), ${map.regions.length} region(s)`;
   const body = pts.length ? svg : '<p class="empty">No landmarks or regions found in this mission.</p>';
-  return webviewPage(title, '', styles, body, nonce);
+  // Drag a landmark to a new cell -> rewrite its `At: i,j` (the edit is applied to
+  // the .amd and the map re-renders). Uses the shared `moved` flag so a plain click
+  // still jumps to the node.
+  const extraScript = `
+  const GRID = { minI: ${minI}, minJ: ${minJ}, cell: ${cell} };
+  for (const g of scroll.querySelectorAll('.lm.draggable')) {
+    let dragging = false, dx0 = 0, dy0 = 0;
+    g.addEventListener('mousedown', (e) => { e.stopPropagation(); dragging = true; moved = false; dx0 = e.clientX; dy0 = e.clientY; });
+    window.addEventListener('mousemove', (e) => { if (!dragging) { return; } const dx = (e.clientX - dx0) / zoom, dy = (e.clientY - dy0) / zoom; if (Math.abs(dx) + Math.abs(dy) > 2) { moved = true; } g.setAttribute('transform', 'translate(' + dx + ',' + dy + ')'); });
+    window.addEventListener('mouseup', (e) => {
+      if (!dragging) { return; }
+      dragging = false; g.removeAttribute('transform');
+      if (!moved) { return; }
+      const dx = (e.clientX - dx0) / zoom, dy = (e.clientY - dy0) / zoom;
+      const i0 = +g.dataset.i, j0 = +g.dataset.j;
+      const ox = (i0 - GRID.minI) * GRID.cell + GRID.cell / 2, oy = (j0 - GRID.minJ) * GRID.cell + GRID.cell / 2;
+      const ni = Math.round((ox + dx - GRID.cell / 2) / GRID.cell) + GRID.minI;
+      const nj = Math.round((oy + dy - GRID.cell / 2) / GRID.cell) + GRID.minJ;
+      if (ni !== i0 || nj !== j0) { vscode.postMessage({ type: 'setAt', uri: g.dataset.uri, range: JSON.parse(g.dataset.atrange), i: ni, j: nj }); }
+    });
+  }
+  `;
+  return webviewPage(title, '', styles, body, nonce, extraScript);
 }
 
 async function openLocation(uriStr: string, line: number): Promise<void> {
@@ -381,34 +406,45 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
   for (const n of graph.nodes) {
     const p = pos.get(n.key)!;
     const h = sectionHue(n.section);
-    svg += `<g class="nd" data-key="${esc(n.key)}" data-uri="${esc(n.uri)}" data-line="${n.line}">`
+    svg += `<g class="nd" data-key="${esc(n.key)}" data-section="${esc(n.section)}" data-uri="${esc(n.uri)}" data-line="${n.line}">`
       + `<rect x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="6" fill="hsl(${h},45%,28%)" stroke="hsl(${h},60%,55%)"/>`
       + `<text x="${p.x + 8}" y="${p.y + 19}" class="nlabel">${esc(clip(n.display))}</text>`
       + `</g>`;
   }
   svg += `</svg>`;
 
+  const sections = [...new Set(graph.nodes.map((n) => n.section))].sort();
   const legend = Object.entries(EDGE_COLOR)
-    .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('');
+    .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('')
+    + sections.map((s) => `<label class="filt"><input type="checkbox" checked data-section="${esc(s)}"> ${esc(s)}</label>`).join('');
 
   const styles = `
   .nlabel { fill: #fff; font-size: 11px; }
   .nd { cursor: pointer; }
-  .nd:hover rect { stroke-width: 2.5; }`;
+  .nd:hover rect { stroke-width: 2.5; }
+  .filt { font-size: 11px; margin-right: 8px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+  .filt input { vertical-align: middle; margin-right: 2px; }`;
   const title = `Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`;
   const body = graph.nodes.length ? svg : '<p class="empty">No nodes found.</p>';
-  // Hovering a node dims all but it and its direct neighbours/links.
+  // Hover a node -> spotlight it + direct neighbours; section checkboxes filter.
   const extraScript = `
   const edges = [...scroll.querySelectorAll('path.edge')];
   const gnodes = [...scroll.querySelectorAll('.nd')];
   function highlight(key) {
-    if (!key) { for (const p of edges) { p.style.opacity = ''; p.style.strokeWidth = ''; } for (const n of gnodes) { n.style.opacity = ''; } return; }
+    if (!key) { for (const p of edges) { p.style.opacity = ''; p.style.strokeWidth = ''; } for (const n of gnodes) { if (n.style.display !== 'none') n.style.opacity = ''; } return; }
     const adj = new Set([key]);
     for (const p of edges) { if (p.dataset.from === key || p.dataset.to === key) { adj.add(p.dataset.from); adj.add(p.dataset.to); } }
     for (const p of edges) { const on = p.dataset.from === key || p.dataset.to === key; p.style.opacity = on ? '0.95' : '0.06'; p.style.strokeWidth = on ? '2.5' : '1.5'; }
-    for (const n of gnodes) { n.style.opacity = adj.has(n.dataset.key) ? '1' : '0.2'; }
+    for (const n of gnodes) { if (n.style.display !== 'none') n.style.opacity = adj.has(n.dataset.key) ? '1' : '0.2'; }
   }
   for (const n of gnodes) { n.addEventListener('mouseenter', () => highlight(n.dataset.key)); n.addEventListener('mouseleave', () => highlight(null)); }
+  function applyFilter() {
+    const hidden = new Set([...document.querySelectorAll('.filt input:not(:checked)')].map((c) => c.dataset.section));
+    const hiddenKeys = new Set();
+    for (const n of gnodes) { const off = hidden.has(n.dataset.section); n.style.display = off ? 'none' : ''; if (off) hiddenKeys.add(n.dataset.key); }
+    for (const p of edges) { p.style.display = (hiddenKeys.has(p.dataset.from) || hiddenKeys.has(p.dataset.to)) ? 'none' : ''; }
+  }
+  for (const c of document.querySelectorAll('.filt input')) { c.addEventListener('change', applyFilter); }
   `;
   return webviewPage(title, legend, styles, body, nonce, extraScript);
 }
@@ -456,11 +492,27 @@ async function showMap(): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
     'amdMap', 'AMD Mission Map', vscode.ViewColumn.Beside, { enableScripts: true },
   );
-  const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
-  panel.webview.html = renderMap(map, nonce);
-  panel.webview.onDidReceiveMessage((msg) => {
+  const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
+  panel.webview.html = renderMap(map, nonce());
+
+  const refresh = async () => {
+    try {
+      const m = await client!.sendRequest<MissionMap>('amd/map', { textDocument: { uri } });
+      panel.webview.html = renderMap(m, nonce());
+    } catch (e) { output.appendLine(`Map refresh failed: ${e}`); }
+  };
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line);
+    } else if (msg?.type === 'setAt' && msg.range) {
+      const edit = new vscode.WorkspaceEdit();
+      const r = msg.range;
+      edit.replace(vscode.Uri.parse(msg.uri),
+        new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character),
+        `${msg.i}, ${msg.j}`);
+      await vscode.workspace.applyEdit(edit);
+      await refresh();   // re-render at the new position
     }
   });
 }

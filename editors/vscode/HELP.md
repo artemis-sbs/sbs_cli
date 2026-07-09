@@ -58,19 +58,25 @@ title bar on a `.amd` file) to see your mission's geography: every landmark
 disc in its `Color:`. **Click a landmark** to jump to its node. The map spans the
 whole mission's `.amd` files, so a landmark defined in any file shows up.
 
-Navigation (both this and the graph): **zoom** with the buttons or **Ctrl+scroll**,
-**Fit** to the window, **drag the canvas** to pan, and toggle the **Overview**
-minimap (bottom-right) — click it to jump anywhere.
+**Edit:** **drag a landmark** to a new cell to move it — its `At:` is rewritten in
+the `.amd` (undoable with Ctrl+Z, and the map re-renders). A plain click still jumps
+to the node.
+
+Navigation (both this and the graph): the view **opens fitted** to the window;
+**zoom** with the buttons or **Ctrl+scroll**, **Fit** again anytime, **drag the
+canvas** to pan, and toggle the **Overview** minimap (bottom-right) — click it to
+jump anywhere.
 
 ### Story graph
 
 Run **Artemis AMD: Show Story Graph** to see how your content connects: every node
 and the links between them — choices, `Scene:`, `Then: reveal`, and `Parent:` — laid
 out left-to-right, colored by kind, and grouped by section. **Click a node** to jump
-to it. **Hover a node** to spotlight it and its direct links (everything else dims).
-Great for spotting dead-end dialogue, unreachable quests, and the overall shape of a
-conversation. Same navigation as the map — zoom, Fit, drag-to-pan, and the Overview
-minimap.
+to it. **Hover a node** to spotlight it and its direct links (everything else dims),
+and **filter by section** with the toolbar checkboxes (focus on just dialogue, or
+just quests). Great for spotting dead-end dialogue, unreachable quests, and the
+overall shape of a conversation. Same navigation as the map — fit-on-open, zoom, Fit,
+drag-to-pan, and the Overview minimap.
 
 ### Format on save
 
