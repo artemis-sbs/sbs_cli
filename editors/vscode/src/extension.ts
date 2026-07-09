@@ -429,8 +429,17 @@ async function openLocation(uriStr: string, line: number): Promise<void> {
 
 // --- Story graph preview ----------------------------------------------------
 interface GraphNode { key: string; display: string; section: string; uri: string; line: number; addLine: number; }
-interface GraphEdge { from: string; to: string; kind: string; }
+interface GraphEdge { from: string; to: string; kind: string; uri: string; line: number; targetRange: LspRange; }
 interface MissionGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
+
+// Downstream-reachable set from `start` (following edges). Empty if start missing.
+function reachableFrom(graph: MissionGraph, start: string): Set<string> {
+  const adj = new Map<string, string[]>();
+  for (const e of graph.edges) { (adj.get(e.from) ?? adj.set(e.from, []).get(e.from)!).push(e.to); }
+  const seen = new Set<string>([start]), q = [start];
+  while (q.length) { const k = q.shift()!; for (const t of adj.get(k) ?? []) { if (!seen.has(t)) { seen.add(t); q.push(t); } } }
+  return seen;
+}
 
 function sectionHue(s: string): number {
   let h = 0;
@@ -442,7 +451,18 @@ const EDGE_COLOR: Record<string, string> = {
   choice: '#7aa2f7', scene: '#9ece6a', reveal: '#e0af68', parent: '#bb9af7',
 };
 
-function renderGraph(graph: MissionGraph, nonce: string): string {
+function renderGraph(fullGraph: MissionGraph, nonce: string, focusKey?: string | null): string {
+  // Focus: restrict to the flow reachable from a node, and lay out just that.
+  let graph = fullGraph;
+  let focusName = '';
+  if (focusKey && fullGraph.nodes.some((n) => n.key === focusKey)) {
+    const keep = reachableFrom(fullGraph, focusKey);
+    graph = {
+      nodes: fullGraph.nodes.filter((n) => keep.has(n.key)),
+      edges: fullGraph.edges.filter((e) => keep.has(e.from) && keep.has(e.to)),
+    };
+    focusName = fullGraph.nodes.find((n) => n.key === focusKey)?.display ?? focusKey;
+  }
   const NW = 190, NH = 30, HGAP = 90, VGAP = 16;
   // depth = longest-path layer (cycle-safe: relax at most N times)
   const depth = new Map<string, number>(graph.nodes.map((n) => [n.key, 0]));
@@ -477,7 +497,10 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
     const a = pos.get(e.from), b = pos.get(e.to);
     if (!a || !b) { continue; }
     const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
-    svg += `<path class="edge" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${EDGE_COLOR[e.kind] || '#888'}" stroke-width="1.5" opacity="0.65"/>`;
+    const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+    svg += `<path class="edge" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${d}" fill="none" stroke="${EDGE_COLOR[e.kind] || '#888'}" stroke-width="1.5" opacity="0.65"/>`;
+    // a wider transparent hit path so the thin edge is right-clickable
+    svg += `<path class="ehit" data-uri="${esc(e.uri)}" data-line="${e.line}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" data-kind="${e.kind}" data-targetrange='${JSON.stringify(e.targetRange)}' d="${d}" fill="none" stroke="transparent" stroke-width="12" pointer-events="stroke"/>`;
   }
   for (const n of graph.nodes) {
     const p = pos.get(n.key)!;
@@ -490,17 +513,23 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
   svg += `</svg>`;
 
   const sections = [...new Set(graph.nodes.map((n) => n.section))].sort();
-  const legend = Object.entries(EDGE_COLOR)
-    .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('')
+  const legend = (focusKey ? `<button id="showall" class="lbtn">&#8592; Show all</button>` : '')
+    + Object.entries(EDGE_COLOR)
+      .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('')
     + sections.map((s) => `<label class="filt"><input type="checkbox" checked data-section="${esc(s)}"> ${esc(s)}</label>`).join('');
 
   const styles = `
+  .lbtn { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); border: none; border-radius: 4px; padding: 2px 9px; margin-right: 8px; cursor: pointer; font-size: 11px; }
+  .lbtn:hover { background: var(--vscode-button-secondaryHoverBackground, #555); }
+  .ehit { cursor: context-menu; }
   .nlabel { fill: #fff; font-size: 11px; }
   .nd { cursor: pointer; }
   .nd:hover rect { stroke-width: 2.5; }
   .filt { font-size: 11px; margin-right: 8px; color: var(--vscode-descriptionForeground); cursor: pointer; }
   .filt input { vertical-align: middle; margin-right: 2px; }`;
-  const title = `Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`;
+  const title = focusKey
+    ? `Focus: ${esc(focusName)} — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`
+    : `Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`;
   const body = graph.nodes.length ? svg : '<p class="empty">No nodes found.</p>';
   // Hover a node -> spotlight it + direct neighbours; section checkboxes filter.
   const extraScript = `
@@ -552,13 +581,22 @@ function renderGraph(graph: MissionGraph, nonce: string): string {
     }
   });
 
-  // Right-click a node for Rename / Delete / Go to.
+  // Right-click a node for Focus / Rename / Delete / Go to.
   for (const n of gnodes) {
     n.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       vscode.postMessage({ type: 'nodeMenu', key: n.dataset.key, display: n.dataset.display, uri: n.dataset.uri, line: parseInt(n.dataset.line, 10), addLine: parseInt(n.dataset.addline, 10) });
     });
   }
+  // Right-click a link (its hit path) to delete or rewire it.
+  for (const h of scroll.querySelectorAll('path.ehit')) {
+    h.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      vscode.postMessage({ type: 'edgeMenu', uri: h.dataset.uri, line: parseInt(h.dataset.line, 10), from: h.dataset.from, to: h.dataset.to, kind: h.dataset.kind, targetRange: JSON.parse(h.dataset.targetrange) });
+    });
+  }
+  const showall = document.getElementById('showall');
+  if (showall) { showall.addEventListener('click', () => vscode.postMessage({ type: 'focus', key: null })); }
   `;
   return webviewPage(title, legend, styles, body, nonce, extraScript);
 }
@@ -581,12 +619,13 @@ async function showGraph(): Promise<void> {
     'amdGraph', 'AMD Story Graph', vscode.ViewColumn.Beside, { enableScripts: true },
   );
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
-  panel.webview.html = renderGraph(graph, nonce());
+  let focusKey: string | null = null;
+  panel.webview.html = renderGraph(graph, nonce(), focusKey);
 
   const refresh = async () => {
     try {
       const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
-      panel.webview.html = renderGraph(g, nonce());
+      panel.webview.html = renderGraph(g, nonce(), focusKey);
     } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
   };
 
@@ -600,9 +639,11 @@ async function showGraph(): Promise<void> {
       await vscode.workspace.applyEdit(edit);
       await refresh();
     } else if (msg?.type === 'nodeMenu') {
-      const pick = await vscode.window.showQuickPick(['Go to', 'Rename…', 'Delete'],
+      const pick = await vscode.window.showQuickPick(['Focus here', 'Go to', 'Rename…', 'Delete'],
         { placeHolder: `${msg.display} (${msg.key})` });
-      if (pick === 'Go to') {
+      if (pick === 'Focus here') {
+        focusKey = msg.key; await refresh();
+      } else if (pick === 'Go to') {
         openLocation(msg.uri, msg.line);
       } else if (pick === 'Rename…') {
         const nn = await vscode.window.showInputBox({
@@ -626,6 +667,30 @@ async function showGraph(): Promise<void> {
           await refresh();
         }
       }
+    } else if (msg?.type === 'edgeMenu') {
+      const pick = await vscode.window.showQuickPick(['Delete link', 'Rewire…'],
+        { placeHolder: `${msg.from} → ${msg.to} (${msg.kind})` });
+      if (pick === 'Delete link') {
+        const edit = new vscode.WorkspaceEdit();
+        edit.delete(vscode.Uri.parse(msg.uri), new vscode.Range(msg.line, 0, msg.line + 1, 0));
+        await vscode.workspace.applyEdit(edit);
+        await refresh();
+      } else if (pick === 'Rewire…') {
+        const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+        const items = g.nodes.filter((n) => n.key !== msg.from).map((n) => ({ label: n.key, description: n.display }));
+        const target = await vscode.window.showQuickPick(items, { placeHolder: `Rewire ${msg.from}'s link to…` });
+        if (target) {
+          const r = msg.targetRange;
+          const edit = new vscode.WorkspaceEdit();
+          edit.replace(vscode.Uri.parse(msg.uri),
+            new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character), target.label);
+          await vscode.workspace.applyEdit(edit);
+          await refresh();
+        }
+      }
+    } else if (msg?.type === 'focus') {
+      focusKey = msg.key ?? null;
+      await refresh();
     }
   });
 }

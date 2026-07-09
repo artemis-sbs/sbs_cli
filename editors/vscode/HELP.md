@@ -78,8 +78,14 @@ and the links between them — choices, `Scene:`, `Then: reveal`, and `Parent:` 
 out left-to-right, colored by kind, and grouped by section. **Click a node** to jump
 to it. **Drag from one node onto another** to add a choice link — it writes
 `- [target](key)` into the source node's body (undoable). **Right-click a node** to
-**Rename** it (the key changes across the whole mission — every reference follows),
-**Delete** it, or **Go to** it. **Hover a node** to
+**Focus here** (see just the flow reachable from it), **Rename** it (the key changes
+across the whole mission — every reference follows), **Delete** it, or **Go to** it.
+**Right-click a link** to **Delete** it or **Rewire** it to a different node.
+
+**Focus mode** trims the overview to one flow: pick **Focus here** on a node and the
+graph re-lays-out only the nodes reachable from it — ideal for following a single
+conversation or quest chain. The **← Show all** button (top-left) returns to the
+whole mission. **Hover a node** to
 spotlight it and its direct links (everything else dims), and **filter by section**
 with the toolbar checkboxes (focus on just dialogue, or just quests). Great for spotting dead-end dialogue, unreachable quests, and the
 overall shape of a conversation. Same navigation as the map — fit-on-open, zoom, Fit,
