@@ -562,6 +562,15 @@ const EDGE_COLOR: Record<string, string> = {
   choice: '#7aa2f7', scene: '#9ece6a', reveal: '#e0af68', parent: '#bb9af7',
 };
 
+// Typed node templates: scaffolded into the right `##` section with sensible fields.
+const NODE_TEMPLATES: Record<string, { section: string | null; sectionDisplay: string; keyBase: string; body: (k: string) => string }> = {
+  'Dialogue scene': { section: 'dialogue', sectionDisplay: 'Dialogue', keyBase: 'scene', body: (k) => `\n### [New Scene](${k})\n---\nSpeaker: \nWhen: comms\n---\n% \n` },
+  'Quest step': { section: 'narrative', sectionDisplay: 'Narrative', keyBase: 'quest', body: (k) => `\n### [New Quest](${k})\n---\nScope: shared\nState: secret\nWhen: \nThen: reveal \n---\nDescription.\n` },
+  'Lifeform (cast)': { section: 'lifeforms', sectionDisplay: 'Lifeforms', keyBase: 'character', body: (k) => `\n### [New Character](${k})\n---\nFace: female\nRoles: advisor\nScene: \nColor: #6cf\n---\nDescription.\n` },
+  'Goal': { section: 'goals', sectionDisplay: 'Goals', keyBase: 'goal', body: (k) => `\n### [New Goal](${k})\n---\nScope: shared\nState: active\nWin: true\nWhen: signal \n---\nDescription.\n` },
+  'Generic node': { section: null, sectionDisplay: '', keyBase: 'new_node', body: (k) => `\n### [New Node](${k})\n` },
+};
+
 function renderGraph(fullGraph: MissionGraph, nonce: string, focus?: Focus | null): string {
   // Focus: restrict to the flow reachable from a node, and lay out just that.
   let graph = fullGraph;
@@ -833,15 +842,30 @@ async function showGraph(): Promise<void> {
         : (focus.hops === Infinity ? Infinity : (focus.hops >= 5 ? Infinity : focus.hops + 1));
       await refresh();
     } else if (msg?.type === 'addNode') {
+      const typeName = await vscode.window.showQuickPick(Object.keys(NODE_TEMPLATES),
+        { placeHolder: 'New node type' });
+      if (!typeName) { return; }
+      const t = NODE_TEMPLATES[typeName];
       const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
       const keys = new Set(g.nodes.map((n) => n.key));
-      let key = 'new_node', i = 2;
-      while (keys.has(key)) { key = `new_node_${i++}`; }
-      const d = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+      let key = t.keyBase, i = 2;
+      while (keys.has(key)) { key = `${t.keyBase}_${i++}`; }
+      let insertLine: number, needHeader = false;
+      if (t.section) {
+        const si = await client!.sendRequest<{ line: number; exists: boolean }>(
+          'amd/sectionInsert', { textDocument: { uri }, section: t.section });
+        insertLine = si.line; needHeader = !si.exists;
+      } else {
+        const d = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+        insertLine = d.lineCount;
+      }
+      let text = t.body(key);
+      if (needHeader) { text = `\n## [${t.sectionDisplay}](${t.section})${text}`; }
       const edit = new vscode.WorkspaceEdit();
-      edit.insert(vscode.Uri.parse(uri), new vscode.Position(d.lineCount, 0), `\n### [New Node](${key})\n% \n`);
+      edit.insert(vscode.Uri.parse(uri), new vscode.Position(insertLine, 0), text);
       await vscode.workspace.applyEdit(edit);
       await refresh();
+      showInspector(uri, key);   // open the inspector on the new node to fill it in
     }
   });
 }

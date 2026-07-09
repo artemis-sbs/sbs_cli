@@ -92,7 +92,10 @@ to it. **Drag from one node onto another** to add a choice link — it writes
 across the whole mission — every reference follows), **Delete** it, or **Go to** it.
 **Right-click a link** to **Delete** it or **Rewire** it to a different node.
 
-**Double-click empty canvas** to create a new node stub.
+**Double-click empty canvas** to create a node: pick a **type** (Dialogue scene /
+Quest step / Lifeform / Goal / Generic) and it's scaffolded into the right `##`
+section with sensible fields (creating the section if needed), then the **Inspector**
+opens so you can fill it in.
 
 **Focus mode** trims the overview to one flow: pick **Focus here** on a node and the
 graph re-lays-out only the nodes reachable from it — ideal for following a single
