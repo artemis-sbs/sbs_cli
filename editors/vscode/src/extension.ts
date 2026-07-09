@@ -489,6 +489,85 @@ function renderInspector(d: NodeDetail, nonce: string): string {
 </script></body></html>`;
 }
 
+// --- Face builder (per-feature; blind - faces render only in the engine) ----
+interface FaceMeta { races: string[]; features: Record<string, { label: string; max: number; optional?: boolean }[]>; }
+let faceBuilderPanel: vscode.WebviewPanel | undefined;
+
+function renderFaceBuilder(meta: FaceMeta, nonce: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { margin: 0; padding: 12px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
+  h3 { margin: 0 0 8px; } label.k { display:block; font-size:11px; color: var(--vscode-descriptionForeground); margin: 10px 0 2px; }
+  select, input[readonly] { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #8884); border-radius: 3px; padding: 4px 6px; }
+  #out { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family, monospace); }
+  .srow { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .srow label { flex: 0 0 90px; font-size: 12px; }
+  .srow input[type=range] { flex: 1 1 auto; }
+  .srow .fval { flex: 0 0 24px; text-align: right; color: var(--vscode-descriptionForeground); }
+  .note { color: var(--vscode-descriptionForeground); font-size: 11px; margin: 6px 0; }
+  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; margin-top: 10px; }
+</style></head><body>
+<h3>Face Builder</h3>
+<label class="k">Race</label>
+<select id="race">${meta.races.map((r) => `<option>${esc(r)}</option>`).join('')}</select>
+<div id="sliders"></div>
+<label class="k">Face string</label><input id="out" readonly/>
+<p class="note">No live preview - faces render only in the game. Use the in-engine avatar editor to see it.</p>
+<button id="use">Use this face</button>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const META = ${JSON.stringify(meta.features)};
+  const raceSel = document.getElementById('race'), sliders = document.getElementById('sliders'), out = document.getElementById('out');
+  function renderSliders() {
+    const feats = META[raceSel.value] || [];
+    sliders.innerHTML = feats.map((f, i) => '<div class="srow"><label>' + f.label + '</label>' +
+      (f.optional ? '<input type="checkbox" class="fen" data-i="' + i + '" checked>' : '<span style="width:13px"></span>') +
+      '<input type="range" class="fsl" data-i="' + i + '" min="0" max="' + f.max + '" value="0"><span class="fval" data-i="' + i + '">0</span></div>').join('');
+    sliders.querySelectorAll('.fsl').forEach((s) => s.oninput = () => { sliders.querySelector('.fval[data-i="' + s.dataset.i + '"]').textContent = s.value; build(); });
+    sliders.querySelectorAll('.fen').forEach((c) => c.onchange = build);
+    build();
+  }
+  function build() {
+    const feats = META[raceSel.value] || [];
+    const values = [], enables = [];
+    feats.forEach((f, i) => {
+      values.push(parseInt(sliders.querySelector('.fsl[data-i="' + i + '"]').value, 10));
+      const c = sliders.querySelector('.fen[data-i="' + i + '"]');
+      enables.push(c ? c.checked : true);
+    });
+    vscode.postMessage({ type: 'faceBuild', race: raceSel.value, values, enables });
+  }
+  raceSel.onchange = renderSliders;
+  document.getElementById('use').onclick = () => vscode.postMessage({ type: 'useFace', value: out.value });
+  window.addEventListener('message', (e) => { if (e.data && e.data.type === 'built') { out.value = e.data.value; } });
+  renderSliders();
+</script></body></html>`;
+}
+
+async function showFaceBuilder(): Promise<void> {
+  if (!client) { return; }
+  let meta: FaceMeta;
+  try { meta = await client.sendRequest<FaceMeta>('amd/faceMeta', {}); }
+  catch (e) { output.appendLine(`Face meta failed: ${e}`); return; }
+  if (!meta.races.length) { vscode.window.showWarningMessage('Artemis AMD: face builder unavailable.'); return; }
+  if (!faceBuilderPanel) {
+    faceBuilderPanel = vscode.window.createWebviewPanel('amdFace', 'AMD Face Builder',
+      vscode.ViewColumn.Beside, { enableScripts: true });
+    faceBuilderPanel.onDidDispose(() => { faceBuilderPanel = undefined; });
+    faceBuilderPanel.webview.onDidReceiveMessage(async (m) => {
+      if (m?.type === 'faceBuild') {
+        const r = await client!.sendRequest<{ face: string }>('amd/faceBuild', { race: m.race, values: m.values, enables: m.enables });
+        faceBuilderPanel?.webview.postMessage({ type: 'built', value: r.face });
+      } else if (m?.type === 'useFace') {
+        inspectorPanel?.webview.postMessage({ type: 'setFace', value: m.value });
+      }
+    });
+  }
+  faceBuilderPanel.webview.html = renderFaceBuilder(meta, String(Date.now()) + Math.random().toString(36).slice(2));
+  faceBuilderPanel.reveal(vscode.ViewColumn.Beside, true);
+}
+
 async function showInspector(uri: string, key: string): Promise<void> {
   if (!client) { return; }
   let detail: NodeDetail | null;
@@ -510,8 +589,9 @@ async function showInspector(uri: string, key: string): Promise<void> {
           'Random Kralien': 'kralien', 'Random Ximni': 'ximni',
         };
         const pick = await vscode.window.showQuickPick(
-          ['female (keyword)', 'male (keyword)', ...Object.keys(RACES)], { placeHolder: 'Face' });
+          ['Build custom…', 'female (keyword)', 'male (keyword)', ...Object.keys(RACES)], { placeHolder: 'Face' });
         if (!pick) { return; }
+        if (pick === 'Build custom…') { showFaceBuilder(); return; }
         let value = pick.startsWith('female') ? 'female' : pick.startsWith('male') ? 'male' : '';
         if (RACES[pick]) {
           const r = await client!.sendRequest<{ face: string }>('amd/faceRandom', { race: RACES[pick] });
