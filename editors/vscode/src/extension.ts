@@ -1167,8 +1167,18 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     if (!a || !b) { continue; }
     let d: string;
     if (flowLR) {
-      const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
-      d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+      // Orthogonal: out the source's right, a vertical jog, into the target's
+      // left. The jog is at least a stub right of the source so a backward
+      // (cross-lane) link doesn't cut back through the source node.
+      const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2;
+      if (Math.abs(y1 - y2) < 1) {
+        d = `M${x1},${y1} H${x2}`;
+      } else {
+        const mx = Math.max((x1 + x2) / 2, x1 + 24);
+        const dir = y2 > y1 ? 1 : -1;
+        const r = Math.min(8, Math.abs(y2 - y1) / 2, Math.abs(mx - x1), Math.abs(x2 - mx));
+        d = `M${x1},${y1} H${mx - r} Q${mx},${y1} ${mx},${y1 + dir * r} V${y2 - dir * r} Q${mx},${y2} ${mx + r},${y2} H${x2}`;
+      }
     } else {
       const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y, my = (y1 + y2) / 2;
       d = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
