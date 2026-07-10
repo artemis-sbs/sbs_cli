@@ -11,7 +11,7 @@
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
-      "panel": [
+      "activitybar": [
         { "id": "amdPanel", "title": "AMD Inspector", "icon": "media/amd-icon.svg" }
       ]
     },

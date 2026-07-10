@@ -59,9 +59,10 @@ you can start editing visually right away.
 
 ### Inspector (edit a node as a form)
 
-The Inspector comes two ways. There's a **docked Inspector** in the panel area
-(next to Problems/Output — open it from **View → Open View… → AMD Inspector**, or
-the AMD icon on the panel) that **follows your cursor**: put the caret in any node
+The Inspector comes two ways. There's a **docked Inspector** in its own **AMD**
+container on the Activity Bar (the left icon strip) — click the AMD icon to open it,
+or drag it to the right secondary sidebar if you prefer it there. It **follows your
+cursor**: put the caret in any node
 in an `.amd` file and its form appears, ready to edit. And there's the **movable
 panel** — right-click a graph node or a map landmark and choose **Edit…** — which
 opens the same form as its own editor tab. Both edit live and stay in sync with each
