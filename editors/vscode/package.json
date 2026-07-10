@@ -24,12 +24,14 @@
       {
         "command": "amd.showMap",
         "title": "Show Mission Map",
-        "category": "Artemis AMD"
+        "category": "Artemis AMD",
+        "icon": "$(map)"
       },
       {
         "command": "amd.showGraph",
         "title": "Show Story Graph",
-        "category": "Artemis AMD"
+        "category": "Artemis AMD",
+        "icon": "$(type-hierarchy)"
       },
       {
         "command": "amd.newFile",
