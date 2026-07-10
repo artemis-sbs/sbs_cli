@@ -1,8 +1,9 @@
 name: Create Archive
-on: 
+on:
   push:
     tags:
       - "*"
+      - "!amd-vscode-v*"   # the VS Code extension has its own release workflow
 jobs:
   build:
     runs-on: windows-latest
