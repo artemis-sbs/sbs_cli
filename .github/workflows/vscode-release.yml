@@ -41,6 +41,7 @@ jobs:
           artifacts: "editors/vscode/*.vsix"
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true
+          makeLatest: false   # never become the repo's "latest" release — `sbs update` reads that for sbs.pyz
           name: "Artemis AMD (VS Code) ${{ github.ref_name }}"
           generateReleaseNotes: true
           body: |
