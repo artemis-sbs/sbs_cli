@@ -739,6 +739,9 @@ async function showFaceBuilder(initialFace = ''): Promise<void> {
       if (m?.type === 'faceBuild') {
         const r = await client!.sendRequest<{ face: string }>('amd/faceBuild', { race: m.race, values: m.values, enables: m.enables });
         faceBuilderPanel?.webview.postMessage({ type: 'built', value: r.face });
+        // Live-apply to the field/drawer that opened the builder, so edits flow
+        // through as you move the sliders (no need to press "Use this face").
+        faceHost?.webview.postMessage({ type: (faceHost.prefix || '') + 'setFace', value: r.face });
       } else if (m?.type === 'useFace') {
         faceHost?.webview.postMessage({ type: (faceHost.prefix || '') + 'setFace', value: m.value });
       }
