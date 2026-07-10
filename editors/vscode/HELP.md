@@ -59,14 +59,14 @@ you can start editing visually right away.
 
 ### Inspector (edit a node as a form)
 
-The Inspector comes two ways. There's a **docked Inspector** in its own **AMD**
-container on the Activity Bar (the left icon strip) — click the AMD icon to open it,
-or drag it to the right secondary sidebar if you prefer it there. It **follows your
-cursor**: put the caret in any node
-in an `.amd` file and its form appears, ready to edit. And there's the **movable
-panel** — right-click a graph node or a map landmark and choose **Edit…** — which
-opens the same form as its own editor tab. Both edit live and stay in sync with each
-other and the text.
+The Inspector shows up in three places — it's **one form mounted three ways**, all
+editing live and staying in sync with each other and the text. (1) A **docked Inspector**
+in its own **AMD** container on the Activity Bar (the left icon strip) — click the AMD icon
+to open it, or drag it to the right secondary sidebar. It **follows your cursor**: put the
+caret in any node in an `.amd` file and its form appears. (2) A **movable panel** —
+right-click a graph node or map landmark and choose **Edit…** — the same form as its own
+editor tab. (3) A **drawer inside the Map / Story Graph** — click a node there and the form
+slides in without leaving the view.
 
 The Inspector is a form for that node's **Display** name, its **metadata fields**
 (`State`, `When`, `Speaker`, `Kind`, …, each a labelled input; **+ add field** for
@@ -101,9 +101,10 @@ them.
 Run **Artemis AMD: Show Mission Map** (Command Palette, or the button in the editor
 title bar on a `.amd` file) to see your mission's geography: every landmark
 (`At: i,j`) plotted on a grid, each region (`Center:` / `Radius:`) drawn as a tinted
-disc in its `Color:`. **Click a landmark** to jump to its node and load it into the
-docked **AMD Inspector** (edit it live right there). The map spans the whole mission's
-`.amd` files, so a landmark defined in any file shows up.
+disc in its `Color:`. **Click a landmark** to open the **Inspector drawer** right inside
+the map — a slide-out form (the same one used everywhere else) to edit that node live
+without leaving the map; close it with the **×** in its corner. The map spans the whole
+mission's `.amd` files, so a landmark defined in any file shows up.
 
 **Edit:** **drag a landmark** to a new cell to move it — its `At:` is rewritten in
 the `.amd` (undoable with Ctrl+Z, and the map re-renders); a plain click still jumps
@@ -122,8 +123,9 @@ jump anywhere.
 
 Run **Artemis AMD: Show Story Graph** to see how your content connects: every node
 and the links between them — choices, `Scene:`, `Then: reveal`, and `Parent:` — laid
-out left-to-right, colored by kind, and grouped by section. **Click a node** to jump
-to it and load it into the docked **AMD Inspector** to edit live. **Drag from one node onto another** to add a choice link — it writes
+out left-to-right, colored by kind, and grouped by section. **Click a node** to open the
+**Inspector drawer** inside the graph and edit that node live (close it with the **×**).
+**Drag from one node onto another** to add a choice link — it writes
 `- [target](key)` into the source node's body (undoable). **Right-click a node** to
 **Focus here** (see just the flow reachable from it), **Rename** it (the key changes
 across the whole mission — every reference follows), **Delete** it, or **Go to** it.

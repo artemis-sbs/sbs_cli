@@ -147,9 +147,9 @@ function esc(s: string): string {
 // bounded scroll area (real scrollbars), with zoom (buttons + Ctrl+wheel), fit-to-
 // window, drag-to-pan, and a minimap overview. `.lm`/`.nd` are click-to-jump.
 // `extraScript` is appended for view-specific behaviour (e.g. graph highlighting).
-function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string, extraScript = ''): string {
+function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string, extraScript = '', inspector?: { scripts: string; imgCsp: string }): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inspector ? inspector.imgCsp : ''} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   html, body { height: 100%; }
   body { margin: 0; display: flex; flex-direction: column; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
@@ -179,6 +179,13 @@ function webviewPage(title: string, legend: string, styles: string, body: string
   .ctxmenu .ci:hover { background: var(--vscode-menu-selectionBackground, #06f); color: var(--vscode-menu-selectionForeground, #fff); }
   .ctxmenu .ci.danger { color: var(--vscode-errorForeground, #f66); }
   .ctxmenu .sep { height: 1px; margin: 4px 0; background: var(--vscode-menu-separatorBackground, #8884); }
+  #insp-drawer { position: fixed; top: 0; right: 0; width: 340px; max-width: 82vw; height: 100%; z-index: 40; overflow: auto;
+    background: var(--vscode-editor-background); border-left: 1px solid var(--vscode-panel-border, #8883); box-shadow: -3px 0 14px #0007; }
+  #insp-drawer.hidden { display: none; }
+  #insp-drawer-bar { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background));
+    border-bottom: 1px solid var(--vscode-panel-border, #8883); font-size: 12px; color: var(--vscode-descriptionForeground); }
+  #insp-close { cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
   ${styles}
 </style></head><body>
 <header>
@@ -194,6 +201,8 @@ function webviewPage(title: string, legend: string, styles: string, body: string
 <div class="scroll" id="scroll">${body}</div>
 <div id="minimap"><div id="minirect"></div></div>
 <div id="ctxmenu" class="ctxmenu hidden"></div>
+${inspector ? `<div id="insp-drawer" class="hidden"><div id="insp-drawer-bar"><span>Inspector</span><span id="insp-close" title="Close">&times;</span></div><div id="insp-mount"></div></div>` : ''}
+${inspector ? inspector.scripts : ''}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const scroll = document.getElementById('scroll');
@@ -296,11 +305,34 @@ function webviewPage(title: string, legend: string, styles: string, body: string
   buildMini(); apply();
   // fit on open if the content is larger than the viewport
   requestAnimationFrame(() => { if (svg && (baseW > scroll.clientWidth || baseH > scroll.clientHeight)) { doFit(); } });
+
+  // --- Inspector drawer (in-webview edit panel) ---
+  ${inspector ? `
+  (function () {
+    const drawer = document.getElementById('insp-drawer');
+    const mount = document.getElementById('insp-mount');
+    let handle = null;
+    document.getElementById('insp-close').addEventListener('click', () => drawer.classList.add('hidden'));
+    window.addEventListener('message', (e) => {
+      const m = e.data;
+      if (!m || typeof m.type !== 'string' || m.type.indexOf('insp:') !== 0) { return; }
+      if (m.type === 'insp:render') {
+        if (!handle) { handle = InspectorForm.mount(mount, vscode, { prefix: 'insp:', model: m.model }); }
+        else { handle.render(m.model); }
+        drawer.classList.remove('hidden');
+      } else if (m.type === 'insp:patch' && handle) { handle.patch(m); }
+      else if (m.type === 'insp:setFace' && handle) { handle.setFace(m.value); }
+    });
+    // Ask the extension to (re)send the current node — re-opens the drawer after
+    // a full re-render of this webview.
+    vscode.postMessage({ type: 'inspReady' });
+  })();
+  ` : ''}
   ${extraScript}
 </script></body></html>`;
 }
 
-function renderMap(map: MissionMap, nonce: string): string {
+function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview): string {
   const pts = [
     ...map.landmarks.map((l) => ({ i: l.i, j: l.j })),
     ...map.regions.flatMap((r) => [
@@ -444,7 +476,9 @@ function renderMap(map: MissionMap, nonce: string): string {
     });
   }
   `;
-  return webviewPage(title, '', styles, body, nonce, extraScript);
+  const inj = faceInjection(webview, nonce);
+  return webviewPage(title, '', styles, body, nonce, extraScript,
+    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp });
 }
 
 // --- Inspector: edit a node's display / fields / body as a form ------------
@@ -468,13 +502,26 @@ interface Inspector {
   busy: boolean;
   queued?: { display: string; fields: NodeField[]; body: string };
   syncTimer?: ReturnType<typeof setTimeout>;
+  prefix: string;                       // '' for standalone webviews, 'insp:' for the map/graph drawer
+  render(detail: NodeDetail): void;     // full render: set webview.html (standalone) or postMessage (drawer)
   reveal(): void;
 }
 let panelInspector: Inspector | undefined;   // "Edit…" — a movable editor tab
 let viewInspector: Inspector | undefined;    // docked in the panel, follows the caret
+const drawerInspectors = new Set<Inspector>();  // in-webview drawers on the map/graph
 let faceHost: Inspector | undefined;         // which inspector opened the Face builder
 let viewFollowTimer: ReturnType<typeof setTimeout> | undefined;
-function liveInspectors(): Inspector[] { return [panelInspector, viewInspector].filter(Boolean) as Inspector[]; }
+function liveInspectors(): Inspector[] {
+  return [panelInspector, viewInspector, ...drawerInspectors].filter(Boolean) as Inspector[];
+}
+// Fetch a node's detail and render it into a host (used by the map/graph drawer).
+async function loadNodeInto(insp: Inspector, uri: string, key: string): Promise<void> {
+  if (!client) { return; }
+  try {
+    const d = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri }, key });
+    if (d) { renderInspectorInto(insp, uri, d); }
+  } catch { /* ignore */ }
+}
 
 function rng(r: LspRange): vscode.Range {
   return new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
@@ -534,110 +581,38 @@ function faceInjection(webview: vscode.Webview, nonce: string): { scripts: strin
   return { scripts, imgCsp: `img-src ${webview.cspSource};`, available: !!(gfx && extensionUri) };
 }
 
-function renderInspector(d: NodeDetail, nonce: string, inj: { scripts: string; imgCsp: string; available: boolean }): string {
-  const valueControl = (f: NodeField) => {
-    const opts = FIELD_ENUMS[f.label.toLowerCase()];
-    if (!opts) { return `<input class="fval" value="${esc(f.value)}" placeholder="value"/>`; }
-    const all = [...new Set([...opts, f.value].filter(Boolean))];
-    return `<select class="fval">${all.map((o) => `<option${o === f.value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-  };
-  const hasFace = d.fields.some((f) => f.label.toLowerCase() === 'face');
-  const faceVal = d.fields.find((f) => f.label.toLowerCase() === 'face')?.value ?? '';
-  const rows = d.fields.map((f) => f.label.toLowerCase() === 'face'
-    ? `<div class="frow"><input class="flabel" value="${esc(f.label)}"/><span>:</span><input class="fval facefield" value="${esc(f.value)}" placeholder="face string or female/male"/><button type="button" class="facebtn">Face…</button></div>`
-    : `<div class="frow"><input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span>${valueControl(f)}</div>`).join('');
-  const facePreview = hasFace ? `<canvas id="facePreview" width="220" height="220"></canvas>` : '';
+// The node as a plain model for the shared client-side form (media/inspectorForm.js).
+function formModel(d: NodeDetail): { key: string; display: string; fields: NodeField[]; body: string } {
+  return { key: d.key, display: d.display, fields: d.fields, body: d.bodyText };
+}
+
+// A <script> tag loading the shared form module into a webview.
+function inspectorFormScript(webview: vscode.Webview, nonce: string): string {
+  const uri = extensionUri
+    ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'inspectorForm.js')).toString()
+    : '';
+  return `<script nonce="${nonce}" src="${uri}"></script>`;
+}
+
+// The standalone Inspector webview (panel + docked view): a thin shell that
+// mounts the shared form. Live-sync messages are unprefixed here (prefix "").
+function renderInspector(d: NodeDetail, nonce: string, inj: { scripts: string; imgCsp: string; available: boolean }, webview: vscode.Webview): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inj.imgCsp} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
-  body { margin: 0; padding: 12px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
-  h3 { margin: 0 0 10px; } h4 { margin: 14px 0 6px; color: var(--vscode-descriptionForeground); font-weight: 600; }
-  label.k { display: block; font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
-  input, textarea, select { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #8884); border-radius: 3px; padding: 4px 6px; font-family: inherit; }
-  select { background: var(--vscode-dropdown-background, var(--vscode-input-background)); }
-  textarea { font-family: var(--vscode-editor-font-family, monospace); }
-  .frow { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
-  .frow .flabel { flex: 0 0 34%; } .frow .fval { flex: 1 1 auto; }
-  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; padding: 5px 12px; cursor: pointer; margin-top: 10px; }
-  button:hover { background: var(--vscode-button-hoverBackground); }
-  .sec { color: var(--vscode-descriptionForeground); font-size: 11px; }
-  #addf, .facebtn { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); padding: 2px 8px; }
-  .facebtn { flex: 0 0 auto; margin: 0; }
-  #facePreview { display: block; width: 110px; height: 110px; margin: 6px 0; border: 1px solid var(--vscode-input-border, #8884); border-radius: 4px; background: var(--vscode-input-background); }
+  body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
 </style></head><body>
-<h3>${esc(d.display || d.key)} <span class="sec">(${esc(d.key)})</span></h3>
-<label class="k">Display</label><input id="display" value="${esc(d.display)}"/>
-<h4>Fields</h4>
-<div id="fields">${rows}</div>
-${facePreview}
-<button id="addf">+ add field</button>
-<h4>Body</h4>
-<textarea id="body" rows="14">${esc(d.bodyText)}</textarea>
-<div class="sec" id="status">Changes apply automatically.</div>
+<div id="insp-root"></div>
 ${inj.scripts}
+${inspectorFormScript(webview, nonce)}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
-  const fieldsEl = document.getElementById('fields');
-  const displayEl = document.getElementById('display');
-  const bodyEl = document.getElementById('body');
-  const statusEl = document.getElementById('status');
-  const _facePreview = document.getElementById('facePreview');
-  const _faceCtx = _facePreview ? _facePreview.getContext('2d') : null;
-  function _drawFacePreview(str) { if (_faceCtx && window.FaceRender) { FaceRender.drawString(_facePreview, _faceCtx, str); } }
-  if (_facePreview) { _drawFacePreview(${JSON.stringify(faceVal)}); }
-
-  // Collect the current form state (what the .amd should become).
-  function collect() {
-    const fields = [...fieldsEl.querySelectorAll('.frow')].map((r) => ({
-      label: r.querySelector('.flabel').value.trim(), value: r.querySelector('.fval').value.trim(),
-    })).filter((f) => f.label);
-    return { display: displayEl.value, fields, body: bodyEl.value };
-  }
-  // Debounced live apply — no button; edits flow to the .amd on idle.
-  let _t = 0;
-  function scheduleApply() {
-    statusEl.textContent = 'Editing…';
-    clearTimeout(_t);
-    _t = setTimeout(() => { statusEl.textContent = 'Saved'; vscode.postMessage({ type: 'applyNode', ...collect() }); }, 300);
-  }
-  // Any input in the form (existing or future rows) schedules an apply.
-  document.body.addEventListener('input', scheduleApply);
-  document.body.addEventListener('change', scheduleApply);
-
-  document.getElementById('addf').addEventListener('click', () => {
-    const div = document.createElement('div'); div.className = 'frow';
-    div.innerHTML = '<input class="flabel" placeholder="field"/><span>:</span><input class="fval" placeholder="value"/>';
-    fieldsEl.appendChild(div);
-    div.querySelector('.flabel').focus();
-  });
-
-  const facebtn = document.querySelector('.facebtn');
-  const _faceField = document.querySelector('.facefield');
-  if (facebtn) { facebtn.addEventListener('click', () => vscode.postMessage({ type: 'buildFace', face: _faceField ? _faceField.value : '' })); }
-  if (_faceField) { _faceField.addEventListener('input', () => _drawFacePreview(_faceField.value)); }
-
-  // Reverse sync: the extension sends fresh values when the .amd changes
-  // elsewhere. Patch only fields the user isn't currently editing.
+  const h = InspectorForm.mount(document.getElementById('insp-root'), vscode, { prefix: '', model: ${JSON.stringify(formModel(d))} });
   window.addEventListener('message', (e) => {
-    const m = e.data;
-    if (!m) { return; }
-    if (m.type === 'setFace') {
-      const el = document.querySelector('.facefield'); if (el) { el.value = m.value; } _drawFacePreview(m.value); scheduleApply(); return;
-    }
-    if (m.type === 'patch') {
-      const active = document.activeElement;
-      const setIf = (el, val) => { if (el && el !== active && el.value !== val) { el.value = val; } };
-      setIf(displayEl, m.display);
-      setIf(bodyEl, m.body);
-      const rows = [...fieldsEl.querySelectorAll('.frow')];
-      // Update matching labels' values; only touch rows whose inputs aren't focused.
-      for (const f of m.fields) {
-        const row = rows.find((r) => r.querySelector('.flabel').value.trim().toLowerCase() === f.label.toLowerCase());
-        if (row) { setIf(row.querySelector('.fval'), f.value); }
-      }
-      const ff = document.querySelector('.facefield'); if (ff) { _drawFacePreview(ff.value); }
-      statusEl.textContent = 'Saved';
-    }
+    const m = e.data; if (!m) { return; }
+    if (m.type === 'patch') { h.patch(m); }
+    else if (m.type === 'setFace') { h.setFace(m.value); }
+    else if (m.type === 'render') { h.render(m.model); }
   });
 </script></body></html>`;
 }
@@ -736,7 +711,7 @@ async function showFaceBuilder(initialFace = ''): Promise<void> {
         const r = await client!.sendRequest<{ face: string }>('amd/faceBuild', { race: m.race, values: m.values, enables: m.enables });
         faceBuilderPanel?.webview.postMessage({ type: 'built', value: r.face });
       } else if (m?.type === 'useFace') {
-        faceHost?.webview.postMessage({ type: 'setFace', value: m.value });
+        faceHost?.webview.postMessage({ type: (faceHost.prefix || '') + 'setFace', value: m.value });
       }
     });
   }
@@ -745,18 +720,19 @@ async function showFaceBuilder(initialFace = ''): Promise<void> {
   faceBuilderPanel.reveal(vscode.ViewColumn.Beside, true);
 }
 
-// Render a node into a host's webview (full render — used on first show and when
-// the shown node changes). Reuses the same form for panel and docked view.
+// Render a node into a host (full render — first show / shown node changed).
 function renderInspectorInto(insp: Inspector, uri: string, detail: NodeDetail): void {
   insp.uri = uri; insp.detail = detail;
-  const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
-  insp.webview.html = renderInspector(detail, nonce, faceInjection(insp.webview, nonce));
+  insp.render(detail);
 }
 
 // Attach the message handler (Face picker + live apply) to a host's webview.
+// Messages are namespaced by the host's `prefix` so several forms can share one
+// webview (the map/graph drawer uses "insp:").
 function wireInspector(insp: Inspector): void {
+  const p = insp.prefix;
   insp.webview.onDidReceiveMessage(async (msg) => {
-    if (msg?.type === 'buildFace') {
+    if (msg?.type === p + 'buildFace') {
       faceHost = insp;
       const RACES: Record<string, string> = {
         'Random Terran (female)': 'terran female', 'Random Terran (male)': 'terran male',
@@ -770,7 +746,7 @@ function wireInspector(insp: Inspector): void {
       if (pick === 'Paste from Avatar Editor') {
         const clip = (await vscode.env.clipboard.readText()).trim();
         if (!clip) { vscode.window.showWarningMessage('Clipboard is empty — design a face in the in-game Avatar Editor first (it copies the face string on every change).'); return; }
-        insp.webview.postMessage({ type: 'setFace', value: clip });
+        insp.webview.postMessage({ type: p + 'setFace', value: clip });
         return;
       }
       let value = pick.startsWith('female') ? 'female' : pick.startsWith('male') ? 'male' : '';
@@ -778,11 +754,19 @@ function wireInspector(insp: Inspector): void {
         const r = await client!.sendRequest<{ face: string }>('amd/faceRandom', { race: RACES[pick] });
         value = r.face;
       }
-      insp.webview.postMessage({ type: 'setFace', value });
+      insp.webview.postMessage({ type: p + 'setFace', value });
       return;
     }
-    if (msg?.type === 'applyNode') { await applyInspectorEdit(insp, msg); }
+    if (msg?.type === p + 'applyNode') { await applyInspectorEdit(insp, msg); }
   });
+}
+
+// Full-render strategy for a standalone webview (panel / docked view): set html.
+function standaloneRender(webview: vscode.Webview): (detail: NodeDetail) => void {
+  return (detail) => {
+    const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+    webview.html = renderInspector(detail, nonce, faceInjection(webview, nonce), webview);
+  };
 }
 
 // "Edit…" entry — the movable panel. Creates it once, then loads the node.
@@ -799,6 +783,7 @@ async function showInspector(uri: string, key: string): Promise<void> {
       vscode.ViewColumn.Beside, { enableScripts: true, localResourceRoots: faceWebviewRoots() });
     const insp: Inspector = {
       webview: panel.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
+      prefix: '', render: standaloneRender(panel.webview),
       reveal: () => panel.reveal(vscode.ViewColumn.Beside, true),
     };
     panel.onDidDispose(() => { if (panelInspector === insp) { panelInspector = undefined; } if (faceHost === insp) { faceHost = undefined; } });
@@ -815,6 +800,7 @@ class InspectorViewProvider implements vscode.WebviewViewProvider {
     view.webview.options = { enableScripts: true, localResourceRoots: faceWebviewRoots() };
     const insp: Inspector = {
       webview: view.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
+      prefix: '', render: standaloneRender(view.webview),
       reveal: () => view.show?.(true),
     };
     viewInspector = insp;
@@ -916,7 +902,7 @@ async function reloadInspector(insp: Inspector): Promise<void> {
   } catch { return; }
   if (!fresh) { return; }   // node gone (e.g. heading retyped) — leave the last good view
   insp.detail = fresh;
-  insp.webview.postMessage({ type: 'patch', display: fresh.display, fields: fresh.fields, body: fresh.bodyText });
+  insp.webview.postMessage({ type: insp.prefix + 'patch', display: fresh.display, fields: fresh.fields, body: fresh.bodyText });
 }
 
 function wsEditFromChanges(changes: Record<string, { range: LspRange; newText: string }[]> | undefined): vscode.WorkspaceEdit {
@@ -994,7 +980,7 @@ const NODE_TEMPLATES: Record<string, { section: string | null; sectionDisplay: s
   'Generic node': { section: null, sectionDisplay: '', keyBase: 'new_node', body: (k) => `\n### [New Node](${k})\n` },
 };
 
-function renderGraph(fullGraph: MissionGraph, nonce: string, focus?: Focus | null): string {
+function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Webview, focus?: Focus | null): string {
   // Focus: restrict to the flow reachable from a node, and lay out just that.
   let graph = fullGraph;
   let focusName = '';
@@ -1173,7 +1159,9 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, focus?: Focus | nul
     vscode.postMessage({ type: 'addNode' });
   });
   `;
-  return webviewPage(title, legend, styles, body, nonce, extraScript);
+  const inj = faceInjection(webview, nonce);
+  return webviewPage(title, legend, styles, body, nonce, extraScript,
+    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp });
 }
 
 async function showGraph(): Promise<void> {
@@ -1191,16 +1179,27 @@ async function showGraph(): Promise<void> {
     return;
   }
   const panel = vscode.window.createWebviewPanel(
-    'amdGraph', 'AMD Story Graph', vscode.ViewColumn.Beside, { enableScripts: true },
+    'amdGraph', 'AMD Story Graph', vscode.ViewColumn.Beside,
+    { enableScripts: true, localResourceRoots: faceWebviewRoots() },
   );
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   let focus: Focus | null = null;
-  panel.webview.html = renderGraph(graph, nonce(), focus);
+  panel.webview.html = renderGraph(graph, nonce(), panel.webview, focus);
+
+  const drawer: Inspector = {
+    webview: panel.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
+    prefix: 'insp:',
+    render: (d) => panel.webview.postMessage({ type: 'insp:render', model: formModel(d) }),
+    reveal: () => { /* the drawer reveals itself on render */ },
+  };
+  drawerInspectors.add(drawer);
+  wireInspector(drawer);
+  panel.onDidDispose(() => { drawerInspectors.delete(drawer); if (faceHost === drawer) { faceHost = undefined; } });
 
   const refresh = async () => {
     try {
       const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
-      panel.webview.html = renderGraph(g, nonce(), focus);
+      panel.webview.html = renderGraph(g, nonce(), panel.webview, focus);
     } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
   };
 
@@ -1208,7 +1207,9 @@ async function showGraph(): Promise<void> {
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line);
     } else if (msg?.type === 'inspect') {
-      await inspectInDockedView(msg.uri, msg.key);
+      await loadNodeInto(drawer, msg.uri, msg.key);
+    } else if (msg?.type === 'inspReady') {
+      if (drawer.detail) { drawer.render(drawer.detail); }
     } else if (msg?.type === 'connect' && msg.toKey) {
       const edit = new vscode.WorkspaceEdit();
       edit.insert(vscode.Uri.parse(msg.uri), new vscode.Position(msg.addLine, 0),
@@ -1340,15 +1341,26 @@ async function showMap(): Promise<void> {
     return;
   }
   const panel = vscode.window.createWebviewPanel(
-    'amdMap', 'AMD Mission Map', vscode.ViewColumn.Beside, { enableScripts: true },
+    'amdMap', 'AMD Mission Map', vscode.ViewColumn.Beside,
+    { enableScripts: true, localResourceRoots: faceWebviewRoots() },
   );
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
-  panel.webview.html = renderMap(map, nonce());
+  panel.webview.html = renderMap(map, nonce(), panel.webview);
+
+  const drawer: Inspector = {
+    webview: panel.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
+    prefix: 'insp:',
+    render: (d) => panel.webview.postMessage({ type: 'insp:render', model: formModel(d) }),
+    reveal: () => { /* the drawer reveals itself on render */ },
+  };
+  drawerInspectors.add(drawer);
+  wireInspector(drawer);
+  panel.onDidDispose(() => { drawerInspectors.delete(drawer); if (faceHost === drawer) { faceHost = undefined; } });
 
   const refresh = async () => {
     try {
       const m = await client!.sendRequest<MissionMap>('amd/map', { textDocument: { uri } });
-      panel.webview.html = renderMap(m, nonce());
+      panel.webview.html = renderMap(m, nonce(), panel.webview);
     } catch (e) { output.appendLine(`Map refresh failed: ${e}`); }
   };
 
@@ -1356,7 +1368,9 @@ async function showMap(): Promise<void> {
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line);
     } else if (msg?.type === 'inspect') {
-      await inspectInDockedView(msg.uri, msg.key);
+      await loadNodeInto(drawer, msg.uri, msg.key);
+    } else if (msg?.type === 'inspReady') {
+      if (drawer.detail) { drawer.render(drawer.detail); }
     } else if (msg?.type === 'setAt' && msg.range) {
       const edit = new vscode.WorkspaceEdit();
       const r = msg.range;
