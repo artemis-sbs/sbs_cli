@@ -1129,11 +1129,24 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     laneTop.set(sec, yCursor + LABEL_H);
     yCursor += LABEL_H + laneRows.get(sec)! * (NH + VGAP) + LANE_PAD + LANE_GAP;
   }
+  // Horizontal compaction PER LANE: pack each lane's occupied depths into
+  // consecutive columns, so a lane whose nodes sit at sparse global depths
+  // (with other lanes filling the columns between) doesn't get big gaps.
+  const laneCol = new Map<string, Map<number, number>>();
+  for (const sec of secOrder) {
+    const ds = [...new Set(graph.nodes.filter((n) => n.section === sec).map((n) => depth.get(n.key) ?? 0))].sort((a, b) => a - b);
+    const m = new Map<number, number>();
+    ds.forEach((d, i) => m.set(d, i));
+    laneCol.set(sec, m);
+  }
+  let maxCols = 1;
+  for (const m of laneCol.values()) { maxCols = Math.max(maxCols, m.size); }
   const pos = new Map<string, { x: number; y: number }>();
   for (const n of graph.nodes) {
-    pos.set(n.key, { x: (depth.get(n.key) ?? 0) * (NW + HGAP) + XPAD, y: laneTop.get(n.section)! + (rowInLane.get(n.key) ?? 0) * (NH + VGAP) });
+    const col = laneCol.get(n.section)!.get(depth.get(n.key) ?? 0) ?? 0;
+    pos.set(n.key, { x: col * (NW + HGAP) + XPAD, y: laneTop.get(n.section)! + (rowInLane.get(n.key) ?? 0) * (NH + VGAP) });
   }
-  const W = (maxDepth + 1) * (NW + HGAP) + XPAD + 40;
+  const W = maxCols * (NW + HGAP) + XPAD + 40;
   const H = Math.max(yCursor, 120);
 
   // Lane bands + labels, drawn behind the graph.
