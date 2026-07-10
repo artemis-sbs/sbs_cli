@@ -100,8 +100,9 @@ them.
 Run **Artemis AMD: Show Mission Map** (Command Palette, or the button in the editor
 title bar on a `.amd` file) to see your mission's geography: every landmark
 (`At: i,j`) plotted on a grid, each region (`Center:` / `Radius:`) drawn as a tinted
-disc in its `Color:`. **Click a landmark** to jump to its node. The map spans the
-whole mission's `.amd` files, so a landmark defined in any file shows up.
+disc in its `Color:`. **Click a landmark** to jump to its node and load it into the
+docked **AMD Inspector** (edit it live right there). The map spans the whole mission's
+`.amd` files, so a landmark defined in any file shows up.
 
 **Edit:** **drag a landmark** to a new cell to move it — its `At:` is rewritten in
 the `.amd` (undoable with Ctrl+Z, and the map re-renders); a plain click still jumps
@@ -121,7 +122,7 @@ jump anywhere.
 Run **Artemis AMD: Show Story Graph** to see how your content connects: every node
 and the links between them — choices, `Scene:`, `Then: reveal`, and `Parent:` — laid
 out left-to-right, colored by kind, and grouped by section. **Click a node** to jump
-to it. **Drag from one node onto another** to add a choice link — it writes
+to it and load it into the docked **AMD Inspector** to edit live. **Drag from one node onto another** to add a choice link — it writes
 `- [target](key)` into the source node's body (undoable). **Right-click a node** to
 **Focus here** (see just the flow reachable from it), **Rename** it (the key changes
 across the whole mission — every reference follows), **Delete** it, or **Go to** it.

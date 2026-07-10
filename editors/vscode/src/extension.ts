@@ -284,9 +284,13 @@ function webviewPage(title: string, legend: string, styles: string, body: string
     updateMini();
   });
 
-  // --- click to jump (suppressed after a drag) ---
+  // --- click to jump + edit in the docked Inspector (suppressed after a drag) ---
   for (const g of scroll.querySelectorAll('.lm, .nd')) {
-    g.addEventListener('click', () => { if (moved) { return; } vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) }); });
+    g.addEventListener('click', () => {
+      if (moved) { return; }
+      vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) });
+      vscode.postMessage({ type: 'inspect', uri: g.dataset.uri, key: g.dataset.key });
+    });
   }
 
   buildMini(); apply();
@@ -819,9 +823,28 @@ class InspectorViewProvider implements vscode.WebviewViewProvider {
       body { margin:0; padding:14px; color: var(--vscode-descriptionForeground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: 13px; }
     </style></head><body>Open an <code>.amd</code> file and place the cursor in a node to edit it here.</body></html>`;
     view.onDidDispose(() => { if (viewInspector === insp) { viewInspector = undefined; } if (faceHost === insp) { faceHost = undefined; } });
-    view.onDidChangeVisibility(() => { if (view.visible) { void followCaretToView(); } });
+    view.onDidChangeVisibility(() => { if (view.visible) { void flushPendingInspect(); void followCaretToView(); } });
+    void flushPendingInspect();
     void followCaretToView();
   }
+}
+
+// Selecting a node in the Map or Graph loads it into the docked Inspector. We
+// reveal the view (which resolves it if it wasn't shown yet) and load the node.
+// `pendingInspect` bridges the case where the view resolves after the request.
+let pendingInspect: { uri: string; key: string } | undefined;
+async function inspectInDockedView(uri: string, key: string): Promise<void> {
+  pendingInspect = { uri, key };
+  await vscode.commands.executeCommand('amd.inspectorView.focus');
+  await flushPendingInspect();
+}
+async function flushPendingInspect(): Promise<void> {
+  if (!pendingInspect || !viewInspector || !client) { return; }
+  const { uri, key } = pendingInspect; pendingInspect = undefined;
+  try {
+    const d = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri }, key });
+    if (d) { renderInspectorInto(viewInspector, uri, d); }
+  } catch { /* view will still follow the caret */ }
 }
 
 // Point the docked view at whichever node owns the active editor's caret. Only
@@ -1184,6 +1207,8 @@ async function showGraph(): Promise<void> {
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line);
+    } else if (msg?.type === 'inspect') {
+      await inspectInDockedView(msg.uri, msg.key);
     } else if (msg?.type === 'connect' && msg.toKey) {
       const edit = new vscode.WorkspaceEdit();
       edit.insert(vscode.Uri.parse(msg.uri), new vscode.Position(msg.addLine, 0),
@@ -1330,6 +1355,8 @@ async function showMap(): Promise<void> {
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line);
+    } else if (msg?.type === 'inspect') {
+      await inspectInDockedView(msg.uri, msg.key);
     } else if (msg?.type === 'setAt' && msg.range) {
       const edit = new vscode.WorkspaceEdit();
       const r = msg.range;
