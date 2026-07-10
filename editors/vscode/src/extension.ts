@@ -451,16 +451,26 @@ interface NodeDetail {
   bodyText: string; bodyRange: LspRange;
 }
 
-let inspectorPanel: vscode.WebviewPanel | undefined;
-let inspectorUri = '';
-let inspectorDetail: NodeDetail | undefined;
-// Live-sync state: the Inspector auto-applies (debounced in the webview) and
-// mirrors external edits back. `inspectorSelfEdit` swallows the echo from our
-// own applyEdit; the busy/queued pair serialises overlapping applies.
-let inspectorSelfEdit = false;
-let inspectorApplyBusy = false;
-let inspectorApplyQueued: { display: string; fields: NodeField[]; body: string } | undefined;
-let inspectorSyncTimer: ReturnType<typeof setTimeout> | undefined;
+// An Inspector is one live projection of a node onto a webview — either the
+// movable panel ("Edit…") or the docked, cursor-following view. Both share all
+// the render + live-sync logic; the fields below are the per-host live-sync
+// state. `selfEdit` swallows the echo from our own applyEdit; busy/queued
+// serialises overlapping debounced applies.
+interface Inspector {
+  webview: vscode.Webview;
+  uri: string;
+  detail: NodeDetail | undefined;
+  selfEdit: boolean;
+  busy: boolean;
+  queued?: { display: string; fields: NodeField[]; body: string };
+  syncTimer?: ReturnType<typeof setTimeout>;
+  reveal(): void;
+}
+let panelInspector: Inspector | undefined;   // "Edit…" — a movable editor tab
+let viewInspector: Inspector | undefined;    // docked in the panel, follows the caret
+let faceHost: Inspector | undefined;         // which inspector opened the Face builder
+let viewFollowTimer: ReturnType<typeof setTimeout> | undefined;
+function liveInspectors(): Inspector[] { return [panelInspector, viewInspector].filter(Boolean) as Inspector[]; }
 
 function rng(r: LspRange): vscode.Range {
   return new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
@@ -722,7 +732,7 @@ async function showFaceBuilder(initialFace = ''): Promise<void> {
         const r = await client!.sendRequest<{ face: string }>('amd/faceBuild', { race: m.race, values: m.values, enables: m.enables });
         faceBuilderPanel?.webview.postMessage({ type: 'built', value: r.face });
       } else if (m?.type === 'useFace') {
-        inspectorPanel?.webview.postMessage({ type: 'setFace', value: m.value });
+        faceHost?.webview.postMessage({ type: 'setFace', value: m.value });
       }
     });
   }
@@ -731,6 +741,47 @@ async function showFaceBuilder(initialFace = ''): Promise<void> {
   faceBuilderPanel.reveal(vscode.ViewColumn.Beside, true);
 }
 
+// Render a node into a host's webview (full render — used on first show and when
+// the shown node changes). Reuses the same form for panel and docked view.
+function renderInspectorInto(insp: Inspector, uri: string, detail: NodeDetail): void {
+  insp.uri = uri; insp.detail = detail;
+  const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+  insp.webview.html = renderInspector(detail, nonce, faceInjection(insp.webview, nonce));
+}
+
+// Attach the message handler (Face picker + live apply) to a host's webview.
+function wireInspector(insp: Inspector): void {
+  insp.webview.onDidReceiveMessage(async (msg) => {
+    if (msg?.type === 'buildFace') {
+      faceHost = insp;
+      const RACES: Record<string, string> = {
+        'Random Terran (female)': 'terran female', 'Random Terran (male)': 'terran male',
+        'Random Skaraan': 'skaraan', 'Random Torgoth': 'torgoth', 'Random Arvonian': 'arvonian',
+        'Random Kralien': 'kralien', 'Random Ximni': 'ximni',
+      };
+      const pick = await vscode.window.showQuickPick(
+        ['Build custom…', 'Paste from Avatar Editor', 'female (keyword)', 'male (keyword)', ...Object.keys(RACES)], { placeHolder: 'Face' });
+      if (!pick) { return; }
+      if (pick === 'Build custom…') { showFaceBuilder(typeof msg.face === 'string' ? msg.face : ''); return; }
+      if (pick === 'Paste from Avatar Editor') {
+        const clip = (await vscode.env.clipboard.readText()).trim();
+        if (!clip) { vscode.window.showWarningMessage('Clipboard is empty — design a face in the in-game Avatar Editor first (it copies the face string on every change).'); return; }
+        insp.webview.postMessage({ type: 'setFace', value: clip });
+        return;
+      }
+      let value = pick.startsWith('female') ? 'female' : pick.startsWith('male') ? 'male' : '';
+      if (RACES[pick]) {
+        const r = await client!.sendRequest<{ face: string }>('amd/faceRandom', { race: RACES[pick] });
+        value = r.face;
+      }
+      insp.webview.postMessage({ type: 'setFace', value });
+      return;
+    }
+    if (msg?.type === 'applyNode') { await applyInspectorEdit(insp, msg); }
+  });
+}
+
+// "Edit…" entry — the movable panel. Creates it once, then loads the node.
 async function showInspector(uri: string, key: string): Promise<void> {
   if (!client) { return; }
   let detail: NodeDetail | null;
@@ -739,54 +790,67 @@ async function showInspector(uri: string, key: string): Promise<void> {
   } catch (e) { output.appendLine(`Inspector failed: ${e}`); return; }
   if (!detail) { vscode.window.showWarningMessage(`Artemis AMD: node '${key}' not found.`); return; }
 
-  inspectorUri = uri; inspectorDetail = detail;
-  if (!inspectorPanel) {
-    inspectorPanel = vscode.window.createWebviewPanel('amdInspector', 'AMD Inspector',
+  if (!panelInspector) {
+    const panel = vscode.window.createWebviewPanel('amdInspector', 'AMD Inspector',
       vscode.ViewColumn.Beside, { enableScripts: true, localResourceRoots: faceWebviewRoots() });
-    inspectorPanel.onDidDispose(() => { inspectorPanel = undefined; });
-    inspectorPanel.webview.onDidReceiveMessage(async (msg) => {
-      if (msg?.type === 'buildFace') {
-        const RACES: Record<string, string> = {
-          'Random Terran (female)': 'terran female', 'Random Terran (male)': 'terran male',
-          'Random Skaraan': 'skaraan', 'Random Torgoth': 'torgoth', 'Random Arvonian': 'arvonian',
-          'Random Kralien': 'kralien', 'Random Ximni': 'ximni',
-        };
-        const pick = await vscode.window.showQuickPick(
-          ['Build custom…', 'Paste from Avatar Editor', 'female (keyword)', 'male (keyword)', ...Object.keys(RACES)], { placeHolder: 'Face' });
-        if (!pick) { return; }
-        if (pick === 'Build custom…') { showFaceBuilder(typeof msg.face === 'string' ? msg.face : ''); return; }
-        if (pick === 'Paste from Avatar Editor') {
-          const clip = (await vscode.env.clipboard.readText()).trim();
-          if (!clip) { vscode.window.showWarningMessage('Clipboard is empty — design a face in the in-game Avatar Editor first (it copies the face string on every change).'); return; }
-          inspectorPanel?.webview.postMessage({ type: 'setFace', value: clip });
-          return;
-        }
-        let value = pick.startsWith('female') ? 'female' : pick.startsWith('male') ? 'male' : '';
-        if (RACES[pick]) {
-          const r = await client!.sendRequest<{ face: string }>('amd/faceRandom', { race: RACES[pick] });
-          value = r.face;
-        }
-        inspectorPanel?.webview.postMessage({ type: 'setFace', value });
-        return;
-      }
-      if (msg?.type === 'applyNode') { await applyInspectorEdit(msg); }
-    });
+    const insp: Inspector = {
+      webview: panel.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
+      reveal: () => panel.reveal(vscode.ViewColumn.Beside, true),
+    };
+    panel.onDidDispose(() => { if (panelInspector === insp) { panelInspector = undefined; } if (faceHost === insp) { faceHost = undefined; } });
+    panelInspector = insp;
+    wireInspector(insp);
   }
-  const inspNonce = String(Date.now()) + Math.random().toString(36).slice(2);
-  inspectorPanel.webview.html = renderInspector(detail, inspNonce, faceInjection(inspectorPanel.webview, inspNonce));
-  inspectorPanel.reveal(vscode.ViewColumn.Beside, true);
+  renderInspectorInto(panelInspector, uri, detail);
+  panelInspector.reveal();
+}
+
+// Docked, cursor-following Inspector in the panel area.
+class InspectorViewProvider implements vscode.WebviewViewProvider {
+  resolveWebviewView(view: vscode.WebviewView): void {
+    view.webview.options = { enableScripts: true, localResourceRoots: faceWebviewRoots() };
+    const insp: Inspector = {
+      webview: view.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
+      reveal: () => view.show?.(true),
+    };
+    viewInspector = insp;
+    wireInspector(insp);
+    view.webview.html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      body { margin:0; padding:14px; color: var(--vscode-descriptionForeground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: 13px; }
+    </style></head><body>Open an <code>.amd</code> file and place the cursor in a node to edit it here.</body></html>`;
+    view.onDidDispose(() => { if (viewInspector === insp) { viewInspector = undefined; } if (faceHost === insp) { faceHost = undefined; } });
+    view.onDidChangeVisibility(() => { if (view.visible) { void followCaretToView(); } });
+    void followCaretToView();
+  }
+}
+
+// Point the docked view at whichever node owns the active editor's caret. Only
+// re-renders when the node actually changes (moving within a node is a no-op;
+// value changes arrive via reverse-sync).
+async function followCaretToView(): Promise<void> {
+  if (!client || !viewInspector) { return; }
+  const ed = vscode.window.activeTextEditor;
+  if (!ed || ed.document.languageId !== 'amd') { return; }
+  const uri = ed.document.uri.toString();
+  const line = ed.selection.active.line;
+  let detail: NodeDetail | null;
+  try { detail = await client.sendRequest<NodeDetail | null>('amd/nodeAtLine', { textDocument: { uri }, line }); }
+  catch { return; }
+  if (!detail) { return; }
+  if (viewInspector.uri === uri && viewInspector.detail?.key === detail.key) { return; }
+  renderInspectorInto(viewInspector, uri, detail);
 }
 
 // Write the form's current state into the .amd — only the parts that changed —
 // then refresh ranges WITHOUT rebuilding the webview (so focus/caret survive).
 // Serialised so a fast typist's overlapping debounces can't interleave edits.
-async function applyInspectorEdit(msg: { display: string; fields: NodeField[]; body: string }): Promise<void> {
-  if (!client || !inspectorDetail) { return; }
-  if (inspectorApplyBusy) { inspectorApplyQueued = msg; return; }
-  inspectorApplyBusy = true;
+async function applyInspectorEdit(insp: Inspector, msg: { display: string; fields: NodeField[]; body: string }): Promise<void> {
+  if (!client || !insp.detail) { return; }
+  if (insp.busy) { insp.queued = msg; return; }
+  insp.busy = true;
   try {
-    const d = inspectorDetail;
-    const u = vscode.Uri.parse(inspectorUri);
+    const d = insp.detail;
+    const u = vscode.Uri.parse(insp.uri);
     const edit = new vscode.WorkspaceEdit();
     let changed = false;
 
@@ -807,35 +871,29 @@ async function applyInspectorEdit(msg: { display: string; fields: NodeField[]; b
     }
     if (!changed) { return; }
 
-    inspectorSelfEdit = true;              // swallow the echo in onDidChangeTextDocument
+    insp.selfEdit = true;              // swallow the echo in onDidChangeTextDocument
     await vscode.workspace.applyEdit(edit);
     try {
-      const fresh = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri: inspectorUri }, key: d.key });
-      if (fresh) { inspectorDetail = fresh; }
+      const fresh = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri: insp.uri }, key: d.key });
+      if (fresh) { insp.detail = fresh; }
     } catch { /* keep old ranges; next edit will re-resolve */ }
   } finally {
-    inspectorApplyBusy = false;
-    if (inspectorApplyQueued) { const q = inspectorApplyQueued; inspectorApplyQueued = undefined; void applyInspectorEdit(q); }
+    insp.busy = false;
+    if (insp.queued) { const q = insp.queued; insp.queued = undefined; void applyInspectorEdit(insp, q); }
   }
 }
 
-// The .amd changed elsewhere (text editor, map, graph) — mirror it into the
-// Inspector. If the panel isn't focused we can safely rebuild; if it is, patch
-// values so we don't clobber a field the user is mid-edit.
-async function reloadInspectorFromDoc(): Promise<void> {
-  if (!client || !inspectorPanel || !inspectorDetail) { return; }
+// The .amd changed elsewhere — mirror the current node's values back into a host,
+// patching only fields the user isn't focused in (the webview guards that).
+async function reloadInspector(insp: Inspector): Promise<void> {
+  if (!client || !insp.detail) { return; }
   let fresh: NodeDetail | null;
   try {
-    fresh = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri: inspectorUri }, key: inspectorDetail.key });
+    fresh = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri: insp.uri }, key: insp.detail.key });
   } catch { return; }
   if (!fresh) { return; }   // node gone (e.g. heading retyped) — leave the last good view
-  inspectorDetail = fresh;
-  if (inspectorPanel.active) {
-    inspectorPanel.webview.postMessage({ type: 'patch', display: fresh.display, fields: fresh.fields, body: fresh.bodyText });
-  } else {
-    const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
-    inspectorPanel.webview.html = renderInspector(fresh, nonce, faceInjection(inspectorPanel.webview, nonce));
-  }
+  insp.detail = fresh;
+  insp.webview.postMessage({ type: 'patch', display: fresh.display, fields: fresh.fields, body: fresh.bodyText });
 }
 
 function wsEditFromChanges(changes: Record<string, { range: LspRange; newText: string }[]> | undefined): vscode.WorkspaceEdit {
@@ -1460,13 +1518,26 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
 
-  // Reverse sync: when the Inspector's .amd changes elsewhere, mirror it back
-  // into the form (debounced; our own edits are swallowed by inspectorSelfEdit).
+  // Docked, cursor-following Inspector view.
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('amd.inspectorView', new InspectorViewProvider(),
+      { webviewOptions: { retainContextWhenHidden: true } }));
+  const followSoon = () => { clearTimeout(viewFollowTimer); viewFollowTimer = setTimeout(() => { void followCaretToView(); }, 120); };
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => followSoon()));
+  context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection((e) => {
+    if (e.textEditor === vscode.window.activeTextEditor) { followSoon(); }
+  }));
+
+  // Reverse sync: when an Inspector's .amd changes elsewhere, mirror it back into
+  // that host's form (debounced; a host's own edit is swallowed by its selfEdit).
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument((e) => {
-    if (!inspectorPanel || !inspectorDetail || e.document.uri.toString() !== inspectorUri) { return; }
-    if (inspectorSelfEdit) { inspectorSelfEdit = false; return; }
-    clearTimeout(inspectorSyncTimer);
-    inspectorSyncTimer = setTimeout(() => { void reloadInspectorFromDoc(); }, 250);
+    const changed = e.document.uri.toString();
+    for (const insp of liveInspectors()) {
+      if (insp.uri !== changed || !insp.detail) { continue; }
+      if (insp.selfEdit) { insp.selfEdit = false; continue; }
+      clearTimeout(insp.syncTimer);
+      insp.syncTimer = setTimeout(() => { void reloadInspector(insp); }, 250);
+    }
   }));
 
   // Restart the server when the relevant settings change.

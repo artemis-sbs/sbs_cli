@@ -59,8 +59,15 @@ you can start editing visually right away.
 
 ### Inspector (edit a node as a form)
 
-Right-click a graph node or a map landmark and choose **Edit…** to open the
-**Inspector** — a form for that node's **Display** name, its **metadata fields**
+The Inspector comes two ways. There's a **docked Inspector** in the panel area
+(next to Problems/Output — open it from **View → Open View… → AMD Inspector**, or
+the AMD icon on the panel) that **follows your cursor**: put the caret in any node
+in an `.amd` file and its form appears, ready to edit. And there's the **movable
+panel** — right-click a graph node or a map landmark and choose **Edit…** — which
+opens the same form as its own editor tab. Both edit live and stay in sync with each
+other and the text.
+
+The Inspector is a form for that node's **Display** name, its **metadata fields**
 (`State`, `When`, `Speaker`, `Kind`, …, each a labelled input; **+ add field** for
 new ones), and its **Body** text (descriptions, dialogue `%` lines, choices) in a
 text area. Common fields (`State`, `Scope`, `Kind`, `Mode`, `Win`) render as **dropdowns**. A

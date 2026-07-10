@@ -10,6 +10,16 @@
   "categories": ["Programming Languages", "Linters", "Formatters"],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "panel": [
+        { "id": "amdPanel", "title": "AMD Inspector", "icon": "media/amd-icon.svg" }
+      ]
+    },
+    "views": {
+      "amdPanel": [
+        { "id": "amd.inspectorView", "name": "Inspector", "type": "webview", "contextualTitle": "AMD Inspector" }
+      ]
+    },
     "commands": [
       {
         "command": "amd.showMap",
