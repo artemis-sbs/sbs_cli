@@ -67,8 +67,9 @@ text area. Common fields (`State`, `Scope`, `Kind`, `Mode`, `Win`) render as **d
 lifeform's **`Face`** field gets a **Face…** button offering `female`/`male`, a random
 face per race (Terran / Skaraan / Torgoth / Arvonian / Kralien / Ximni), or **Build
 custom…** — a **Face Builder** with a slider per feature (eyes, mouth, hair, …) and
-optional-feature toggles; the face string updates live and **Use this face** drops it
-back into the field. The builder (and the Inspector's Face field) shows a **live
+optional-feature toggles; it **starts from the field's current face** (race and every
+slider seeded from the existing string, not defaults), the face string updates live, and
+**Use this face** drops it back into the field. The builder (and the Inspector's Face field) shows a **live
 preview** composited from the Cosmos face atlases — the same renderer the browser mock
 uses — so long as the extension can find your install (it reads the art from
 `<cosmos>/data/graphics/`; set `amd.cosmosPath` if the preview stays blank). You can

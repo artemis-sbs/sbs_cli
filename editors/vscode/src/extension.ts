@@ -169,6 +169,16 @@ function webviewPage(title: string, legend: string, styles: string, body: string
   #minimap svg { pointer-events: none; display: block; }
   #minirect { position: absolute; border: 1.5px solid var(--vscode-focusBorder, #58f); background: rgba(90,140,255,0.15); pointer-events: none; }
   #minimap.hidden { display: none; }
+  .ctxmenu { position: fixed; z-index: 50; min-width: 150px; padding: 4px 0; font-size: 13px; user-select: none;
+    background: var(--vscode-menu-background, var(--vscode-editor-background));
+    color: var(--vscode-menu-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border, #8886));
+    border-radius: 5px; box-shadow: 0 3px 14px #0009; }
+  .ctxmenu.hidden { display: none; }
+  .ctxmenu .ci { padding: 5px 14px; cursor: pointer; white-space: nowrap; }
+  .ctxmenu .ci:hover { background: var(--vscode-menu-selectionBackground, #06f); color: var(--vscode-menu-selectionForeground, #fff); }
+  .ctxmenu .ci.danger { color: var(--vscode-errorForeground, #f66); }
+  .ctxmenu .sep { height: 1px; margin: 4px 0; background: var(--vscode-menu-separatorBackground, #8884); }
   ${styles}
 </style></head><body>
 <header>
@@ -183,9 +193,31 @@ function webviewPage(title: string, legend: string, styles: string, body: string
 </header>
 <div class="scroll" id="scroll">${body}</div>
 <div id="minimap"><div id="minirect"></div></div>
+<div id="ctxmenu" class="ctxmenu hidden"></div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const scroll = document.getElementById('scroll');
+  // Shared right-click menu: items = [{label, action, danger} | {sep:true}]; send(action) posts.
+  const ctxEl = document.getElementById('ctxmenu');
+  function hideCtxMenu() { ctxEl.classList.add('hidden'); ctxEl.innerHTML = ''; }
+  function showCtxMenu(x, y, items, send) {
+    ctxEl.innerHTML = '';
+    for (const it of items) {
+      if (it.sep) { const s = document.createElement('div'); s.className = 'sep'; ctxEl.appendChild(s); continue; }
+      const d = document.createElement('div');
+      d.className = 'ci' + (it.danger ? ' danger' : '');
+      d.textContent = it.label;
+      d.addEventListener('click', (ev) => { ev.stopPropagation(); hideCtxMenu(); send(it.action); });
+      ctxEl.appendChild(d);
+    }
+    ctxEl.classList.remove('hidden');
+    const mw = ctxEl.offsetWidth, mh = ctxEl.offsetHeight;
+    ctxEl.style.left = Math.max(2, Math.min(x, window.innerWidth - mw - 4)) + 'px';
+    ctxEl.style.top = Math.max(2, Math.min(y, window.innerHeight - mh - 4)) + 'px';
+  }
+  window.addEventListener('click', hideCtxMenu);
+  window.addEventListener('blur', hideCtxMenu);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideCtxMenu(); } });
   const svg = scroll.querySelector('svg');
   const baseW = svg ? parseFloat(svg.getAttribute('width')) : 0;
   const baseH = svg ? parseFloat(svg.getAttribute('height')) : 0;
@@ -233,7 +265,7 @@ function webviewPage(title: string, legend: string, styles: string, body: string
   document.getElementById('bfit').onclick = doFit;
   document.getElementById('bmini').onclick = () => { miniWrap.classList.toggle('hidden'); updateMini(); };
   scroll.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); const r = scroll.getBoundingClientRect(); setZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9), e.clientX - r.left, e.clientY - r.top); } }, { passive: false });
-  scroll.addEventListener('scroll', updateMini);
+  scroll.addEventListener('scroll', () => { updateMini(); hideCtxMenu(); });
   window.addEventListener('resize', updateMini);
 
   // --- drag to pan ---
@@ -399,8 +431,12 @@ function renderMap(map: MissionMap, nonce: string): string {
   // Right-click a landmark for Rename / Change Kind / Delete / Go to.
   for (const g of scroll.querySelectorAll('.lm')) {
     g.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      vscode.postMessage({ type: 'lmMenu', key: g.dataset.key, display: g.dataset.display, uri: g.dataset.uri, line: parseInt(g.dataset.line, 10), addLine: parseInt(g.dataset.addline, 10), kindRange: g.dataset.kindrange ? JSON.parse(g.dataset.kindrange) : null });
+      e.preventDefault(); e.stopPropagation();
+      const data = { type: 'lmMenu', key: g.dataset.key, display: g.dataset.display, uri: g.dataset.uri, line: parseInt(g.dataset.line, 10), addLine: parseInt(g.dataset.addline, 10), kindRange: g.dataset.kindrange ? JSON.parse(g.dataset.kindrange) : null };
+      const items = [{ label: 'Edit…', action: 'Edit…' }, { label: 'Go to', action: 'Go to' }, { label: 'Rename…', action: 'Rename…' }];
+      if (data.kindRange) { items.push({ label: 'Change Kind…', action: 'Change Kind…' }); }
+      items.push({ sep: true }, { label: 'Delete', action: 'Delete', danger: true });
+      showCtxMenu(e.clientX, e.clientY, items, (action) => vscode.postMessage({ ...data, action }));
     });
   }
   `;
@@ -538,8 +574,8 @@ ${inj.scripts}
     vscode.postMessage({ type: 'applyNode', display, fields, body });
   });
   const facebtn = document.querySelector('.facebtn');
-  if (facebtn) { facebtn.addEventListener('click', () => vscode.postMessage({ type: 'buildFace' })); }
   const _faceField = document.querySelector('.facefield');
+  if (facebtn) { facebtn.addEventListener('click', () => vscode.postMessage({ type: 'buildFace', face: _faceField ? _faceField.value : '' })); }
   if (_faceField) { _faceField.addEventListener('input', () => _drawFacePreview(_faceField.value)); }
   window.addEventListener('message', (e) => {
     if (e.data && e.data.type === 'setFace') { const el = document.querySelector('.facefield'); if (el) { el.value = e.data.value; } _drawFacePreview(e.data.value); }
@@ -551,7 +587,7 @@ ${inj.scripts}
 interface FaceMeta { races: string[]; features: Record<string, { label: string; max: number; optional?: boolean }[]>; }
 let faceBuilderPanel: vscode.WebviewPanel | undefined;
 
-function renderFaceBuilder(meta: FaceMeta, nonce: string, inj: { scripts: string; imgCsp: string; available: boolean }): string {
+function renderFaceBuilder(meta: FaceMeta, nonce: string, inj: { scripts: string; imgCsp: string; available: boolean }, init?: { race: string; values: number[]; enables: boolean[] } | null): string {
   const note = inj.available
     ? 'Live preview composited from the Cosmos face atlases.'
     : 'No preview - set amd.cosmosPath so the face atlases can be found (they live in the Cosmos install\'s data/graphics/).';
@@ -572,7 +608,7 @@ function renderFaceBuilder(meta: FaceMeta, nonce: string, inj: { scripts: string
 </style></head><body>
 <h3>Face Builder</h3>
 <label class="k">Race</label>
-<select id="race">${meta.races.map((r) => `<option>${esc(r)}</option>`).join('')}</select>
+<select id="race">${meta.races.map((r) => `<option${init && init.race === r ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select>
 <div id="sliders"></div>
 <canvas id="preview" width="360" height="360"></canvas>
 <label class="k">Face string</label><input id="out" readonly/>
@@ -582,14 +618,22 @@ ${inj.scripts}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const META = ${JSON.stringify(meta.features)};
+  const INIT = ${JSON.stringify(init || null)};
+  let _initApplied = false;
   const raceSel = document.getElementById('race'), sliders = document.getElementById('sliders'), out = document.getElementById('out');
   const previewCanvas = document.getElementById('preview'), previewCtx = previewCanvas.getContext('2d');
   function drawPreview(str) { if (window.FaceRender) { FaceRender.drawString(previewCanvas, previewCtx, str); } }
   function renderSliders() {
     const feats = META[raceSel.value] || [];
-    sliders.innerHTML = feats.map((f, i) => '<div class="srow"><label>' + f.label + '</label>' +
-      (f.optional ? '<input type="checkbox" class="fen" data-i="' + i + '" checked>' : '<span style="width:13px"></span>') +
-      '<input type="range" class="fsl" data-i="' + i + '" min="0" max="' + f.max + '" value="0"><span class="fval" data-i="' + i + '">0</span></div>').join('');
+    const useInit = INIT && !_initApplied && raceSel.value === INIT.race;
+    sliders.innerHTML = feats.map((f, i) => {
+      const val = (useInit && i < INIT.values.length) ? INIT.values[i] : 0;
+      const en = (useInit && i < INIT.enables.length) ? INIT.enables[i] : true;
+      return '<div class="srow"><label>' + f.label + '</label>' +
+        (f.optional ? '<input type="checkbox" class="fen" data-i="' + i + '"' + (en ? ' checked' : '') + '>' : '<span style="width:13px"></span>') +
+        '<input type="range" class="fsl" data-i="' + i + '" min="0" max="' + f.max + '" value="' + val + '"><span class="fval" data-i="' + i + '">' + val + '</span></div>';
+    }).join('');
+    if (useInit) { _initApplied = true; }
     sliders.querySelectorAll('.fsl').forEach((s) => s.oninput = () => { sliders.querySelector('.fval[data-i="' + s.dataset.i + '"]').textContent = s.value; build(); });
     sliders.querySelectorAll('.fen').forEach((c) => c.onchange = build);
     build();
@@ -611,12 +655,19 @@ ${inj.scripts}
 </script></body></html>`;
 }
 
-async function showFaceBuilder(): Promise<void> {
+interface FaceInit { race: string; values: number[]; enables: boolean[]; }
+
+async function showFaceBuilder(initialFace = ''): Promise<void> {
   if (!client) { return; }
   let meta: FaceMeta;
   try { meta = await client.sendRequest<FaceMeta>('amd/faceMeta', {}); }
   catch (e) { output.appendLine(`Face meta failed: ${e}`); return; }
   if (!meta.races.length) { vscode.window.showWarningMessage('Artemis AMD: face builder unavailable.'); return; }
+  let init: FaceInit | null = null;
+  if (initialFace.trim()) {
+    try { init = await client.sendRequest<FaceInit | null>('amd/faceParse', { face: initialFace }); }
+    catch (e) { output.appendLine(`Face parse failed: ${e}`); }
+  }
   if (!faceBuilderPanel) {
     faceBuilderPanel = vscode.window.createWebviewPanel('amdFace', 'AMD Face Builder',
       vscode.ViewColumn.Beside, { enableScripts: true, localResourceRoots: faceWebviewRoots() });
@@ -631,7 +682,7 @@ async function showFaceBuilder(): Promise<void> {
     });
   }
   const fbNonce = String(Date.now()) + Math.random().toString(36).slice(2);
-  faceBuilderPanel.webview.html = renderFaceBuilder(meta, fbNonce, faceInjection(faceBuilderPanel.webview, fbNonce));
+  faceBuilderPanel.webview.html = renderFaceBuilder(meta, fbNonce, faceInjection(faceBuilderPanel.webview, fbNonce), init);
   faceBuilderPanel.reveal(vscode.ViewColumn.Beside, true);
 }
 
@@ -658,7 +709,7 @@ async function showInspector(uri: string, key: string): Promise<void> {
         const pick = await vscode.window.showQuickPick(
           ['Build custom…', 'Paste from Avatar Editor', 'female (keyword)', 'male (keyword)', ...Object.keys(RACES)], { placeHolder: 'Face' });
         if (!pick) { return; }
-        if (pick === 'Build custom…') { showFaceBuilder(); return; }
+        if (pick === 'Build custom…') { showFaceBuilder(typeof msg.face === 'string' ? msg.face : ''); return; }
         if (pick === 'Paste from Avatar Editor') {
           const clip = (await vscode.env.clipboard.readText()).trim();
           if (!clip) { vscode.window.showWarningMessage('Clipboard is empty — design a face in the in-game Avatar Editor first (it copies the face string on every change).'); return; }
@@ -913,15 +964,24 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, focus?: Focus | nul
   // Right-click a node for Focus / Rename / Delete / Go to.
   for (const n of gnodes) {
     n.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      vscode.postMessage({ type: 'nodeMenu', key: n.dataset.key, display: n.dataset.display, uri: n.dataset.uri, line: parseInt(n.dataset.line, 10), addLine: parseInt(n.dataset.addline, 10) });
+      e.preventDefault(); e.stopPropagation();
+      const data = { type: 'nodeMenu', key: n.dataset.key, display: n.dataset.display, uri: n.dataset.uri, line: parseInt(n.dataset.line, 10), addLine: parseInt(n.dataset.addline, 10) };
+      showCtxMenu(e.clientX, e.clientY, [
+        { label: 'Edit…', action: 'Edit…' }, { label: 'Focus here', action: 'Focus here' },
+        { label: 'Go to', action: 'Go to' }, { label: 'Rename…', action: 'Rename…' },
+        { sep: true }, { label: 'Delete', action: 'Delete', danger: true },
+      ], (action) => vscode.postMessage({ ...data, action }));
     });
   }
   // Right-click a link (its hit path) to delete or rewire it.
   for (const h of scroll.querySelectorAll('path.ehit')) {
     h.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
-      vscode.postMessage({ type: 'edgeMenu', uri: h.dataset.uri, line: parseInt(h.dataset.line, 10), from: h.dataset.from, to: h.dataset.to, kind: h.dataset.kind, targetRange: JSON.parse(h.dataset.targetrange) });
+      const data = { type: 'edgeMenu', uri: h.dataset.uri, line: parseInt(h.dataset.line, 10), from: h.dataset.from, to: h.dataset.to, kind: h.dataset.kind, targetRange: JSON.parse(h.dataset.targetrange) };
+      const items = [];
+      if (data.kind === 'choice') { items.push({ label: 'Edit choice…', action: 'Edit choice…' }); }
+      items.push({ label: 'Rewire…', action: 'Rewire…' }, { sep: true }, { label: 'Delete link', action: 'Delete link', danger: true });
+      showCtxMenu(e.clientX, e.clientY, items, (action) => vscode.postMessage({ ...data, action }));
     });
   }
   const showall = document.getElementById('showall');
@@ -979,7 +1039,7 @@ async function showGraph(): Promise<void> {
       await vscode.workspace.applyEdit(edit);
       await refresh();
     } else if (msg?.type === 'nodeMenu') {
-      const pick = await vscode.window.showQuickPick(['Edit…', 'Focus here', 'Go to', 'Rename…', 'Delete'],
+      const pick = msg.action || await vscode.window.showQuickPick(['Edit…', 'Focus here', 'Go to', 'Rename…', 'Delete'],
         { placeHolder: `${msg.display} (${msg.key})` });
       if (pick === 'Edit…') {
         showInspector(uri, msg.key);
@@ -1011,7 +1071,7 @@ async function showGraph(): Promise<void> {
       }
     } else if (msg?.type === 'edgeMenu') {
       const items = msg.kind === 'choice' ? ['Edit choice…', 'Delete link', 'Rewire…'] : ['Delete link', 'Rewire…'];
-      const pick = await vscode.window.showQuickPick(items,
+      const pick = msg.action || await vscode.window.showQuickPick(items,
         { placeHolder: `${msg.from} → ${msg.to} (${msg.kind})` });
       if (pick === 'Edit choice…') {
         const c = await client!.sendRequest<{ label: string; target: string; trailer: string; range: LspRange } | null>(
@@ -1145,7 +1205,7 @@ async function showMap(): Promise<void> {
       const items = ['Edit…', 'Go to', 'Rename…'];
       if (msg.kindRange) { items.push('Change Kind…'); }
       items.push('Delete');
-      const pick = await vscode.window.showQuickPick(items, { placeHolder: `${msg.display} (${msg.key})` });
+      const pick = msg.action || await vscode.window.showQuickPick(items, { placeHolder: `${msg.display} (${msg.key})` });
       if (pick === 'Edit…') {
         showInspector(uri, msg.key);
       } else if (pick === 'Go to') {
