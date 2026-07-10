@@ -1114,24 +1114,8 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
       arr.forEach((k, i) => rowInLane.set(k, i));
     }
   }
-  const laneRows = new Map<string, number>();
-  for (const sec of secOrder) {
-    let h = 1;
-    for (let d = 0; d <= maxDepth; d++) { h = Math.max(h, (cells.get(sec + '|' + d) ?? []).length); }
-    laneRows.set(sec, h);
-  }
-
-  // Lane vertical placement.
-  const LABEL_H = 22, LANE_PAD = 10, LANE_GAP = 14, XPAD = 130;
-  const laneTop = new Map<string, number>();
-  let yCursor = 24;
-  for (const sec of secOrder) {
-    laneTop.set(sec, yCursor + LABEL_H);
-    yCursor += LABEL_H + laneRows.get(sec)! * (NH + VGAP) + LANE_PAD + LANE_GAP;
-  }
   // Horizontal compaction PER LANE: pack each lane's occupied depths into
-  // consecutive columns, so a lane whose nodes sit at sparse global depths
-  // (with other lanes filling the columns between) doesn't get big gaps.
+  // consecutive columns (computed early so we can classify back links by column).
   const laneCol = new Map<string, Map<number, number>>();
   for (const sec of secOrder) {
     const ds = [...new Set(graph.nodes.filter((n) => n.section === sec).map((n) => depth.get(n.key) ?? 0))].sort((a, b) => a - b);
@@ -1141,10 +1125,46 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   }
   let maxCols = 1;
   for (const m of laneCol.values()) { maxCols = Math.max(maxCols, m.size); }
+  const secByKey = new Map(graph.nodes.map((n) => [n.key, n.section]));
+  const XPAD = 130;
+  const nodeX = (key: string) => (laneCol.get(secByKey.get(key) ?? '')?.get(depth.get(key) ?? 0) ?? 0) * (NW + HGAP) + XPAD;
+
+  // A "back link" targets a node in the same or a left column. Drawn as a chip
+  // on the source instead of a backward line that reads against the flow.
+  const backBySource = new Map<string, typeof graph.edges>();
+  const forwardEdges: typeof graph.edges = [];
+  for (const e of graph.edges) {
+    if (nodeX(e.to) <= nodeX(e.from)) { (backBySource.get(e.from) ?? backBySource.set(e.from, []).get(e.from)!).push(e); }
+    else { forwardEdges.push(e); }
+  }
+  const CHIP_H = 15, CHIP_GAP = 2;
+  const laneChipRows = new Map<string, number>();
+  for (const sec of secOrder) {
+    let m = 0;
+    for (const n of graph.nodes) { if (n.section === sec) { m = Math.max(m, backBySource.get(n.key)?.length ?? 0); } }
+    laneChipRows.set(sec, m);
+  }
+  // Row height includes reserved space for a node's back-link chips.
+  const rowStep = (sec: string) => NH + (laneChipRows.get(sec) ?? 0) * (CHIP_H + CHIP_GAP) + VGAP;
+
+  const laneRows = new Map<string, number>();
+  for (const sec of secOrder) {
+    let h = 1;
+    for (let d = 0; d <= maxDepth; d++) { h = Math.max(h, (cells.get(sec + '|' + d) ?? []).length); }
+    laneRows.set(sec, h);
+  }
+
+  // Lane vertical placement.
+  const LABEL_H = 22, LANE_PAD = 10, LANE_GAP = 14;
+  const laneTop = new Map<string, number>();
+  let yCursor = 24;
+  for (const sec of secOrder) {
+    laneTop.set(sec, yCursor + LABEL_H);
+    yCursor += LABEL_H + laneRows.get(sec)! * rowStep(sec) + LANE_PAD + LANE_GAP;
+  }
   const pos = new Map<string, { x: number; y: number }>();
   for (const n of graph.nodes) {
-    const col = laneCol.get(n.section)!.get(depth.get(n.key) ?? 0) ?? 0;
-    pos.set(n.key, { x: col * (NW + HGAP) + XPAD, y: laneTop.get(n.section)! + (rowInLane.get(n.key) ?? 0) * (NH + VGAP) });
+    pos.set(n.key, { x: nodeX(n.key), y: laneTop.get(n.section)! + (rowInLane.get(n.key) ?? 0) * rowStep(n.section) });
   }
   const W = maxCols * (NW + HGAP) + XPAD + 40;
   const H = Math.max(yCursor, 120);
@@ -1153,7 +1173,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   let laneSvg = '';
   for (const sec of secOrder) {
     const top = laneTop.get(sec)! - LABEL_H;
-    const ht = LABEL_H + laneRows.get(sec)! * (NH + VGAP) + LANE_PAD;
+    const ht = LABEL_H + laneRows.get(sec)! * rowStep(sec) + LANE_PAD;
     const hue = sectionHue(sec);
     laneSvg += `<g class="lane" data-section="${esc(sec)}">`
       + `<rect x="0" y="${top}" width="${W}" height="${ht}" rx="6" fill="hsl(${hue},45%,50%)" fill-opacity="0.06" stroke="hsl(${hue},45%,55%)" stroke-opacity="0.3"/>`
@@ -1162,7 +1182,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
 
   const clip = (s: string) => (s.length > 26 ? s.slice(0, 25) + '…' : s);
   let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${laneSvg}`;
-  for (const e of graph.edges) {
+  for (const e of forwardEdges) {
     const a = pos.get(e.from), b = pos.get(e.to);
     if (!a || !b) { continue; }
     let d: string;
@@ -1207,6 +1227,23 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
         + `<text x="${cx}" y="${cy + 3.5}" class="ncsign">${isC ? '+' : '−'}</text></g>`;
     }
   }
+  // Back-link chips: a "↩ target" pill under the source (click to jump; right-click
+  // to edit/delete the link) instead of a line running backward against the flow.
+  const nodeByKey = new Map(graph.nodes.map((n) => [n.key, n]));
+  for (const [srcKey, bes] of backBySource) {
+    const p = pos.get(srcKey);
+    if (!p) { continue; }
+    bes.forEach((e, i) => {
+      const t = nodeByKey.get(e.to);
+      const label = '↩ ' + (t ? clip(t.display) : e.to);
+      const cw = Math.min(NW, 22 + label.length * 6.2);
+      const cy = p.y + NH + CHIP_GAP + i * (CHIP_H + CHIP_GAP);
+      const col = EDGE_COLOR[e.kind] || '#888';
+      svg += `<g class="blink" data-uri="${esc(e.uri)}" data-line="${e.line}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" data-kind="${e.kind}" data-targetrange='${JSON.stringify(e.targetRange)}' data-tkey="${esc(e.to)}" data-turi="${esc(t ? t.uri : e.uri)}" data-tline="${t ? t.line : 0}"><title>back link to ${esc(t ? t.display : e.to)}</title>`
+        + `<rect x="${p.x}" y="${cy}" width="${cw}" height="${CHIP_H}" rx="7" fill="${col}" fill-opacity="0.18" stroke="${col}" stroke-opacity="0.55"/>`
+        + `<text x="${p.x + 7}" y="${cy + 11}" class="blabel">${esc(label)}</text></g>`;
+    });
+  }
   svg += `</svg>`;
 
   const dirLabel = focus ? { down: '&#8595; down', up: '&#8593; up', both: '&#8597; both' }[focus.dir] : '';
@@ -1235,6 +1272,9 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   .ncaret:hover circle { stroke-width: 2.5; }
   .ncsign { fill: #fff; font-size: 12px; text-anchor: middle; pointer-events: none; }
   .lanelabel { font-size: 12px; font-weight: 600; }
+  .blink { cursor: pointer; }
+  .blink:hover rect { fill-opacity: 0.35; }
+  .blabel { fill: var(--vscode-foreground); font-size: 10px; pointer-events: none; }
   .filt { font-size: 11px; margin-right: 8px; color: var(--vscode-descriptionForeground); cursor: pointer; }
   .filt input { vertical-align: middle; margin-right: 2px; }`;
   const title = focus
@@ -1317,6 +1357,22 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   }
   const expandall = document.getElementById('expandall');
   if (expandall) { expandall.addEventListener('click', () => vscode.postMessage({ type: 'expandAll' })); }
+  // Back-link chips: click jumps to the target; right-click edits/deletes the link.
+  for (const c of scroll.querySelectorAll('.blink')) {
+    c.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'goto', uri: c.dataset.turi, line: parseInt(c.dataset.tline, 10) });
+      vscode.postMessage({ type: 'inspect', uri: c.dataset.turi, key: c.dataset.tkey });
+    });
+    c.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const data = { type: 'edgeMenu', uri: c.dataset.uri, line: parseInt(c.dataset.line, 10), from: c.dataset.from, to: c.dataset.to, kind: c.dataset.kind, targetRange: JSON.parse(c.dataset.targetrange) };
+      const items = [];
+      if (data.kind === 'choice') { items.push({ label: 'Edit choice…', action: 'Edit choice…' }); }
+      items.push({ label: 'Rewire…', action: 'Rewire…' }, { sep: true }, { label: 'Delete link', action: 'Delete link', danger: true });
+      showCtxMenu(e.clientX, e.clientY, items, (action) => vscode.postMessage({ ...data, action }));
+    });
+  }
   const showall = document.getElementById('showall');
   if (showall) { showall.addEventListener('click', () => vscode.postMessage({ type: 'focus', key: null })); }
   const fdir = document.getElementById('fdir');

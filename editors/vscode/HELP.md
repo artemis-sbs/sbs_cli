@@ -153,7 +153,10 @@ control (**− / +**, up to **all**) to widen or tighten the neighbourhood. **�
 all** returns to the whole mission. **Hover a node** to
 spotlight it and its direct links (everything else dims), and **filter by section**
 with the toolbar checkboxes — unchecking a section drops its whole lane and the
-remaining lanes **recompact** to close the gap. Great for spotting dead-end dialogue, unreachable quests, and the
+remaining lanes **recompact** to close the gap. Links that run **backward** (to a node
+in the same or an earlier column — e.g. a choice that loops to an earlier scene) aren't
+drawn as against-the-flow lines; instead the source shows a small **↩ target chip** —
+click it to jump to the target, right-click to edit or delete that link. Great for spotting dead-end dialogue, unreachable quests, and the
 overall shape of a conversation. Same navigation as the map — fit-on-open, zoom, Fit,
 drag-to-pan, and the Overview minimap.
 
