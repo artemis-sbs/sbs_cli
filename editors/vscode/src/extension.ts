@@ -946,13 +946,24 @@ function wsEditFromChanges(changes: Record<string, { range: LspRange; newText: s
   return edit;
 }
 
-async function openLocation(uriStr: string, line: number, preserveFocus = false): Promise<void> {
+async function openLocation(uriStr: string, line: number, opts?: { onlyIfVisible?: boolean }): Promise<void> {
+  const uri = vscode.Uri.parse(uriStr);
+  const pos = new vscode.Position(Math.max(0, line), 0);
+  const range = new vscode.Range(pos, pos);
+  if (opts?.onlyIfVisible) {
+    // Click on the map/graph: scroll the editor to the node only if it's already
+    // on screen — never open a closed file or pull a background tab forward.
+    const ed = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri.toString());
+    if (!ed) { return; }
+    ed.selection = new vscode.Selection(pos, pos);
+    ed.revealRange(range, vscode.TextEditorRevealType.InCenter);
+    return;
+  }
   try {
-    const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriStr));
-    const editor = await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preserveFocus, preview: true });
-    const pos = new vscode.Position(Math.max(0, line), 0);
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: true });
     editor.selection = new vscode.Selection(pos, pos);
-    editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
   } catch (e) {
     output.appendLine(`Could not open ${uriStr}: ${e}`);
   }
@@ -1337,7 +1348,7 @@ async function showGraph(): Promise<void> {
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
-      openLocation(msg.uri, msg.line, true);   // reveal in the editor but keep focus on the map/graph
+      openLocation(msg.uri, msg.line, { onlyIfVisible: true });   // scroll only if already on screen; never steal focus or open a tab
     } else if (msg?.type === 'viewState') {
       lastView = { zoom: msg.zoom, sl: msg.sl, st: msg.st };
     } else if (msg?.type === 'toggleCollapse') {
@@ -1514,7 +1525,7 @@ async function showMap(): Promise<void> {
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
-      openLocation(msg.uri, msg.line, true);   // reveal in the editor but keep focus on the map/graph
+      openLocation(msg.uri, msg.line, { onlyIfVisible: true });   // scroll only if already on screen; never steal focus or open a tab
     } else if (msg?.type === 'viewState') {
       lastView = { zoom: msg.zoom, sl: msg.sl, st: msg.st };
     } else if (msg?.type === 'inspect') {
