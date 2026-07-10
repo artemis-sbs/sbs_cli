@@ -946,10 +946,10 @@ function wsEditFromChanges(changes: Record<string, { range: LspRange; newText: s
   return edit;
 }
 
-async function openLocation(uriStr: string, line: number): Promise<void> {
+async function openLocation(uriStr: string, line: number, preserveFocus = false): Promise<void> {
   try {
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriStr));
-    const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+    const editor = await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preserveFocus, preview: true });
     const pos = new vscode.Position(Math.max(0, line), 0);
     editor.selection = new vscode.Selection(pos, pos);
     editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
@@ -1337,7 +1337,7 @@ async function showGraph(): Promise<void> {
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
-      openLocation(msg.uri, msg.line);
+      openLocation(msg.uri, msg.line, true);   // reveal in the editor but keep focus on the map/graph
     } else if (msg?.type === 'viewState') {
       lastView = { zoom: msg.zoom, sl: msg.sl, st: msg.st };
     } else if (msg?.type === 'toggleCollapse') {
@@ -1514,7 +1514,7 @@ async function showMap(): Promise<void> {
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
-      openLocation(msg.uri, msg.line);
+      openLocation(msg.uri, msg.line, true);   // reveal in the editor but keep focus on the map/graph
     } else if (msg?.type === 'viewState') {
       lastView = { zoom: msg.zoom, sl: msg.sl, st: msg.st };
     } else if (msg?.type === 'inspect') {
