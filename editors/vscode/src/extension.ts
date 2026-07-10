@@ -1126,8 +1126,9 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     const top = laneTop.get(sec)! - LABEL_H;
     const ht = LABEL_H + laneRows.get(sec)! * (NH + VGAP) + LANE_PAD;
     const hue = sectionHue(sec);
-    laneSvg += `<rect x="0" y="${top}" width="${W}" height="${ht}" rx="6" fill="hsl(${hue},45%,50%)" fill-opacity="0.06" stroke="hsl(${hue},45%,55%)" stroke-opacity="0.3"/>`
-      + `<text x="12" y="${top + 15}" class="lanelabel" fill="hsl(${hue},60%,72%)">${esc(sec || 'ungrouped')}</text>`;
+    laneSvg += `<g class="lane" data-section="${esc(sec)}">`
+      + `<rect x="0" y="${top}" width="${W}" height="${ht}" rx="6" fill="hsl(${hue},45%,50%)" fill-opacity="0.06" stroke="hsl(${hue},45%,55%)" stroke-opacity="0.3"/>`
+      + `<text x="12" y="${top + 15}" class="lanelabel" fill="hsl(${hue},60%,72%)">${esc(sec || 'ungrouped')}</text></g>`;
   }
 
   const clip = (s: string) => (s.length > 26 ? s.slice(0, 25) + '…' : s);
@@ -1219,6 +1220,8 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     const hiddenKeys = new Set();
     for (const n of gnodes) { const off = hidden.has(n.dataset.section); n.style.display = off ? 'none' : ''; if (off) hiddenKeys.add(n.dataset.key); }
     for (const p of edges) { p.style.display = (hiddenKeys.has(p.dataset.from) || hiddenKeys.has(p.dataset.to)) ? 'none' : ''; }
+    for (const l of scroll.querySelectorAll('.lane')) { l.style.display = hidden.has(l.dataset.section) ? 'none' : ''; }
+    for (const c of scroll.querySelectorAll('.ncaret')) { c.style.display = hiddenKeys.has(c.dataset.key) ? 'none' : ''; }
   }
   for (const c of document.querySelectorAll('.filt input')) { c.addEventListener('change', applyFilter); }
 
