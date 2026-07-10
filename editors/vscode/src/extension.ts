@@ -1009,7 +1009,7 @@ const NODE_TEMPLATES: Record<string, { section: string | null; sectionDisplay: s
   'Generic node': { section: null, sectionDisplay: '', keyBase: 'new_node', body: (k) => `\n### [New Node](${k})\n` },
 };
 
-function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Webview, focus?: Focus | null, initialView?: { zoom: number; sl: number; st: number } | null): string {
+function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Webview, focus?: Focus | null, initialView?: { zoom: number; sl: number; st: number } | null, collapsed?: Set<string>): string {
   // Focus: restrict to the flow reachable from a node, and lay out just that.
   let graph = fullGraph;
   let focusName = '';
@@ -1021,8 +1021,36 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     };
     focusName = fullGraph.nodes.find((n) => n.key === focus.key)?.display ?? focus.key;
   }
+
+  // Collapse: fold the exclusive subtree under a collapsed node. A node is
+  // hidden iff it's a down-descendant of a collapsed node AND not reachable
+  // from a root by a path that avoids collapsed nodes.
+  const downAdj = new Map<string, string[]>();
+  for (const e of graph.edges) { (downAdj.get(e.from) ?? downAdj.set(e.from, []).get(e.from)!).push(e.to); }
+  const hasChildren = new Set<string>([...downAdj.keys()].filter((k) => downAdj.get(k)!.length > 0));
+  const hidden = new Set<string>();
+  const hiddenCount = new Map<string, number>();
+  if (collapsed && collapsed.size) {
+    const indeg = new Map<string, number>(graph.nodes.map((n) => [n.key, 0]));
+    for (const e of graph.edges) { indeg.set(e.to, (indeg.get(e.to) ?? 0) + 1); }
+    let roots = graph.nodes.filter((n) => (indeg.get(n.key) ?? 0) === 0).map((n) => n.key);
+    if (!roots.length) { roots = graph.nodes.map((n) => n.key); }
+    const clean = new Set<string>(); const q1 = [...roots];
+    while (q1.length) { const k = q1.shift()!; if (clean.has(k)) { continue; } clean.add(k); if (!collapsed.has(k)) { for (const c of (downAdj.get(k) ?? [])) { q1.push(c); } } }
+    const cand = new Set<string>(); const q2: string[] = [];
+    for (const c of collapsed) { for (const ch of (downAdj.get(c) ?? [])) { q2.push(ch); } }
+    while (q2.length) { const k = q2.shift()!; if (cand.has(k)) { continue; } cand.add(k); for (const ch of (downAdj.get(k) ?? [])) { q2.push(ch); } }
+    for (const k of cand) { if (!clean.has(k)) { hidden.add(k); } }
+    for (const c of collapsed) {
+      let n = 0; const seen = new Set<string>(); const q3 = [...(downAdj.get(c) ?? [])];
+      while (q3.length) { const k = q3.shift()!; if (seen.has(k)) { continue; } seen.add(k); if (hidden.has(k)) { n++; for (const ch of (downAdj.get(k) ?? [])) { q3.push(ch); } } }
+      hiddenCount.set(c, n);
+    }
+    graph = { nodes: graph.nodes.filter((n) => !hidden.has(n.key)), edges: graph.edges.filter((e) => !hidden.has(e.from) && !hidden.has(e.to)) };
+  }
+
   const NW = 190, NH = 30, HGAP = 90, VGAP = 22;
-  const ORIENT: 'LR' | 'TB' = 'LR';   // A keeps left-to-right; C flips this to 'TB'
+  const TB = true;   // top-down flow (Option C); set false for left-to-right
   // Layer = flow axis (longest-path, cycle-safe: relax at most N times).
   const depth = new Map<string, number>(graph.nodes.map((n) => [n.key, 0]));
   for (let it = 0; it < graph.nodes.length; it++) {
@@ -1099,21 +1127,27 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   const pos = new Map<string, { x: number; y: number }>();
   for (const n of graph.nodes) {
     const L = depth.get(n.key) ?? 0, C = cross.get(n.key) ?? 0;
-    pos.set(n.key, ORIENT === 'LR'
+    pos.set(n.key, !TB
       ? { x: L * LSTEP + 20, y: C * CSTEP + 40 }
       : { x: C * LSTEP + 20, y: L * CSTEP + 40 });
   }
   const spanLayers = depths.length, spanCross = maxCross + 1;
-  const W = (ORIENT === 'LR' ? spanLayers * LSTEP : spanCross * LSTEP) + 40;
-  const H = Math.max((ORIENT === 'LR' ? spanCross * CSTEP : spanLayers * CSTEP) + 60, 120);
+  const W = (!TB ? spanLayers * LSTEP : spanCross * LSTEP) + 40;
+  const H = Math.max((!TB ? spanCross * CSTEP : spanLayers * CSTEP) + 60, 120);
 
   const clip = (s: string) => (s.length > 26 ? s.slice(0, 25) + '…' : s);
   let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
   for (const e of graph.edges) {
     const a = pos.get(e.from), b = pos.get(e.to);
     if (!a || !b) { continue; }
-    const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
-    const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+    let d: string;
+    if (!TB) {
+      const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
+      d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+    } else {
+      const x1 = a.x + NW / 2, y1 = a.y + NH, x2 = b.x + NW / 2, y2 = b.y, my = (y1 + y2) / 2;
+      d = `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`;
+    }
     svg += `<path class="edge" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${d}" fill="none" stroke="${EDGE_COLOR[e.kind] || '#888'}" stroke-width="1.5" opacity="0.65"/>`;
     // a wider transparent hit path so the thin edge is right-clickable
     svg += `<path class="ehit" data-uri="${esc(e.uri)}" data-line="${e.line}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" data-kind="${e.kind}" data-targetrange='${JSON.stringify(e.targetRange)}' d="${d}" fill="none" stroke="transparent" stroke-width="12" pointer-events="stroke"/>`;
@@ -1121,13 +1155,22 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   for (const n of graph.nodes) {
     const p = pos.get(n.key)!;
     const h = sectionHue(n.section);
-    svg += `<g class="nd" data-key="${esc(n.key)}" data-display="${esc(n.display)}" data-section="${esc(n.section)}" data-uri="${esc(n.uri)}" data-line="${n.line}" data-addline="${n.addLine}" data-cx="${p.x + NW}" data-cy="${p.y + NH / 2}">`
+    svg += `<g class="nd" data-key="${esc(n.key)}" data-display="${esc(n.display)}" data-section="${esc(n.section)}" data-uri="${esc(n.uri)}" data-line="${n.line}" data-addline="${n.addLine}" data-cx="${p.x + NW / 2}" data-cy="${p.y + NH / 2}">`
       + `<rect x="${p.x}" y="${p.y}" width="${NW}" height="${NH}" rx="6" fill="hsl(${h},45%,28%)" stroke="hsl(${h},60%,55%)"/>`
       + `<text x="${p.x + 8}" y="${p.y + 19}" class="nlabel">${esc(clip(n.display))}</text>`
       + (n.problems && (n.problems.error || n.problems.warning)
         ? `<circle cx="${p.x + NW - 6}" cy="${p.y + 6}" r="4.5" fill="${n.problems.error ? '#f55' : '#fc4'}" stroke="#0008" stroke-width="0.5"><title>${n.problems.error} error(s), ${n.problems.warning} warning(s)</title></circle>`
         : '')
       + `</g>`;
+    // Collapse/expand toggle for nodes that have children (fan-out point).
+    if (hasChildren.has(n.key)) {
+      const isC = !!(collapsed && collapsed.has(n.key));
+      const cx = p.x + NW / 2, cy = p.y + NH;
+      const tip = isC ? `${hiddenCount.get(n.key) ?? 0} hidden — click to expand` : 'click to collapse';
+      svg += `<g class="ncaret" data-key="${esc(n.key)}"><title>${esc(tip)}</title>`
+        + `<circle cx="${cx}" cy="${cy}" r="7" fill="hsl(${h},45%,18%)" stroke="hsl(${h},60%,55%)"/>`
+        + `<text x="${cx}" y="${cy + 3.5}" class="ncsign">${isC ? '+' : '−'}</text></g>`;
+    }
   }
   svg += `</svg>`;
 
@@ -1141,7 +1184,8 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
       + `<button id="hinc" class="lbtn" title="More hops">+</button>`
     : '';
   const sections = [...new Set(graph.nodes.map((n) => n.section))].sort();
-  const legend = focusBar
+  const expandBar = (collapsed && collapsed.size) ? `<button id="expandall" class="lbtn">Expand all</button>` : '';
+  const legend = focusBar + expandBar
     + Object.entries(EDGE_COLOR)
       .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('')
     + sections.map((s) => `<label class="filt"><input type="checkbox" checked data-section="${esc(s)}"> ${esc(s)}</label>`).join('');
@@ -1153,6 +1197,9 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   .nlabel { fill: #fff; font-size: 11px; }
   .nd { cursor: pointer; }
   .nd:hover rect { stroke-width: 2.5; }
+  .ncaret { cursor: pointer; }
+  .ncaret:hover circle { stroke-width: 2.5; }
+  .ncsign { fill: #fff; font-size: 12px; text-anchor: middle; pointer-events: none; }
   .filt { font-size: 11px; margin-right: 8px; color: var(--vscode-descriptionForeground); cursor: pointer; }
   .filt input { vertical-align: middle; margin-right: 2px; }`;
   const title = focus
@@ -1232,6 +1279,12 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
       showCtxMenu(e.clientX, e.clientY, items, (action) => vscode.postMessage({ ...data, action }));
     });
   }
+  // Collapse / expand a subtree from a node's toggle badge.
+  for (const c of scroll.querySelectorAll('.ncaret')) {
+    c.addEventListener('click', (e) => { e.stopPropagation(); vscode.postMessage({ type: 'toggleCollapse', key: c.dataset.key }); });
+  }
+  const expandall = document.getElementById('expandall');
+  if (expandall) { expandall.addEventListener('click', () => vscode.postMessage({ type: 'expandAll' })); }
   const showall = document.getElementById('showall');
   if (showall) { showall.addEventListener('click', () => vscode.postMessage({ type: 'focus', key: null })); }
   const fdir = document.getElementById('fdir');
@@ -1272,7 +1325,8 @@ async function showGraph(): Promise<void> {
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   let focus: Focus | null = null;
   let lastView: { zoom: number; sl: number; st: number } | null = null;
-  panel.webview.html = renderGraph(graph, nonce(), panel.webview, focus);
+  const collapsed = new Set<string>();
+  panel.webview.html = renderGraph(graph, nonce(), panel.webview, focus, null, collapsed);
 
   const drawer: Inspector = {
     webview: panel.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
@@ -1286,7 +1340,7 @@ async function showGraph(): Promise<void> {
   const refresh = async () => {
     try {
       const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
-      panel.webview.html = renderGraph(g, nonce(), panel.webview, focus, lastView);
+      panel.webview.html = renderGraph(g, nonce(), panel.webview, focus, lastView, collapsed);
     } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
   };
   // One debounced refresh path for both own gestures and external edits.
@@ -1304,6 +1358,11 @@ async function showGraph(): Promise<void> {
       openLocation(msg.uri, msg.line);
     } else if (msg?.type === 'viewState') {
       lastView = { zoom: msg.zoom, sl: msg.sl, st: msg.st };
+    } else if (msg?.type === 'toggleCollapse') {
+      if (collapsed.has(msg.key)) { collapsed.delete(msg.key); } else { collapsed.add(msg.key); }
+      scheduleRefresh();
+    } else if (msg?.type === 'expandAll') {
+      collapsed.clear(); scheduleRefresh();
     } else if (msg?.type === 'inspect') {
       await loadNodeInto(drawer, msg.uri, msg.key);
     } else if (msg?.type === 'inspReady') {

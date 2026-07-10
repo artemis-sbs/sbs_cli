@@ -125,8 +125,12 @@ adding a node no longer snaps the view back to the fit.
 
 Run **Artemis AMD: Show Story Graph** to see how your content connects: every node
 and the links between them — choices, `Scene:`, `Then: reveal`, and `Parent:` — laid
-out left-to-right, colored by kind, and grouped by section. **Click a node** to open the
-**Inspector drawer** inside the graph and edit that node live (close it with the **×**).
+out **top-down** and colored by kind, with connected nodes lined up to keep the flow
+readable. A node with children shows a **± toggle** at its base: click it to **collapse
+or expand** that branch (its exclusive subtree folds away; nodes reached another way
+stay). When anything's collapsed, an **Expand all** button appears in the toolbar.
+**Click a node** to open the **Inspector drawer** inside the graph and edit that node
+live (close it with the **×**).
 **Drag from one node onto another** to add a choice link — it writes
 `- [target](key)` into the source node's body (undoable). **Right-click a node** to
 **Focus here** (see just the flow reachable from it), **Rename** it (the key changes
