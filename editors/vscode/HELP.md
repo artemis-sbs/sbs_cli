@@ -107,17 +107,19 @@ without leaving the map; close it with the **×** in its corner. The map spans t
 mission's `.amd` files, so a landmark defined in any file shows up.
 
 **Edit:** **drag a landmark** to a new cell to move it — its `At:` is rewritten in
-the `.amd` (undoable with Ctrl+Z, and the map re-renders); a plain click still jumps
-to the node. **Double-click an empty cell** to create a new landmark stub there.
-**Right-click a landmark** to **Rename** it (mission-wide — every reference follows),
-**Change Kind**, **Delete**, or **Go to**. **Regions** get two handles: drag the
-**centre dot** to move the region (rewrites `Center:`) and the **edge dot** to resize
-it (rewrites `Radius:`).
+the `.amd` (undoable with Ctrl+Z, and the map re-renders); a plain click opens the
+Inspector drawer. **Double-click an empty cell** to create a new landmark stub there,
+or **right-click empty space** for **New landmark here** / **New region here** (a
+region is scaffolded with `Center` / `Radius` / `Color`). **Right-click a landmark** to
+**Rename** it (mission-wide — every reference follows), **Change Kind**, **Delete**, or
+**Go to**. **Regions** get two handles: drag the **centre dot** to move the region
+(rewrites `Center:`) and the **edge dot** to resize it (rewrites `Radius:`).
 
 Navigation (both this and the graph): the view **opens fitted** to the window;
 **zoom** with the buttons or **Ctrl+scroll**, **Fit** again anytime, **drag the
 canvas** to pan, and toggle the **Overview** minimap (bottom-right) — click it to
-jump anywhere.
+jump anywhere. Your **pan and zoom are kept across edits** — moving a landmark or
+adding a node no longer snaps the view back to the fit.
 
 ### Story graph
 

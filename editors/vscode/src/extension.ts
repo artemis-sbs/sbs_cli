@@ -147,7 +147,7 @@ function esc(s: string): string {
 // bounded scroll area (real scrollbars), with zoom (buttons + Ctrl+wheel), fit-to-
 // window, drag-to-pan, and a minimap overview. `.lm`/`.nd` are click-to-jump.
 // `extraScript` is appended for view-specific behaviour (e.g. graph highlighting).
-function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string, extraScript = '', inspector?: { scripts: string; imgCsp: string }): string {
+function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string, extraScript = '', inspector?: { scripts: string; imgCsp: string }, initialView?: { zoom: number; sl: number; st: number } | null): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inspector ? inspector.imgCsp : ''} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
@@ -265,7 +265,7 @@ ${inspector ? inspector.scripts : ''}
     zoom = Math.max(0.2, Math.min(4, z)); apply();
     scroll.scrollLeft = fx * baseW * zoom - (cx ?? scroll.clientWidth / 2);
     scroll.scrollTop = fy * baseH * zoom - (cy ?? scroll.clientHeight / 2);
-    updateMini();
+    updateMini(); reportView();
   }
   document.getElementById('zin').onclick = () => setZoom(zoom * 1.2);
   document.getElementById('zout').onclick = () => setZoom(zoom / 1.2);
@@ -274,7 +274,12 @@ ${inspector ? inspector.scripts : ''}
   document.getElementById('bfit').onclick = doFit;
   document.getElementById('bmini').onclick = () => { miniWrap.classList.toggle('hidden'); updateMini(); };
   scroll.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); const r = scroll.getBoundingClientRect(); setZoom(zoom * (e.deltaY < 0 ? 1.1 : 0.9), e.clientX - r.left, e.clientY - r.top); } }, { passive: false });
-  scroll.addEventListener('scroll', () => { updateMini(); hideCtxMenu(); });
+
+  // Report pan/zoom so the extension can restore it after a refresh (no jump).
+  const INITIAL_VIEW = ${initialView ? JSON.stringify(initialView) : 'null'};
+  let _vsTimer = 0;
+  function reportView() { clearTimeout(_vsTimer); _vsTimer = setTimeout(() => vscode.postMessage({ type: 'viewState', zoom: zoom, sl: scroll.scrollLeft, st: scroll.scrollTop }), 200); }
+  scroll.addEventListener('scroll', () => { updateMini(); hideCtxMenu(); reportView(); });
   window.addEventListener('resize', updateMini);
 
   // --- drag to pan ---
@@ -303,8 +308,15 @@ ${inspector ? inspector.scripts : ''}
   }
 
   buildMini(); apply();
-  // fit on open if the content is larger than the viewport
-  requestAnimationFrame(() => { if (svg && (baseW > scroll.clientWidth || baseH > scroll.clientHeight)) { doFit(); } });
+  if (INITIAL_VIEW) {
+    // Restore the pan/zoom from before a refresh instead of re-fitting.
+    zoom = INITIAL_VIEW.zoom; apply();
+    scroll.scrollLeft = INITIAL_VIEW.sl; scroll.scrollTop = INITIAL_VIEW.st;
+    updateMini();
+  } else {
+    // fit on open if the content is larger than the viewport
+    requestAnimationFrame(() => { if (svg && (baseW > scroll.clientWidth || baseH > scroll.clientHeight)) { doFit(); } });
+  }
 
   // --- Inspector drawer (in-webview edit panel) ---
   ${inspector ? `
@@ -332,7 +344,7 @@ ${inspector ? inspector.scripts : ''}
 </script></body></html>`;
 }
 
-function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview): string {
+function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview, initialView?: { zoom: number; sl: number; st: number } | null): string {
   const pts = [
     ...map.landmarks.map((l) => ({ i: l.i, j: l.j })),
     ...map.regions.flatMap((r) => [
@@ -455,14 +467,28 @@ function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview): str
       else { const disc = g.querySelector('.disc'), handle = g.querySelector('.rhandle'); disc.setAttribute('r', baseR * GRID.cell); handle.setAttribute('cx', +disc.getAttribute('cx') + baseR * GRID.cell); }
     }
   });
+  // Convert a client point to the nearest grid cell (i, j).
+  function cellAt(clientX, clientY) {
+    const r = svg.getBoundingClientRect();
+    const ux = (clientX - r.left) / zoom, uy = (clientY - r.top) / zoom;
+    return { i: Math.round((ux - GRID.cell / 2) / GRID.cell) + GRID.minI,
+             j: Math.round((uy - GRID.cell / 2) / GRID.cell) + GRID.minJ };
+  }
   // Double-click an empty cell to create a landmark there.
   scroll.addEventListener('dblclick', (e) => {
     if (!svg || (e.target && e.target.closest && e.target.closest('.lm'))) { return; }
-    const r = svg.getBoundingClientRect();
-    const ux = (e.clientX - r.left) / zoom, uy = (e.clientY - r.top) / zoom;
-    const i = Math.round((ux - GRID.cell / 2) / GRID.cell) + GRID.minI;
-    const j = Math.round((uy - GRID.cell / 2) / GRID.cell) + GRID.minJ;
-    vscode.postMessage({ type: 'addLandmark', i: i, j: j });
+    const c = cellAt(e.clientX, e.clientY);
+    vscode.postMessage({ type: 'addLandmark', i: c.i, j: c.j });
+  });
+  // Right-click empty space to create a landmark or a region at that cell.
+  scroll.addEventListener('contextmenu', (e) => {
+    if (!svg || (e.target && e.target.closest && (e.target.closest('.lm') || e.target.closest('.rg')))) { return; }
+    e.preventDefault();
+    const c = cellAt(e.clientX, e.clientY);
+    showCtxMenu(e.clientX, e.clientY, [
+      { label: 'New landmark here', action: 'addLandmark' },
+      { label: 'New region here', action: 'addRegion' },
+    ], (action) => vscode.postMessage({ type: action, i: c.i, j: c.j }));
   });
   // Right-click a landmark for Rename / Change Kind / Delete / Go to.
   for (const g of scroll.querySelectorAll('.lm')) {
@@ -478,7 +504,7 @@ function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview): str
   `;
   const inj = faceInjection(webview, nonce);
   return webviewPage(title, '', styles, body, nonce, extraScript,
-    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp });
+    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp }, initialView);
 }
 
 // --- Inspector: edit a node's display / fields / body as a form ------------
@@ -980,7 +1006,7 @@ const NODE_TEMPLATES: Record<string, { section: string | null; sectionDisplay: s
   'Generic node': { section: null, sectionDisplay: '', keyBase: 'new_node', body: (k) => `\n### [New Node](${k})\n` },
 };
 
-function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Webview, focus?: Focus | null): string {
+function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Webview, focus?: Focus | null, initialView?: { zoom: number; sl: number; st: number } | null): string {
   // Focus: restrict to the flow reachable from a node, and lay out just that.
   let graph = fullGraph;
   let focusName = '';
@@ -1161,7 +1187,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   `;
   const inj = faceInjection(webview, nonce);
   return webviewPage(title, legend, styles, body, nonce, extraScript,
-    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp });
+    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp }, initialView);
 }
 
 async function showGraph(): Promise<void> {
@@ -1184,6 +1210,7 @@ async function showGraph(): Promise<void> {
   );
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   let focus: Focus | null = null;
+  let lastView: { zoom: number; sl: number; st: number } | null = null;
   panel.webview.html = renderGraph(graph, nonce(), panel.webview, focus);
 
   const drawer: Inspector = {
@@ -1199,13 +1226,15 @@ async function showGraph(): Promise<void> {
   const refresh = async () => {
     try {
       const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
-      panel.webview.html = renderGraph(g, nonce(), panel.webview, focus);
+      panel.webview.html = renderGraph(g, nonce(), panel.webview, focus, lastView);
     } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
   };
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line);
+    } else if (msg?.type === 'viewState') {
+      lastView = { zoom: msg.zoom, sl: msg.sl, st: msg.st };
     } else if (msg?.type === 'inspect') {
       await loadNodeInto(drawer, msg.uri, msg.key);
     } else if (msg?.type === 'inspReady') {
@@ -1345,6 +1374,7 @@ async function showMap(): Promise<void> {
     { enableScripts: true, localResourceRoots: faceWebviewRoots() },
   );
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
+  let lastView: { zoom: number; sl: number; st: number } | null = null;
   panel.webview.html = renderMap(map, nonce(), panel.webview);
 
   const drawer: Inspector = {
@@ -1360,17 +1390,27 @@ async function showMap(): Promise<void> {
   const refresh = async () => {
     try {
       const m = await client!.sendRequest<MissionMap>('amd/map', { textDocument: { uri } });
-      panel.webview.html = renderMap(m, nonce(), panel.webview);
+      panel.webview.html = renderMap(m, nonce(), panel.webview, lastView);
     } catch (e) { output.appendLine(`Map refresh failed: ${e}`); }
   };
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line);
+    } else if (msg?.type === 'viewState') {
+      lastView = { zoom: msg.zoom, sl: msg.sl, st: msg.st };
     } else if (msg?.type === 'inspect') {
       await loadNodeInto(drawer, msg.uri, msg.key);
     } else if (msg?.type === 'inspReady') {
       if (drawer.detail) { drawer.render(drawer.detail); }
+    } else if (msg?.type === 'addRegion') {
+      const d = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+      const key = `region_${msg.i}_${msg.j}`.replace(/-/g, 'm');
+      const stub = `\n### [New Region](${key})\n---\nCenter: ${msg.i}, ${msg.j}\nRadius: 4\nColor: #57f\n---\n`;
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(vscode.Uri.parse(uri), new vscode.Position(d.lineCount, 0), stub);
+      await vscode.workspace.applyEdit(edit);
+      await refresh();
     } else if (msg?.type === 'setAt' && msg.range) {
       const edit = new vscode.WorkspaceEdit();
       const r = msg.range;
