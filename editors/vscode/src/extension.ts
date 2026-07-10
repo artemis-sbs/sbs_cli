@@ -789,6 +789,11 @@ function wireInspector(insp: Inspector): void {
       insp.webview.postMessage({ type: p + 'setFace', value });
       return;
     }
+    if (msg?.type === p + 'faceEditor') {
+      faceHost = insp;
+      showFaceBuilder(typeof msg.face === 'string' ? msg.face : '');
+      return;
+    }
     if (msg?.type === p + 'applyNode') { await applyInspectorEdit(insp, msg); }
   });
 }
@@ -1023,7 +1028,7 @@ const NODE_TEMPLATES: Record<string, { section: string | null; sectionDisplay: s
   'Generic node': { section: null, sectionDisplay: '', keyBase: 'new_node', body: (k) => `\n### [New Node](${k})\n` },
 };
 
-function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Webview, focus?: Focus | null, initialView?: { zoom: number; sl: number; st: number } | null, collapsed?: Set<string>): string {
+function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Webview, focus?: Focus | null, initialView?: { zoom: number; sl: number; st: number } | null, collapsed?: Set<string>, hiddenSections?: Set<string>): string {
   // Focus: restrict to the flow reachable from a node, and lay out just that.
   let graph = fullGraph;
   let focusName = '';
@@ -1034,6 +1039,17 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
       edges: fullGraph.edges.filter((e) => keep.has(e.from) && keep.has(e.to)),
     };
     focusName = fullGraph.nodes.find((n) => n.key === focus.key)?.display ?? focus.key;
+  }
+
+  // Section filter: drop hidden sections BEFORE layout so the lanes recompact.
+  // Keep the full section list for the checkboxes so hidden ones can be re-shown.
+  const allSections = [...new Set(graph.nodes.map((n) => n.section))].sort();
+  if (hiddenSections && hiddenSections.size) {
+    const secByKey = new Map(graph.nodes.map((n) => [n.key, n.section]));
+    graph = {
+      nodes: graph.nodes.filter((n) => !hiddenSections.has(n.section)),
+      edges: graph.edges.filter((e) => !hiddenSections.has(secByKey.get(e.from) ?? '') && !hiddenSections.has(secByKey.get(e.to) ?? '')),
+    };
   }
 
   // Collapse: fold the exclusive subtree under a collapsed node. A node is
@@ -1179,12 +1195,11 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
       + `<span class="leg">hops: ${hopLabel}</span>`
       + `<button id="hinc" class="lbtn" title="More hops">+</button>`
     : '';
-  const sections = [...new Set(graph.nodes.map((n) => n.section))].sort();
   const expandBar = (collapsed && collapsed.size) ? `<button id="expandall" class="lbtn">Expand all</button>` : '';
   const legend = focusBar + expandBar
     + Object.entries(EDGE_COLOR)
       .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('')
-    + sections.map((s) => `<label class="filt"><input type="checkbox" checked data-section="${esc(s)}"> ${esc(s)}</label>`).join('');
+    + allSections.map((s) => `<label class="filt"><input type="checkbox"${hiddenSections?.has(s) ? '' : ' checked'} data-section="${esc(s)}"> ${esc(s || 'ungrouped')}</label>`).join('');
 
   const styles = `
   .lbtn { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); border: none; border-radius: 4px; padding: 2px 9px; margin-right: 8px; cursor: pointer; font-size: 11px; }
@@ -1215,15 +1230,10 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     for (const n of gnodes) { if (n.style.display !== 'none') n.style.opacity = adj.has(n.dataset.key) ? '1' : '0.2'; }
   }
   for (const n of gnodes) { n.addEventListener('mouseenter', () => highlight(n.dataset.key)); n.addEventListener('mouseleave', () => highlight(null)); }
-  function applyFilter() {
-    const hidden = new Set([...document.querySelectorAll('.filt input:not(:checked)')].map((c) => c.dataset.section));
-    const hiddenKeys = new Set();
-    for (const n of gnodes) { const off = hidden.has(n.dataset.section); n.style.display = off ? 'none' : ''; if (off) hiddenKeys.add(n.dataset.key); }
-    for (const p of edges) { p.style.display = (hiddenKeys.has(p.dataset.from) || hiddenKeys.has(p.dataset.to)) ? 'none' : ''; }
-    for (const l of scroll.querySelectorAll('.lane')) { l.style.display = hidden.has(l.dataset.section) ? 'none' : ''; }
-    for (const c of scroll.querySelectorAll('.ncaret')) { c.style.display = hiddenKeys.has(c.dataset.key) ? 'none' : ''; }
+  // Toggling a section re-renders server-side (lanes recompact around it).
+  for (const c of document.querySelectorAll('.filt input')) {
+    c.addEventListener('change', () => vscode.postMessage({ type: 'toggleSection', section: c.dataset.section, hidden: !c.checked }));
   }
-  for (const c of document.querySelectorAll('.filt input')) { c.addEventListener('change', applyFilter); }
 
   // Drag from one node to another to add a choice edge (- [display](target)).
   let connecting = null, tmpLine = null;
@@ -1325,7 +1335,8 @@ async function showGraph(): Promise<void> {
   let focus: Focus | null = null;
   let lastView: { zoom: number; sl: number; st: number } | null = null;
   const collapsed = new Set<string>();
-  panel.webview.html = renderGraph(graph, nonce(), panel.webview, focus, null, collapsed);
+  const hiddenSections = new Set<string>();
+  panel.webview.html = renderGraph(graph, nonce(), panel.webview, focus, null, collapsed, hiddenSections);
 
   const drawer: Inspector = {
     webview: panel.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
@@ -1339,7 +1350,7 @@ async function showGraph(): Promise<void> {
   const refresh = async () => {
     try {
       const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
-      panel.webview.html = renderGraph(g, nonce(), panel.webview, focus, lastView, collapsed);
+      panel.webview.html = renderGraph(g, nonce(), panel.webview, focus, lastView, collapsed, hiddenSections);
     } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
   };
   // One debounced refresh path for both own gestures and external edits.
@@ -1362,6 +1373,9 @@ async function showGraph(): Promise<void> {
       scheduleRefresh();
     } else if (msg?.type === 'expandAll') {
       collapsed.clear(); scheduleRefresh();
+    } else if (msg?.type === 'toggleSection') {
+      if (msg.hidden) { hiddenSections.add(msg.section); } else { hiddenSections.delete(msg.section); }
+      scheduleRefresh();
     } else if (msg?.type === 'inspect') {
       await loadNodeInto(drawer, msg.uri, msg.key);
     } else if (msg?.type === 'inspReady') {

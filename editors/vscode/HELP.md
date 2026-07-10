@@ -80,7 +80,8 @@ slider seeded from the existing string, not defaults), the face string updates l
 **Use this face** drops it back into the field. The builder (and the Inspector's Face field) shows a **live
 preview** composited from the Cosmos face atlases — the same renderer the browser mock
 uses — so long as the extension can find your install (it reads the art from
-`<cosmos>/data/graphics/`; set `amd.cosmosPath` if the preview stays blank). You can
+`<cosmos>/data/graphics/`; set `amd.cosmosPath` if the preview stays blank). **Click the
+face preview** to jump straight into the Face Builder, which now **applies as you edit**. You can
 also design a face in the in-game **Avatar Editor** (the LegendaryMissions
 `avatar_editor` addon), which copies the string to your clipboard on every change, then
 **Face… → Paste from Avatar Editor** to drop it in.
@@ -151,7 +152,8 @@ conversation or quest chain. While focused, the toolbar shows a **direction** to
 control (**− / +**, up to **all**) to widen or tighten the neighbourhood. **← Show
 all** returns to the whole mission. **Hover a node** to
 spotlight it and its direct links (everything else dims), and **filter by section**
-with the toolbar checkboxes (focus on just dialogue, or just quests). Great for spotting dead-end dialogue, unreachable quests, and the
+with the toolbar checkboxes — unchecking a section drops its whole lane and the
+remaining lanes **recompact** to close the gap. Great for spotting dead-end dialogue, unreachable quests, and the
 overall shape of a conversation. Same navigation as the map — fit-on-open, zoom, Fit,
 drag-to-pan, and the Overview minimap.
 

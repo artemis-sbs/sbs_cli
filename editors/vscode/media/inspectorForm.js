@@ -50,7 +50,8 @@
       .insp-root .sec { color: var(--vscode-descriptionForeground); font-size: 11px; }
       .insp-root .insp-addf, .insp-root .facebtn { background: var(--vscode-button-secondaryBackground, #444); color: var(--vscode-button-secondaryForeground, #fff); padding: 2px 8px; }
       .insp-root .facebtn { flex: 0 0 auto; margin: 0; }
-      .insp-root .insp-face { display: block; width: 110px; height: 110px; margin: 6px 0; border: 1px solid var(--vscode-input-border, #8884); border-radius: 4px; background: var(--vscode-input-background); }`;
+      .insp-root .insp-face { display: block; width: 110px; height: 110px; margin: 6px 0; border: 1px solid var(--vscode-input-border, #8884); border-radius: 4px; background: var(--vscode-input-background); cursor: pointer; }
+      .insp-root .insp-face:hover { border-color: var(--vscode-focusBorder, #58f); }`;
     document.head.appendChild(s);
   }
 
@@ -89,7 +90,7 @@
         `<h3>${esc(model.display || model.key)} <span class="sec">(${esc(model.key)})</span></h3>` +
         `<label class="k">Display</label><input class="insp-display" value="${esc(model.display)}"/>` +
         `<h4>Fields</h4><div class="insp-fields">${rows}</div>` +
-        (hasFace ? '<canvas class="insp-face" width="220" height="220"></canvas>' : '') +
+        (hasFace ? '<canvas class="insp-face" width="220" height="220" title="Click to edit in the Face Builder"></canvas>' : '') +
         `<button class="insp-addf">+ add field</button>` +
         `<h4>Body</h4><textarea class="insp-body" rows="14">${esc(model.body)}</textarea>` +
         `<div class="sec insp-status">Changes apply automatically.</div>`;
@@ -138,6 +139,10 @@
       } else if (t.classList.contains('facebtn')) {
         const ff = q('.facefield');
         vscode.postMessage({ type: prefix + 'buildFace', face: ff ? ff.value : '' });
+      } else if (t.classList.contains('insp-face')) {
+        // Click the face preview -> jump straight into the Build custom editor.
+        const ff = q('.facefield');
+        vscode.postMessage({ type: prefix + 'faceEditor', face: ff ? ff.value : '' });
       }
     }
 
