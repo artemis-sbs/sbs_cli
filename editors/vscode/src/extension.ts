@@ -1050,8 +1050,8 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   }
 
   const NW = 190, NH = 30, HGAP = 90, VGAP = 22;
-  const TB = true;   // top-down flow (Option C); set false for left-to-right
-  // Layer = flow axis (longest-path, cycle-safe: relax at most N times).
+  const flowLR = true;   // swimlanes flow left-to-right (Option B)
+  // Flow position = longest-path depth (cycle-safe: relax at most N times).
   const depth = new Map<string, number>(graph.nodes.map((n) => [n.key, 0]));
   for (let it = 0; it < graph.nodes.length; it++) {
     let changed = false;
@@ -1061,87 +1061,68 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     }
     if (!changed) { break; }
   }
-  // Layers as ordered key lists (insertion order to start).
-  const cols = new Map<number, string[]>();
-  for (const n of graph.nodes) { (cols.get(depth.get(n.key) ?? 0) ?? cols.set(depth.get(n.key) ?? 0, []).get(depth.get(n.key) ?? 0)!).push(n.key); }
-  const depths = [...cols.keys()].sort((a, b) => a - b);
-  const layers = depths.map((d) => cols.get(d)!);
+  const maxDepth = graph.nodes.reduce((m, n) => Math.max(m, depth.get(n.key) ?? 0), 0);
 
-  // Neighbours (both directions) for crossing/alignment heuristics.
+  // Swimlanes: one horizontal band per section, in first-appearance order.
+  const secOrder: string[] = [];
+  const secSeen = new Set<string>();
+  for (const n of graph.nodes) { if (!secSeen.has(n.section)) { secSeen.add(n.section); secOrder.push(n.section); } }
+
+  // Stack nodes that share a (section, depth) cell into sub-rows; order each
+  // cell by the barycenter of its neighbours to keep related nodes aligned.
   const nbr = new Map<string, string[]>(graph.nodes.map((n) => [n.key, []]));
   for (const e of graph.edges) { nbr.get(e.from)?.push(e.to); nbr.get(e.to)?.push(e.from); }
-
-  // Order within each layer by barycenter of neighbours -> fewer crossings.
-  const order = new Map<string, number>();
-  layers.forEach((layer) => layer.forEach((k, i) => order.set(k, i)));
-  for (let pass = 0; pass < 4; pass++) {
-    for (const layer of layers) {
+  const cells = new Map<string, string[]>();
+  for (const n of graph.nodes) { const kk = n.section + '|' + (depth.get(n.key) ?? 0); (cells.get(kk) ?? cells.set(kk, []).get(kk)!).push(n.key); }
+  const rowInLane = new Map<string, number>();
+  for (const [, arr] of cells) { arr.forEach((k, i) => rowInLane.set(k, i)); }
+  for (let pass = 0; pass < 3; pass++) {
+    for (const [, arr] of cells) {
       const bary = new Map<string, number>();
-      for (const k of layer) {
-        const ns = nbr.get(k)!;
-        bary.set(k, ns.length ? ns.reduce((s, t) => s + (order.get(t) ?? 0), 0) / ns.length : (order.get(k) ?? 0));
-      }
-      layer.sort((a, b) => (bary.get(a)! - bary.get(b)!) || (order.get(a)! - order.get(b)!));
-      layer.forEach((k, i) => order.set(k, i));
+      for (const k of arr) { const ns = nbr.get(k)!; bary.set(k, ns.length ? ns.reduce((s, t) => s + (rowInLane.get(t) ?? 0), 0) / ns.length : (rowInLane.get(k) ?? 0)); }
+      arr.sort((a, b) => (bary.get(a)! - bary.get(b)!) || a.localeCompare(b));
+      arr.forEach((k, i) => rowInLane.set(k, i));
     }
   }
-
-  // Cross coordinate: pull each node toward the median of its neighbours, then
-  // enforce order + minimum separation. Aligns connected nodes; no overlaps.
-  const cross = new Map<string, number>();
-  layers.forEach((layer) => layer.forEach((k, i) => cross.set(k, i)));
-  for (let pass = 0; pass < 6; pass++) {
-    for (const layer of layers) {
-      for (const k of layer) {
-        const cs = nbr.get(k)!.map((t) => cross.get(t)!).sort((a, b) => a - b);
-        if (cs.length) {
-          const m = cs.length % 2 ? cs[(cs.length - 1) / 2] : (cs[cs.length / 2 - 1] + cs[cs.length / 2]) / 2;
-          cross.set(k, m);
-        }
-      }
-      const ordered = layer.slice().sort((a, b) => order.get(a)! - order.get(b)!);
-      for (let i = 1; i < ordered.length; i++) {
-        const lo = cross.get(ordered[i - 1])! + 1;
-        if (cross.get(ordered[i])! < lo) { cross.set(ordered[i], lo); }
-      }
-    }
-  }
-  // Centre each layer within the widest layer's span.
-  let widest = 0;
-  for (const layer of layers) {
-    if (!layer.length) { continue; }
-    const cs = layer.map((k) => cross.get(k)!);
-    widest = Math.max(widest, Math.max(...cs) - Math.min(...cs));
-  }
-  let maxCross = 0;
-  for (const layer of layers) {
-    if (!layer.length) { continue; }
-    const cs = layer.map((k) => cross.get(k)!);
-    const lo = Math.min(...cs), hi = Math.max(...cs);
-    const shift = (widest - (hi - lo)) / 2 - lo;
-    for (const k of layer) { const v = cross.get(k)! + shift; cross.set(k, v); maxCross = Math.max(maxCross, v); }
+  const laneRows = new Map<string, number>();
+  for (const sec of secOrder) {
+    let h = 1;
+    for (let d = 0; d <= maxDepth; d++) { h = Math.max(h, (cells.get(sec + '|' + d) ?? []).length); }
+    laneRows.set(sec, h);
   }
 
-  // Project (layer, cross) -> (x, y) by orientation.
-  const LSTEP = NW + HGAP, CSTEP = NH + VGAP;
+  // Lane vertical placement.
+  const LABEL_H = 22, LANE_PAD = 10, LANE_GAP = 14, XPAD = 130;
+  const laneTop = new Map<string, number>();
+  let yCursor = 24;
+  for (const sec of secOrder) {
+    laneTop.set(sec, yCursor + LABEL_H);
+    yCursor += LABEL_H + laneRows.get(sec)! * (NH + VGAP) + LANE_PAD + LANE_GAP;
+  }
   const pos = new Map<string, { x: number; y: number }>();
   for (const n of graph.nodes) {
-    const L = depth.get(n.key) ?? 0, C = cross.get(n.key) ?? 0;
-    pos.set(n.key, !TB
-      ? { x: L * LSTEP + 20, y: C * CSTEP + 40 }
-      : { x: C * LSTEP + 20, y: L * CSTEP + 40 });
+    pos.set(n.key, { x: (depth.get(n.key) ?? 0) * (NW + HGAP) + XPAD, y: laneTop.get(n.section)! + (rowInLane.get(n.key) ?? 0) * (NH + VGAP) });
   }
-  const spanLayers = depths.length, spanCross = maxCross + 1;
-  const W = (!TB ? spanLayers * LSTEP : spanCross * LSTEP) + 40;
-  const H = Math.max((!TB ? spanCross * CSTEP : spanLayers * CSTEP) + 60, 120);
+  const W = (maxDepth + 1) * (NW + HGAP) + XPAD + 40;
+  const H = Math.max(yCursor, 120);
+
+  // Lane bands + labels, drawn behind the graph.
+  let laneSvg = '';
+  for (const sec of secOrder) {
+    const top = laneTop.get(sec)! - LABEL_H;
+    const ht = LABEL_H + laneRows.get(sec)! * (NH + VGAP) + LANE_PAD;
+    const hue = sectionHue(sec);
+    laneSvg += `<rect x="0" y="${top}" width="${W}" height="${ht}" rx="6" fill="hsl(${hue},45%,50%)" fill-opacity="0.06" stroke="hsl(${hue},45%,55%)" stroke-opacity="0.3"/>`
+      + `<text x="12" y="${top + 15}" class="lanelabel" fill="hsl(${hue},60%,72%)">${esc(sec || 'ungrouped')}</text>`;
+  }
 
   const clip = (s: string) => (s.length > 26 ? s.slice(0, 25) + '…' : s);
-  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${laneSvg}`;
   for (const e of graph.edges) {
     const a = pos.get(e.from), b = pos.get(e.to);
     if (!a || !b) { continue; }
     let d: string;
-    if (!TB) {
+    if (flowLR) {
       const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
       d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
     } else {
@@ -1165,7 +1146,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     // Collapse/expand toggle for nodes that have children (fan-out point).
     if (hasChildren.has(n.key)) {
       const isC = !!(collapsed && collapsed.has(n.key));
-      const cx = p.x + NW / 2, cy = p.y + NH;
+      const cx = flowLR ? p.x + NW : p.x + NW / 2, cy = flowLR ? p.y + NH / 2 : p.y + NH;
       const tip = isC ? `${hiddenCount.get(n.key) ?? 0} hidden — click to expand` : 'click to collapse';
       svg += `<g class="ncaret" data-key="${esc(n.key)}"><title>${esc(tip)}</title>`
         + `<circle cx="${cx}" cy="${cy}" r="7" fill="hsl(${h},45%,18%)" stroke="hsl(${h},60%,55%)"/>`
@@ -1200,6 +1181,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   .ncaret { cursor: pointer; }
   .ncaret:hover circle { stroke-width: 2.5; }
   .ncsign { fill: #fff; font-size: 12px; text-anchor: middle; pointer-events: none; }
+  .lanelabel { font-size: 12px; font-weight: 600; }
   .filt { font-size: 11px; margin-right: 8px; color: var(--vscode-descriptionForeground); cursor: pointer; }
   .filt input { vertical-align: middle; margin-right: 2px; }`;
   const title = focus
