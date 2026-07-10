@@ -298,10 +298,10 @@ ${inspector ? inspector.scripts : ''}
     updateMini();
   });
 
-  // --- click to jump + edit in the docked Inspector (suppressed after a drag) ---
-  for (const g of scroll.querySelectorAll('.lm, .nd')) {
+  // --- click to jump + edit in the Inspector (suppressed after a drag) ---
+  for (const g of scroll.querySelectorAll('.lm, .nd, .rg')) {
     g.addEventListener('click', () => {
-      if (moved) { return; }
+      if (moved || !g.dataset.key) { return; }
       vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) });
       vscode.postMessage({ type: 'inspect', uri: g.dataset.uri, key: g.dataset.key });
     });
@@ -374,9 +374,12 @@ function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview, init
     const col = /^#[0-9a-fA-F]{3,8}$/.test(r.color) ? r.color : '#88aaff';
     const cx = x(r.i), cy = y(r.j), rad = r.radius * cell;
     const editable = r.centerRange && r.radiusRange;
+    // Always carry the id data so a click can open the Inspector; editable
+    // regions additionally carry the ranges the drag handles rewrite.
+    const idData = ` data-uri="${esc(r.uri)}" data-key="${esc(r.key)}" data-line="${r.line}"`;
     const data = editable
-      ? ` data-uri="${esc(r.uri)}" data-i="${r.i}" data-j="${r.j}" data-radius="${r.radius}" data-centerrange='${JSON.stringify(r.centerRange)}' data-radiusrange='${JSON.stringify(r.radiusRange)}'`
-      : '';
+      ? `${idData} data-i="${r.i}" data-j="${r.j}" data-radius="${r.radius}" data-centerrange='${JSON.stringify(r.centerRange)}' data-radiusrange='${JSON.stringify(r.radiusRange)}'`
+      : idData;
     svg += `<g class="rg${editable ? ' editable' : ''}"${data}>`
       + `<circle class="disc" cx="${cx}" cy="${cy}" r="${rad}" fill="${col}" fill-opacity="0.15" stroke="${col}" stroke-opacity="0.5"/>`
       + `<text x="${cx}" y="${cy - rad + 14}" class="rlabel">${esc(r.display)}</text>`
