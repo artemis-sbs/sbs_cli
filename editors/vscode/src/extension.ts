@@ -1021,8 +1021,9 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     };
     focusName = fullGraph.nodes.find((n) => n.key === focus.key)?.display ?? focus.key;
   }
-  const NW = 190, NH = 30, HGAP = 90, VGAP = 16;
-  // depth = longest-path layer (cycle-safe: relax at most N times)
+  const NW = 190, NH = 30, HGAP = 90, VGAP = 22;
+  const ORIENT: 'LR' | 'TB' = 'LR';   // A keeps left-to-right; C flips this to 'TB'
+  // Layer = flow axis (longest-path, cycle-safe: relax at most N times).
   const depth = new Map<string, number>(graph.nodes.map((n) => [n.key, 0]));
   for (let it = 0; it < graph.nodes.length; it++) {
     let changed = false;
@@ -1032,22 +1033,79 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     }
     if (!changed) { break; }
   }
-  const cols = new Map<number, GraphNode[]>();
-  for (const n of graph.nodes) {
-    const d = depth.get(n.key) ?? 0;
-    if (!cols.has(d)) { cols.set(d, []); }
-    cols.get(d)!.push(n);
-  }
-  const pos = new Map<string, { x: number; y: number }>();
+  // Layers as ordered key lists (insertion order to start).
+  const cols = new Map<number, string[]>();
+  for (const n of graph.nodes) { (cols.get(depth.get(n.key) ?? 0) ?? cols.set(depth.get(n.key) ?? 0, []).get(depth.get(n.key) ?? 0)!).push(n.key); }
   const depths = [...cols.keys()].sort((a, b) => a - b);
-  let maxRows = 0;
-  depths.forEach((d, ci) => {
-    const arr = cols.get(d)!;
-    arr.forEach((n, r) => pos.set(n.key, { x: ci * (NW + HGAP) + 20, y: r * (NH + VGAP) + 40 }));
-    maxRows = Math.max(maxRows, arr.length);
-  });
-  const W = depths.length * (NW + HGAP) + 40;
-  const H = Math.max(maxRows * (NH + VGAP) + 60, 120);
+  const layers = depths.map((d) => cols.get(d)!);
+
+  // Neighbours (both directions) for crossing/alignment heuristics.
+  const nbr = new Map<string, string[]>(graph.nodes.map((n) => [n.key, []]));
+  for (const e of graph.edges) { nbr.get(e.from)?.push(e.to); nbr.get(e.to)?.push(e.from); }
+
+  // Order within each layer by barycenter of neighbours -> fewer crossings.
+  const order = new Map<string, number>();
+  layers.forEach((layer) => layer.forEach((k, i) => order.set(k, i)));
+  for (let pass = 0; pass < 4; pass++) {
+    for (const layer of layers) {
+      const bary = new Map<string, number>();
+      for (const k of layer) {
+        const ns = nbr.get(k)!;
+        bary.set(k, ns.length ? ns.reduce((s, t) => s + (order.get(t) ?? 0), 0) / ns.length : (order.get(k) ?? 0));
+      }
+      layer.sort((a, b) => (bary.get(a)! - bary.get(b)!) || (order.get(a)! - order.get(b)!));
+      layer.forEach((k, i) => order.set(k, i));
+    }
+  }
+
+  // Cross coordinate: pull each node toward the median of its neighbours, then
+  // enforce order + minimum separation. Aligns connected nodes; no overlaps.
+  const cross = new Map<string, number>();
+  layers.forEach((layer) => layer.forEach((k, i) => cross.set(k, i)));
+  for (let pass = 0; pass < 6; pass++) {
+    for (const layer of layers) {
+      for (const k of layer) {
+        const cs = nbr.get(k)!.map((t) => cross.get(t)!).sort((a, b) => a - b);
+        if (cs.length) {
+          const m = cs.length % 2 ? cs[(cs.length - 1) / 2] : (cs[cs.length / 2 - 1] + cs[cs.length / 2]) / 2;
+          cross.set(k, m);
+        }
+      }
+      const ordered = layer.slice().sort((a, b) => order.get(a)! - order.get(b)!);
+      for (let i = 1; i < ordered.length; i++) {
+        const lo = cross.get(ordered[i - 1])! + 1;
+        if (cross.get(ordered[i])! < lo) { cross.set(ordered[i], lo); }
+      }
+    }
+  }
+  // Centre each layer within the widest layer's span.
+  let widest = 0;
+  for (const layer of layers) {
+    if (!layer.length) { continue; }
+    const cs = layer.map((k) => cross.get(k)!);
+    widest = Math.max(widest, Math.max(...cs) - Math.min(...cs));
+  }
+  let maxCross = 0;
+  for (const layer of layers) {
+    if (!layer.length) { continue; }
+    const cs = layer.map((k) => cross.get(k)!);
+    const lo = Math.min(...cs), hi = Math.max(...cs);
+    const shift = (widest - (hi - lo)) / 2 - lo;
+    for (const k of layer) { const v = cross.get(k)! + shift; cross.set(k, v); maxCross = Math.max(maxCross, v); }
+  }
+
+  // Project (layer, cross) -> (x, y) by orientation.
+  const LSTEP = NW + HGAP, CSTEP = NH + VGAP;
+  const pos = new Map<string, { x: number; y: number }>();
+  for (const n of graph.nodes) {
+    const L = depth.get(n.key) ?? 0, C = cross.get(n.key) ?? 0;
+    pos.set(n.key, ORIENT === 'LR'
+      ? { x: L * LSTEP + 20, y: C * CSTEP + 40 }
+      : { x: C * LSTEP + 20, y: L * CSTEP + 40 });
+  }
+  const spanLayers = depths.length, spanCross = maxCross + 1;
+  const W = (ORIENT === 'LR' ? spanLayers * LSTEP : spanCross * LSTEP) + 40;
+  const H = Math.max((ORIENT === 'LR' ? spanCross * CSTEP : spanLayers * CSTEP) + 60, 120);
 
   const clip = (s: string) => (s.length > 26 ? s.slice(0, 25) + '…' : s);
   let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
