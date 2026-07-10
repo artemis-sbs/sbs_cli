@@ -1221,7 +1221,6 @@ async function showGraph(): Promise<void> {
   };
   drawerInspectors.add(drawer);
   wireInspector(drawer);
-  panel.onDidDispose(() => { drawerInspectors.delete(drawer); if (faceHost === drawer) { faceHost = undefined; } });
 
   const refresh = async () => {
     try {
@@ -1229,6 +1228,15 @@ async function showGraph(): Promise<void> {
       panel.webview.html = renderGraph(g, nonce(), panel.webview, focus, lastView);
     } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
   };
+  // One debounced refresh path for both own gestures and external edits.
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleRefresh = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { void refresh(); }, 250); };
+  // Refresh when the mission's .amd changes elsewhere (text editor, inspector),
+  // but not while this graph's own drawer is applying an edit (keeps its focus).
+  const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (e.document.languageId === 'amd' && !drawer.busy) { scheduleRefresh(); }
+  });
+  panel.onDidDispose(() => { drawerInspectors.delete(drawer); if (faceHost === drawer) { faceHost = undefined; } docSub.dispose(); });
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
@@ -1244,14 +1252,14 @@ async function showGraph(): Promise<void> {
       edit.insert(vscode.Uri.parse(msg.uri), new vscode.Position(msg.addLine, 0),
         `- [${msg.toDisplay}](${msg.toKey})\n`);
       await vscode.workspace.applyEdit(edit);
-      await refresh();
+      scheduleRefresh();
     } else if (msg?.type === 'nodeMenu') {
       const pick = msg.action || await vscode.window.showQuickPick(['Edit…', 'Focus here', 'Go to', 'Rename…', 'Delete'],
         { placeHolder: `${msg.display} (${msg.key})` });
       if (pick === 'Edit…') {
         showInspector(uri, msg.key);
       } else if (pick === 'Focus here') {
-        focus = { key: msg.key, dir: 'down', hops: Infinity }; await refresh();
+        focus = { key: msg.key, dir: 'down', hops: Infinity }; scheduleRefresh();
       } else if (pick === 'Go to') {
         openLocation(msg.uri, msg.line);
       } else if (pick === 'Rename…') {
@@ -1263,7 +1271,7 @@ async function showGraph(): Promise<void> {
           const we = await client!.sendRequest<{ changes: Record<string, { range: LspRange; newText: string }[]> }>(
             'amd/rename', { textDocument: { uri }, key: msg.key, newName: nn });
           await vscode.workspace.applyEdit(wsEditFromChanges(we.changes));
-          await refresh();
+          scheduleRefresh();
         }
       } else if (pick === 'Delete') {
         const ok = await vscode.window.showWarningMessage(
@@ -1273,7 +1281,7 @@ async function showGraph(): Promise<void> {
           const edit = new vscode.WorkspaceEdit();
           edit.delete(vscode.Uri.parse(msg.uri), new vscode.Range(msg.line, 0, msg.addLine, 0));
           await vscode.workspace.applyEdit(edit);
-          await refresh();
+          scheduleRefresh();
         }
       }
     } else if (msg?.type === 'edgeMenu') {
@@ -1294,12 +1302,12 @@ async function showGraph(): Promise<void> {
         const edit = new vscode.WorkspaceEdit();
         edit.replace(vscode.Uri.parse(msg.uri), rng(c.range), `- [${label}](${c.target})${trailer}`);
         await vscode.workspace.applyEdit(edit);
-        await refresh();
+        scheduleRefresh();
       } else if (pick === 'Delete link') {
         const edit = new vscode.WorkspaceEdit();
         edit.delete(vscode.Uri.parse(msg.uri), new vscode.Range(msg.line, 0, msg.line + 1, 0));
         await vscode.workspace.applyEdit(edit);
-        await refresh();
+        scheduleRefresh();
       } else if (pick === 'Rewire…') {
         const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
         const items = g.nodes.filter((n) => n.key !== msg.from).map((n) => ({ label: n.key, description: n.display }));
@@ -1310,20 +1318,20 @@ async function showGraph(): Promise<void> {
           edit.replace(vscode.Uri.parse(msg.uri),
             new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character), target.label);
           await vscode.workspace.applyEdit(edit);
-          await refresh();
+          scheduleRefresh();
         }
       }
     } else if (msg?.type === 'focus') {
       focus = msg.key ? { key: msg.key, dir: 'down', hops: Infinity } : null;
-      await refresh();
+      scheduleRefresh();
     } else if (msg?.type === 'focusDir' && focus) {
       focus.dir = focus.dir === 'down' ? 'up' : focus.dir === 'up' ? 'both' : 'down';
-      await refresh();
+      scheduleRefresh();
     } else if (msg?.type === 'focusHops' && focus) {
       focus.hops = msg.delta < 0
         ? (focus.hops === Infinity ? 5 : Math.max(1, focus.hops - 1))
         : (focus.hops === Infinity ? Infinity : (focus.hops >= 5 ? Infinity : focus.hops + 1));
-      await refresh();
+      scheduleRefresh();
     } else if (msg?.type === 'addNode') {
       const typeName = await vscode.window.showQuickPick(Object.keys(NODE_TEMPLATES),
         { placeHolder: 'New node type' });
@@ -1347,7 +1355,7 @@ async function showGraph(): Promise<void> {
       const edit = new vscode.WorkspaceEdit();
       edit.insert(vscode.Uri.parse(uri), new vscode.Position(insertLine, 0), text);
       await vscode.workspace.applyEdit(edit);
-      await refresh();
+      scheduleRefresh();
       showInspector(uri, key);   // open the inspector on the new node to fill it in
     }
   });
@@ -1385,7 +1393,6 @@ async function showMap(): Promise<void> {
   };
   drawerInspectors.add(drawer);
   wireInspector(drawer);
-  panel.onDidDispose(() => { drawerInspectors.delete(drawer); if (faceHost === drawer) { faceHost = undefined; } });
 
   const refresh = async () => {
     try {
@@ -1393,6 +1400,15 @@ async function showMap(): Promise<void> {
       panel.webview.html = renderMap(m, nonce(), panel.webview, lastView);
     } catch (e) { output.appendLine(`Map refresh failed: ${e}`); }
   };
+  // One debounced refresh path for both own gestures and external edits.
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleRefresh = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { void refresh(); }, 250); };
+  // Refresh when the mission's .amd changes elsewhere (text editor, inspector),
+  // but not while this map's own drawer is applying an edit (keeps its focus).
+  const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (e.document.languageId === 'amd' && !drawer.busy) { scheduleRefresh(); }
+  });
+  panel.onDidDispose(() => { drawerInspectors.delete(drawer); if (faceHost === drawer) { faceHost = undefined; } docSub.dispose(); });
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
@@ -1410,7 +1426,7 @@ async function showMap(): Promise<void> {
       const edit = new vscode.WorkspaceEdit();
       edit.insert(vscode.Uri.parse(uri), new vscode.Position(d.lineCount, 0), stub);
       await vscode.workspace.applyEdit(edit);
-      await refresh();
+      scheduleRefresh();
     } else if (msg?.type === 'setAt' && msg.range) {
       const edit = new vscode.WorkspaceEdit();
       const r = msg.range;
@@ -1418,14 +1434,14 @@ async function showMap(): Promise<void> {
         new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character),
         `${msg.i}, ${msg.j}`);
       await vscode.workspace.applyEdit(edit);
-      await refresh();   // re-render at the new position
+      scheduleRefresh();   // re-render at the new position
     } else if (msg?.type === 'setRange' && msg.range) {
       const edit = new vscode.WorkspaceEdit();
       const r = msg.range;
       edit.replace(vscode.Uri.parse(msg.uri),
         new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character), msg.text);
       await vscode.workspace.applyEdit(edit);
-      await refresh();
+      scheduleRefresh();
     } else if (msg?.type === 'addLandmark') {
       const d = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
       const key = `landmark_${msg.i}_${msg.j}`.replace(/-/g, 'm');
@@ -1433,7 +1449,7 @@ async function showMap(): Promise<void> {
       const edit = new vscode.WorkspaceEdit();
       edit.insert(vscode.Uri.parse(uri), new vscode.Position(d.lineCount, 0), stub);
       await vscode.workspace.applyEdit(edit);
-      await refresh();
+      scheduleRefresh();
     } else if (msg?.type === 'lmMenu') {
       const items = ['Edit…', 'Go to', 'Rename…'];
       if (msg.kindRange) { items.push('Change Kind…'); }
@@ -1452,7 +1468,7 @@ async function showMap(): Promise<void> {
           const we = await client!.sendRequest<{ changes: Record<string, { range: LspRange; newText: string }[]> }>(
             'amd/rename', { textDocument: { uri }, key: msg.key, newName: nn });
           await vscode.workspace.applyEdit(wsEditFromChanges(we.changes));
-          await refresh();
+          scheduleRefresh();
         }
       } else if (pick === 'Change Kind…') {
         const kind = await vscode.window.showQuickPick(['derelict', 'station', 'worldlet'],
@@ -1463,7 +1479,7 @@ async function showMap(): Promise<void> {
           edit.replace(vscode.Uri.parse(msg.uri),
             new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character), kind);
           await vscode.workspace.applyEdit(edit);
-          await refresh();
+          scheduleRefresh();
         }
       } else if (pick === 'Delete') {
         const ok = await vscode.window.showWarningMessage(
@@ -1473,7 +1489,7 @@ async function showMap(): Promise<void> {
           const edit = new vscode.WorkspaceEdit();
           edit.delete(vscode.Uri.parse(msg.uri), new vscode.Range(msg.line, 0, msg.addLine, 0));
           await vscode.workspace.applyEdit(edit);
-          await refresh();
+          scheduleRefresh();
         }
       }
     }
