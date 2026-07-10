@@ -75,9 +75,14 @@ uses — so long as the extension can find your install (it reads the art from
 `<cosmos>/data/graphics/`; set `amd.cosmosPath` if the preview stays blank). You can
 also design a face in the in-game **Avatar Editor** (the LegendaryMissions
 `avatar_editor` addon), which copies the string to your clipboard on every change, then
-**Face… → Paste from Avatar Editor** to drop it in. Hit **Apply changes** and it rewrites just those parts of the `.amd`
-(undoable). It's the way to author content without editing AMD syntax by hand — the
-map and graph give you the structure and geography; the Inspector fills in the words.
+**Face… → Paste from Avatar Editor** to drop it in.
+
+**Edits apply automatically** — there's no Apply button. As you type, the change is
+written into just that part of the `.amd` a moment later (each edit is undoable). It's
+also **two-way**: edit the `.amd` (or the map/graph) and the open Inspector updates to
+match, without disturbing a field you're mid-edit. It's the way to author content
+without editing AMD syntax by hand — the map and graph give you the structure and
+geography; the Inspector fills in the words.
 
 Nodes and landmarks with problems show a **badge** in the Story Graph and Map — **red**
 for an error, **yellow** for a warning; hover it for the count. Fix issues where you see

@@ -454,6 +454,13 @@ interface NodeDetail {
 let inspectorPanel: vscode.WebviewPanel | undefined;
 let inspectorUri = '';
 let inspectorDetail: NodeDetail | undefined;
+// Live-sync state: the Inspector auto-applies (debounced in the webview) and
+// mirrors external edits back. `inspectorSelfEdit` swallows the echo from our
+// own applyEdit; the busy/queued pair serialises overlapping applies.
+let inspectorSelfEdit = false;
+let inspectorApplyBusy = false;
+let inspectorApplyQueued: { display: string; fields: NodeField[]; body: string } | undefined;
+let inspectorSyncTimer: ReturnType<typeof setTimeout> | undefined;
 
 function rng(r: LspRange): vscode.Range {
   return new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
@@ -552,33 +559,71 @@ ${facePreview}
 <button id="addf">+ add field</button>
 <h4>Body</h4>
 <textarea id="body" rows="14">${esc(d.bodyText)}</textarea>
-<div><button id="apply">Apply changes</button></div>
+<div class="sec" id="status">Changes apply automatically.</div>
 ${inj.scripts}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  const fieldsEl = document.getElementById('fields');
+  const displayEl = document.getElementById('display');
+  const bodyEl = document.getElementById('body');
+  const statusEl = document.getElementById('status');
   const _facePreview = document.getElementById('facePreview');
   const _faceCtx = _facePreview ? _facePreview.getContext('2d') : null;
   function _drawFacePreview(str) { if (_faceCtx && window.FaceRender) { FaceRender.drawString(_facePreview, _faceCtx, str); } }
   if (_facePreview) { _drawFacePreview(${JSON.stringify(faceVal)}); }
+
+  // Collect the current form state (what the .amd should become).
+  function collect() {
+    const fields = [...fieldsEl.querySelectorAll('.frow')].map((r) => ({
+      label: r.querySelector('.flabel').value.trim(), value: r.querySelector('.fval').value.trim(),
+    })).filter((f) => f.label);
+    return { display: displayEl.value, fields, body: bodyEl.value };
+  }
+  // Debounced live apply — no button; edits flow to the .amd on idle.
+  let _t = 0;
+  function scheduleApply() {
+    statusEl.textContent = 'Editing…';
+    clearTimeout(_t);
+    _t = setTimeout(() => { statusEl.textContent = 'Saved'; vscode.postMessage({ type: 'applyNode', ...collect() }); }, 300);
+  }
+  // Any input in the form (existing or future rows) schedules an apply.
+  document.body.addEventListener('input', scheduleApply);
+  document.body.addEventListener('change', scheduleApply);
+
   document.getElementById('addf').addEventListener('click', () => {
     const div = document.createElement('div'); div.className = 'frow';
     div.innerHTML = '<input class="flabel" placeholder="field"/><span>:</span><input class="fval" placeholder="value"/>';
-    document.getElementById('fields').appendChild(div);
+    fieldsEl.appendChild(div);
+    div.querySelector('.flabel').focus();
   });
-  document.getElementById('apply').addEventListener('click', () => {
-    const display = document.getElementById('display').value;
-    const fields = [...document.querySelectorAll('.frow')].map((r) => ({
-      label: r.querySelector('.flabel').value.trim(), value: r.querySelector('.fval').value.trim(),
-    })).filter((f) => f.label);
-    const body = document.getElementById('body').value;
-    vscode.postMessage({ type: 'applyNode', display, fields, body });
-  });
+
   const facebtn = document.querySelector('.facebtn');
   const _faceField = document.querySelector('.facefield');
   if (facebtn) { facebtn.addEventListener('click', () => vscode.postMessage({ type: 'buildFace', face: _faceField ? _faceField.value : '' })); }
   if (_faceField) { _faceField.addEventListener('input', () => _drawFacePreview(_faceField.value)); }
+
+  // Reverse sync: the extension sends fresh values when the .amd changes
+  // elsewhere. Patch only fields the user isn't currently editing.
   window.addEventListener('message', (e) => {
-    if (e.data && e.data.type === 'setFace') { const el = document.querySelector('.facefield'); if (el) { el.value = e.data.value; } _drawFacePreview(e.data.value); }
+    const m = e.data;
+    if (!m) { return; }
+    if (m.type === 'setFace') {
+      const el = document.querySelector('.facefield'); if (el) { el.value = m.value; } _drawFacePreview(m.value); scheduleApply(); return;
+    }
+    if (m.type === 'patch') {
+      const active = document.activeElement;
+      const setIf = (el, val) => { if (el && el !== active && el.value !== val) { el.value = val; } };
+      setIf(displayEl, m.display);
+      setIf(bodyEl, m.body);
+      const rows = [...fieldsEl.querySelectorAll('.frow')];
+      // Update matching labels' values; only touch rows whose inputs aren't focused.
+      for (const f of m.fields) {
+        const row = rows.find((r) => r.querySelector('.flabel').value.trim().toLowerCase() === f.label.toLowerCase());
+        if (row) { setIf(row.querySelector('.fval'), f.value); }
+      }
+      const ff = document.querySelector('.facefield'); if (ff) { _drawFacePreview(ff.value); }
+      statusEl.textContent = 'Saved';
+    }
   });
 </script></body></html>`;
 }
@@ -724,24 +769,73 @@ async function showInspector(uri: string, key: string): Promise<void> {
         inspectorPanel?.webview.postMessage({ type: 'setFace', value });
         return;
       }
-      if (msg?.type !== 'applyNode' || !inspectorDetail) { return; }
-      const d = inspectorDetail;
-      const edit = new vscode.WorkspaceEdit();
-      const u = vscode.Uri.parse(inspectorUri);
-      if (d.displayRange && msg.display !== d.display) { edit.replace(u, rng(d.displayRange), msg.display); }
-      const fieldText = (msg.fields as NodeField[]).map((f) => `${f.label}: ${f.value}`).join('\n');
-      if (d.fenceRange) { edit.replace(u, rng(d.fenceRange), fieldText); }
-      else if (fieldText) { edit.insert(u, new vscode.Position(d.bodyRange.start.line, 0), `---\n${fieldText}\n---\n`); }
-      let body = msg.body as string;
-      if (body && !body.endsWith('\n')) { body += '\n'; }
-      edit.replace(u, rng(d.bodyRange), body);
-      await vscode.workspace.applyEdit(edit);
-      await showInspector(inspectorUri, d.key);   // re-fetch fresh ranges
+      if (msg?.type === 'applyNode') { await applyInspectorEdit(msg); }
     });
   }
   const inspNonce = String(Date.now()) + Math.random().toString(36).slice(2);
   inspectorPanel.webview.html = renderInspector(detail, inspNonce, faceInjection(inspectorPanel.webview, inspNonce));
   inspectorPanel.reveal(vscode.ViewColumn.Beside, true);
+}
+
+// Write the form's current state into the .amd — only the parts that changed —
+// then refresh ranges WITHOUT rebuilding the webview (so focus/caret survive).
+// Serialised so a fast typist's overlapping debounces can't interleave edits.
+async function applyInspectorEdit(msg: { display: string; fields: NodeField[]; body: string }): Promise<void> {
+  if (!client || !inspectorDetail) { return; }
+  if (inspectorApplyBusy) { inspectorApplyQueued = msg; return; }
+  inspectorApplyBusy = true;
+  try {
+    const d = inspectorDetail;
+    const u = vscode.Uri.parse(inspectorUri);
+    const edit = new vscode.WorkspaceEdit();
+    let changed = false;
+
+    if (d.displayRange && msg.display !== d.display) {
+      edit.replace(u, rng(d.displayRange), msg.display); changed = true;
+    }
+    const fieldText = msg.fields.map((f) => `${f.label}: ${f.value}`).join('\n');
+    const curFields = d.fields.map((f) => `${f.label}: ${f.value}`).join('\n');
+    if (fieldText !== curFields) {
+      if (d.fenceRange) { edit.replace(u, rng(d.fenceRange), fieldText); }
+      else if (fieldText) { edit.insert(u, new vscode.Position(d.bodyRange.start.line, 0), `---\n${fieldText}\n---\n`); }
+      changed = true;
+    }
+    let body = msg.body;
+    if (body && !body.endsWith('\n')) { body += '\n'; }
+    if (body.replace(/\n$/, '') !== d.bodyText.replace(/\n$/, '')) {
+      edit.replace(u, rng(d.bodyRange), body); changed = true;
+    }
+    if (!changed) { return; }
+
+    inspectorSelfEdit = true;              // swallow the echo in onDidChangeTextDocument
+    await vscode.workspace.applyEdit(edit);
+    try {
+      const fresh = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri: inspectorUri }, key: d.key });
+      if (fresh) { inspectorDetail = fresh; }
+    } catch { /* keep old ranges; next edit will re-resolve */ }
+  } finally {
+    inspectorApplyBusy = false;
+    if (inspectorApplyQueued) { const q = inspectorApplyQueued; inspectorApplyQueued = undefined; void applyInspectorEdit(q); }
+  }
+}
+
+// The .amd changed elsewhere (text editor, map, graph) — mirror it into the
+// Inspector. If the panel isn't focused we can safely rebuild; if it is, patch
+// values so we don't clobber a field the user is mid-edit.
+async function reloadInspectorFromDoc(): Promise<void> {
+  if (!client || !inspectorPanel || !inspectorDetail) { return; }
+  let fresh: NodeDetail | null;
+  try {
+    fresh = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri: inspectorUri }, key: inspectorDetail.key });
+  } catch { return; }
+  if (!fresh) { return; }   // node gone (e.g. heading retyped) — leave the last good view
+  inspectorDetail = fresh;
+  if (inspectorPanel.active) {
+    inspectorPanel.webview.postMessage({ type: 'patch', display: fresh.display, fields: fresh.fields, body: fresh.bodyText });
+  } else {
+    const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+    inspectorPanel.webview.html = renderInspector(fresh, nonce, faceInjection(inspectorPanel.webview, nonce));
+  }
 }
 
 function wsEditFromChanges(changes: Record<string, { range: LspRange; newText: string }[]> | undefined): vscode.WorkspaceEdit {
@@ -1365,6 +1459,15 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
+
+  // Reverse sync: when the Inspector's .amd changes elsewhere, mirror it back
+  // into the form (debounced; our own edits are swallowed by inspectorSelfEdit).
+  context.subscriptions.push(vscode.workspace.onDidChangeTextDocument((e) => {
+    if (!inspectorPanel || !inspectorDetail || e.document.uri.toString() !== inspectorUri) { return; }
+    if (inspectorSelfEdit) { inspectorSelfEdit = false; return; }
+    clearTimeout(inspectorSyncTimer);
+    inspectorSyncTimer = setTimeout(() => { void reloadInspectorFromDoc(); }, 250);
+  }));
 
   // Restart the server when the relevant settings change.
   context.subscriptions.push(
