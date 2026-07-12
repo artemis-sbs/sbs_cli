@@ -53,6 +53,19 @@ def _load_amd_lint(missions, mission):
         return amd_lint
 
 
+def _load_signal_lint(missions, mission):
+    """Import `signal_lint` - working tree first, else the mission's own sbslib."""
+    _prefer_working_tree_sbs_utils(missions, mission)
+    sys.path.insert(0, mission)
+    try:
+        from sbs_utils.procedural.signal_lint import signal_lint
+        return signal_lint
+    except Exception:
+        sbs_lib_import(missions, mission)
+        from sbs_utils.procedural.signal_lint import signal_lint
+        return signal_lint
+
+
 def _read_all(mission, pattern):
     """Read every file matching `pattern` under `mission` into a list of strings."""
     out = []
@@ -127,18 +140,26 @@ def _mastlib_signal_source(missions, mission):
 @click.option("--strict", is_flag=True, help="Exit non-zero on warnings too (not just errors).")
 @click.option("--no-cross", is_flag=True,
               help="Skip cross-file checks (signal->//signal route, reach->landmark).")
+@click.option("--no-signals", is_flag=True,
+              help="Skip the .mast //signal side-effect checks (per-console duplication).")
 @click.option("--format", "fmt", type=click.Choice(["text", "compact", "json"]),
               default="text", help="Output format: text (human), compact "
               "(file:line:col: for editor problem-matchers), or json (tools/CI).")
 @click.option("--lsp", is_flag=True,
               help="Run as an AMD language server (LSP over stdio) for editors.")
-def lint(folder, strict, no_cross, fmt, lsp):
-    """Lint the .amd files in a mission FOLDER.
+def lint(folder, strict, no_cross, no_signals, fmt, lsp):
+    """Lint a mission FOLDER: its .amd files AND its .mast signal routes.
 
-    Structural problems (broken headings, unclosed `---` fences, heading-level
-    jumps) are ERRORs and fail the run. Dangling references (choice/Scene/reveal
-    targets, emitted signals with no route, reach cells with no landmark) are
-    WARNINGs. Exit code: 1 if any error (or any finding under --strict), else 0.
+    AMD: structural problems (broken headings, unclosed `---` fences, heading-level
+    jumps) are ERRORs and fail the run; dangling references (choice/Scene/reveal
+    targets, emitted signals with no route, reach cells with no landmark) are WARNINGs.
+
+    MAST signals: a `//signal` route whose body SPAWNS / applies a MODIFIER / changes
+    QUEST state / SAVES / rolls RANDOM runs once PER CONNECTED CONSOLE (only
+    `//shared/signal` is server-once), so it duplicates - flagged as a WARNING. See
+    SIGNAL_ROUTING.md. Skip with --no-signals.
+
+    Exit code: 1 if any error (or any finding under --strict), else 0.
 
     With --lsp, run an editor language server on stdin/stdout instead (VSCode,
     Neovim, Emacs, ...): live diagnostics as you type.
@@ -166,16 +187,19 @@ def lint(folder, strict, no_cross, fmt, lsp):
 
     try:
         amd_lint = _load_amd_lint(missions, mission)
+        signal_lint = None if no_signals else _load_signal_lint(missions, mission)
     except Exception as e:
         print(f"ERROR: could not load sbs_utils to lint ({e})")
         raise SystemExit(2)
 
     amd_files = sorted(glob.glob(os.path.join(mission, "**", "*.amd"), recursive=True))
-    if not amd_files:
+    mast_files = [] if no_signals else sorted(
+        glob.glob(os.path.join(mission, "**", "*.mast"), recursive=True))
+    if not amd_files and not mast_files:
         if fmt == "json":
             print("[]")
         else:
-            print(f"No .amd files under {mission}")
+            print(f"No .amd or .mast files under {mission}")
         return
 
     mast_sources = None
@@ -212,11 +236,35 @@ def lint(folder, strict, no_cross, fmt, lsp):
         else:  # json
             bundle.extend(f.to_dict(file=rel) for f in findings)
 
+    # MAST signal-route pass: side-effects in a //signal route (per-console duplication).
+    # Only files WITH findings are printed (a mission has many clean .mast files).
+    if signal_lint is not None:
+        for path in mast_files:
+            findings = signal_lint(file_path=path)
+            if not findings:
+                continue
+            rel = os.path.relpath(path, mission)
+            for f in findings:
+                if f.is_error():
+                    total_err += 1
+                else:
+                    total_warn += 1
+            if fmt == "text":
+                print(f"== {rel} ==")
+                for f in findings:
+                    print(f"  {f}")
+            elif fmt == "compact":
+                for f in findings:
+                    print(f.compact(rel))
+            else:  # json
+                bundle.extend(f.to_dict(file=rel) for f in findings)
+
     if fmt == "json":
         import json
         print(json.dumps(bundle, indent=2))
     elif fmt == "text":
-        print(f"\n{len(amd_files)} file(s): {total_err} error(s), {total_warn} warning(s)")
+        print(f"\n{len(amd_files)} amd + {len(mast_files)} mast file(s): "
+              f"{total_err} error(s), {total_warn} warning(s)")
 
     if total_err or (strict and total_warn):
         raise SystemExit(1)
