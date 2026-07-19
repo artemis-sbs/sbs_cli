@@ -12,22 +12,51 @@
 //
 // It posts:  {type: prefix+'applyNode', display, fields, body}   (debounced)
 //            {type: prefix+'buildFace', face}
+//            {type: prefix+'faceEditor', face}
 // Face preview uses window.FaceRender (face.js) when present.
+//
+// WIDGETS ARE SCHEMA-DRIVEN. Each field carries a `schema` descriptor (from the
+// LSP, sourced from sbs_utils.procedural.amd_schema): enum -> dropdown, ref ->
+// combobox against the mission symbol table, coord2 -> two cells, color ->
+// swatch, signal -> combobox, compound (When/Then) -> verb + typed operand, face
+// -> the Face Builder. `model.options` holds the candidate lists (node/side/
+// signal). A field with no schema (a hand-added row) degrades to a text box.
 (function (global) {
   'use strict';
 
-  const FIELD_ENUMS = {
-    state: ['active', 'secret', 'idle', 'complete', 'failed'],
-    scope: ['shared', 'ship'],
-    kind: ['derelict', 'station', 'worldlet'],
-    mode: ['story', 'sandbox', 'skirmish', 'war', 'campaign'],
-    win: ['true', 'false'],
-    lose: ['true', 'false'],
-  };
+  let _mountSeq = 0;
 
   function esc(x) {
     return String(x == null ? '' : x).replace(/[&<>"]/g,
       (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  // '#07F' / '#0077FF' -> '#0077ff' for <input type=color>; null if not a hex.
+  function expandHex(v) {
+    const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(String(v || '').trim());
+    if (!m) { return null; }
+    let h = m[1];
+    if (h.length === 3) { h = h.split('').map((c) => c + c).join(''); }
+    return '#' + h.toLowerCase();
+  }
+
+  // 'i, j' (or 'i j') -> ['i','j']; missing parts come back ''.
+  function coordParts(v) {
+    const t = String(v || '').replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+    return [t[0] || '', t[1] || ''];
+  }
+
+  // 'verb rest...' -> [verb, operand]; verb only counts if it's in the schema's
+  // verb set, else the whole value is the operand under the first verb.
+  function compoundParts(v, verbs) {
+    const s = String(v || '').trim();
+    const sp = s.indexOf(' ');
+    const head = sp < 0 ? s : s.slice(0, sp);
+    if (head && verbs[head.toLowerCase()]) {
+      return [head.toLowerCase(), sp < 0 ? '' : s.slice(sp + 1).trim()];
+    }
+    const first = Object.keys(verbs)[0] || '';
+    return [first, s];
   }
 
   let stylesInjected = false;
@@ -44,7 +73,12 @@
       .insp-root select { background: var(--vscode-dropdown-background, var(--vscode-input-background)); }
       .insp-root textarea { font-family: var(--vscode-editor-font-family, monospace); }
       .insp-root .frow { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
-      .insp-root .frow .flabel { flex: 0 0 34%; } .insp-root .frow .fval { flex: 1 1 auto; }
+      .insp-root .frow .flabel { flex: 0 0 30%; } .insp-root .frow .fval { flex: 1 1 auto; }
+      .insp-root .frow .arch { flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 10px; }
+      .insp-root .fcoord { flex: 1 1 auto; display: flex; gap: 4px; } .insp-root .fcoord input { width: 50%; }
+      .insp-root .fcolor { flex: 1 1 auto; display: flex; gap: 4px; align-items: center; }
+      .insp-root .fcolor input[type=color] { flex: 0 0 28px; width: 28px; height: 26px; padding: 0; }
+      .insp-root .fcompound { flex: 1 1 auto; display: flex; gap: 4px; } .insp-root .fverb { flex: 0 0 38%; }
       .insp-root button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 4px; padding: 5px 12px; cursor: pointer; margin-top: 10px; }
       .insp-root button:hover { background: var(--vscode-button-hoverBackground); }
       .insp-root .sec { color: var(--vscode-descriptionForeground); font-size: 11px; }
@@ -58,8 +92,17 @@
   function mount(container, vscode, opts) {
     injectStyles();
     const prefix = (opts && opts.prefix) || '';
-    let model = (opts && opts.model) || { key: '', display: '', fields: [], body: '' };
+    let model = normalizeModel((opts && opts.model) || {});
     let applyTimer = 0;
+    const uid = 'if' + (++_mountSeq);          // unique datalist-id namespace
+
+    function normalizeModel(m) {
+      return {
+        key: m.key || '', display: m.display || '',
+        fields: m.fields || [], body: m.body || '',
+        options: m.options || {},
+      };
+    }
 
     const q = (sel) => container.querySelector(sel);
     const faceCanvas = () => q('.insp-face');
@@ -68,24 +111,80 @@
       if (c && global.FaceRender) { global.FaceRender.drawString(c, c.getContext('2d'), str); }
     }
 
+    function optionList(kind) {
+      const o = model.options || {};
+      return (kind === 'side' ? (o.side || o.node) : kind === 'signal' ? o.signal : o.node) || [];
+    }
+    function datalistId(kind) { return uid + '-' + kind; }
+    function sharedDatalists() {
+      // node/side/signal candidate lists, shared by every combobox in this form.
+      return ['node', 'side', 'signal'].map((k) =>
+        `<datalist id="${datalistId(k)}">${optionList(k).map((v) => `<option value="${esc(v)}">`).join('')}</datalist>`
+      ).join('');
+    }
+
+    // The control(s) after the `label :` for one field, chosen by schema.type.
+    function fieldControl(sch, value) {
+      const t = (sch && sch.type) || 'text';
+      const hint = sch && sch.hint ? ` placeholder="${esc(sch.hint)}"` : ' placeholder="value"';
+      switch (t) {
+        case 'multiline':
+          return `<textarea class="fval" rows="2"${hint}>${esc(value)}</textarea>`;
+        case 'int':
+          return `<input class="fval" inputmode="numeric"${hint} value="${esc(value)}"/>`;
+        case 'enum': {
+          const vals = (sch.values || []).slice();
+          if (sch.open) {                       // suggestions, free text allowed
+            const dl = uid + '-e-' + Math.random().toString(36).slice(2, 7);
+            return `<input class="fval" list="${dl}" value="${esc(value)}"${hint}/>` +
+                   `<datalist id="${dl}">${vals.map((o) => `<option value="${esc(o)}">`).join('')}</datalist>`;
+          }
+          if (value && vals.indexOf(value) < 0) { vals.push(value); }   // keep an odd stored value
+          return `<select class="fval">${vals.map((o) => `<option${o === value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+        }
+        case 'ref': {
+          // node/side refs pick from the mission symbol table; a csv ref is a free
+          // comma list but still suggests node keys.
+          const list = datalistId(sch.ref === 'side' ? 'side' : 'node');
+          return `<input class="fval" list="${list}" value="${esc(value)}"${hint}/>`;
+        }
+        case 'signal':
+          return `<input class="fval" list="${datalistId('signal')}" value="${esc(value)}" placeholder="signal name"/>`;
+        case 'color': {
+          const hx = expandHex(value) || '#888888';
+          return `<span class="fcolor"><input class="fval" value="${esc(value)}"${hint}/>` +
+                 `<input type="color" class="fswatch" value="${hx}"/></span>`;
+        }
+        case 'coord2': {
+          const [i, j] = coordParts(value);
+          return `<span class="fcoord"><input class="fc-i" inputmode="numeric" placeholder="i" value="${esc(i)}"/>` +
+                 `<input class="fc-j" inputmode="numeric" placeholder="j" value="${esc(j)}"/></span>`;
+        }
+        case 'compound': {
+          const verbs = sch.verbs || {};
+          const [verb, operand] = compoundParts(value, verbs);
+          const opts = Object.keys(verbs).map((v) => `<option${v === verb ? ' selected' : ''}>${esc(v)}</option>`).join('');
+          const operSch = verbs[verb] || { type: 'text' };
+          return `<span class="fcompound"><select class="fverb">${opts}</select>` +
+                 `<span class="foperand">${fieldControl(operSch, operand)}</span></span>`;
+        }
+        case 'face':
+          return `<input class="fval facefield" value="${esc(value)}" placeholder="face string or female/male"/><button type="button" class="facebtn">Face…</button>`;
+        default:              // text / csv / role / unknown
+          return `<input class="fval" value="${esc(value)}"${hint}/>`;
+      }
+    }
+
     function build() {
       container.className = 'insp-root';
       const rows = model.fields.map((f) => {
-        if (String(f.label).toLowerCase() === 'face') {
-          return `<div class="frow"><input class="flabel" value="${esc(f.label)}"/><span>:</span><input class="fval facefield" value="${esc(f.value)}" placeholder="face string or female/male"/><button type="button" class="facebtn">Face…</button></div>`;
-        }
-        const opts2 = FIELD_ENUMS[String(f.label).toLowerCase()];
-        let ctrl;
-        if (opts2) {
-          const all = opts2.slice();
-          if (f.value && all.indexOf(f.value) < 0) { all.push(f.value); }
-          ctrl = `<select class="fval">${all.map((o) => `<option${o === f.value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-        } else {
-          ctrl = `<input class="fval" value="${esc(f.value)}" placeholder="value"/>`;
-        }
-        return `<div class="frow"><input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span>${ctrl}</div>`;
+        const sch = f.schema || { type: 'text' };
+        return `<div class="frow" data-ftype="${esc(sch.type || 'text')}">` +
+               `<input class="flabel" value="${esc(f.label)}" placeholder="field"/><span>:</span>` +
+               fieldControl(sch, f.value) + `</div>`;
       }).join('');
-      const hasFace = model.fields.some((f) => String(f.label).toLowerCase() === 'face');
+      const hasFace = model.fields.some((f) => (f.schema && f.schema.type) === 'face' ||
+                                               String(f.label).toLowerCase() === 'face');
       container.innerHTML =
         `<h3>${esc(model.display || model.key)} <span class="sec">(${esc(model.key)})</span></h3>` +
         `<label class="k">Display</label><input class="insp-display" value="${esc(model.display)}"/>` +
@@ -93,15 +192,47 @@
         (hasFace ? '<canvas class="insp-face" width="220" height="220" title="Click to edit in the Face Builder"></canvas>' : '') +
         `<button class="insp-addf">+ add field</button>` +
         `<h4>Body</h4><textarea class="insp-body" rows="14">${esc(model.body)}</textarea>` +
-        `<div class="sec insp-status">Changes apply automatically.</div>`;
+        `<div class="sec insp-status">Changes apply automatically.</div>` +
+        sharedDatalists();
+      // Stamp each row with its schema so collect()/patch() know how to (de)serialize.
+      const rowEls = [...container.querySelectorAll('.frow')];
+      model.fields.forEach((f, i) => { if (rowEls[i]) { rowEls[i].__schema = f.schema || { type: 'text' }; } });
       wire();
       const ff = q('.facefield');
       drawFace(ff ? ff.value : '');
     }
 
+    // Serialize one row's widget(s) back to a single string value.
+    function rowValue(row) {
+      const ftype = row.dataset.ftype || 'text';
+      if (ftype === 'coord2') {
+        const i = row.querySelector('.fc-i'), j = row.querySelector('.fc-j');
+        const a = (i && i.value.trim()) || '', b = (j && j.value.trim()) || '';
+        return (a || b) ? (a + ', ' + b) : '';
+      }
+      if (ftype === 'compound') {
+        const verb = (row.querySelector('.fverb') || {}).value || '';
+        const oper = readValueControl(row.querySelector('.foperand'));
+        return (verb + ' ' + oper).trim();
+      }
+      const el = row.querySelector('.fval');
+      return el ? el.value.trim() : '';
+    }
+    // The value of a single-control container (compound operand may itself be a coord).
+    function readValueControl(span) {
+      if (!span) { return ''; }
+      const i = span.querySelector('.fc-i'), j = span.querySelector('.fc-j');
+      if (i || j) {
+        const a = (i && i.value.trim()) || '', b = (j && j.value.trim()) || '';
+        return (a || b) ? (a + ', ' + b) : '';
+      }
+      const el = span.querySelector('.fval');
+      return el ? el.value.trim() : '';
+    }
+
     function collect() {
       const fields = [...container.querySelectorAll('.frow')].map((r) => ({
-        label: r.querySelector('.flabel').value.trim(), value: r.querySelector('.fval').value.trim(),
+        label: r.querySelector('.flabel').value.trim(), value: rowValue(r),
       })).filter((f) => f.label);
       return { display: q('.insp-display').value, fields, body: q('.insp-body').value };
     }
@@ -119,20 +250,41 @@
       if (!wired) {
         // Delegated once on the container — survives innerHTML rebuilds.
         container.addEventListener('input', onInput);
-        container.addEventListener('change', scheduleApply);
+        container.addEventListener('change', onChange);
         container.addEventListener('click', onClick);
         wired = true;
       }
     }
     function onInput(e) {
-      if (e.target && e.target.classList && e.target.classList.contains('facefield')) { drawFace(e.target.value); }
+      const t = e.target;
+      if (t && t.classList && t.classList.contains('facefield')) { drawFace(t.value); }
       scheduleApply();
+    }
+    function onChange(e) {
+      const t = e.target;
+      // A colour-swatch change writes the hex back into the row's text field.
+      if (t && t.classList && t.classList.contains('fswatch')) {
+        const tf = t.parentElement.querySelector('.fval');
+        if (tf) { tf.value = t.value; }
+      }
+      // Switching a compound verb re-renders its operand control to the verb's type.
+      if (t && t.classList && t.classList.contains('fverb')) { rebuildOperand(t); }
+      scheduleApply();
+    }
+    function rebuildOperand(verbSel) {
+      const row = verbSel.closest('.frow');
+      const sch = row && row.__schema;
+      if (!sch || sch.type !== 'compound') { return; }
+      const operSch = (sch.verbs || {})[verbSel.value] || { type: 'text' };
+      const span = row.querySelector('.foperand');
+      if (span) { span.innerHTML = fieldControl(operSch, ''); }
     }
     function onClick(e) {
       const t = e.target;
       if (!t || !t.classList) { return; }
       if (t.classList.contains('insp-addf')) {
-        const div = document.createElement('div'); div.className = 'frow';
+        const div = document.createElement('div'); div.className = 'frow'; div.dataset.ftype = 'text';
+        div.__schema = { type: 'text' };
         div.innerHTML = '<input class="flabel" placeholder="field"/><span>:</span><input class="fval" placeholder="value"/>';
         q('.insp-fields').appendChild(div);
         div.querySelector('.flabel').focus();
@@ -146,7 +298,29 @@
       }
     }
 
-    function render(m) { model = m || model; build(); }
+    function render(m) { model = normalizeModel(m || model); build(); }
+
+    // Reverse sync: mirror external edits into fields the user isn't focused in.
+    function setRowValue(row, value) {
+      const ftype = row.dataset.ftype || 'text';
+      if (ftype === 'coord2') {
+        const [i, j] = coordParts(value);
+        const ei = row.querySelector('.fc-i'), ej = row.querySelector('.fc-j');
+        if (ei) { ei.value = i; } if (ej) { ej.value = j; }
+        return;
+      }
+      if (ftype === 'compound') {
+        const sch = row.__schema || { verbs: {} };
+        const [verb, operand] = compoundParts(value, sch.verbs || {});
+        const vs = row.querySelector('.fverb'); if (vs) { vs.value = verb; }
+        const span = row.querySelector('.foperand');
+        if (span) { const el = span.querySelector('.fval') || span.querySelector('.fc-i'); if (el && el.classList.contains('fval')) { el.value = operand; } }
+        return;
+      }
+      const el = row.querySelector('.fval');
+      if (el) { el.value = value; }
+      if (ftype === 'color') { const sw = row.querySelector('.fswatch'); const hx = expandHex(value); if (sw && hx) { sw.value = hx; } }
+    }
     function patch(m) {
       const active = document.activeElement;
       const setIf = (el, val) => { if (el && el !== active && el.value !== val) { el.value = val; } };
@@ -155,7 +329,7 @@
       const rows = [...container.querySelectorAll('.frow')];
       for (const f of (m.fields || [])) {
         const row = rows.find((r) => r.querySelector('.flabel').value.trim().toLowerCase() === String(f.label).toLowerCase());
-        if (row) { setIf(row.querySelector('.fval'), f.value); }
+        if (row && !row.contains(active)) { setRowValue(row, f.value); }
       }
       const ff = q('.facefield'); if (ff) { drawFace(ff.value); }
       const st = q('.insp-status'); if (st) { st.textContent = 'Saved'; }

@@ -511,11 +511,16 @@ function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview, init
 }
 
 // --- Inspector: edit a node's display / fields / body as a form ------------
-interface NodeField { label: string; value: string; }
+// A field's schema descriptor (from amd_schema, via the LSP). `type` is the widget
+// kind; the rest parameterise it. Kept loose (open record) so new descriptor keys
+// added server-side flow through untouched.
+interface FieldSchema { type: string; values?: string[]; open?: boolean; ref?: string; csv?: boolean; hint?: string; verbs?: Record<string, FieldSchema>; }
+interface NodeField { label: string; value: string; schema?: FieldSchema; }
+interface SymbolOptions { node?: string[]; side?: string[]; signal?: string[]; }
 interface NodeDetail {
-  key: string; display: string; uri: string;
+  key: string; display: string; uri: string; archetype?: string | null;
   displayRange: LspRange | null; fields: NodeField[]; fenceRange: LspRange | null;
-  bodyText: string; bodyRange: LspRange;
+  options?: SymbolOptions; bodyText: string; bodyRange: LspRange;
 }
 
 // An Inspector is one live projection of a node onto a webview — either the
@@ -556,14 +561,8 @@ function rng(r: LspRange): vscode.Range {
   return new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
 }
 
-const FIELD_ENUMS: Record<string, string[]> = {
-  state: ['active', 'secret', 'idle', 'complete', 'failed'],
-  scope: ['shared', 'ship'],
-  kind: ['derelict', 'station', 'worldlet'],
-  mode: ['story', 'sandbox', 'skirmish', 'war', 'campaign'],
-  win: ['true', 'false'],
-  lose: ['true', 'false'],
-};
+// (Field enums / widget types are no longer hardcoded here - they come from the
+// LSP per field, sourced from sbs_utils.procedural.amd_schema. See formModel.)
 
 // --- Face preview (reuses the mock's compositor, media/face.js) --------------
 // The atlases live in the Cosmos install's data/graphics/. We expose that folder
@@ -611,8 +610,9 @@ function faceInjection(webview: vscode.Webview, nonce: string): { scripts: strin
 }
 
 // The node as a plain model for the shared client-side form (media/inspectorForm.js).
-function formModel(d: NodeDetail): { key: string; display: string; fields: NodeField[]; body: string } {
-  return { key: d.key, display: d.display, fields: d.fields, body: d.bodyText };
+// `options` carries the mission-wide candidate lists the reference widgets need.
+function formModel(d: NodeDetail): { key: string; display: string; fields: NodeField[]; body: string; options: SymbolOptions } {
+  return { key: d.key, display: d.display, fields: d.fields, body: d.bodyText, options: d.options ?? {} };
 }
 
 // A <script> tag loading the shared form module into a webview.
