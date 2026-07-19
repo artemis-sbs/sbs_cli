@@ -831,6 +831,104 @@ async function showInspector(uri: string, key: string): Promise<void> {
   panelInspector.reveal();
 }
 
+// --- Preview: render a node as it would appear in-game (comms card / scan / face) ---
+interface PreviewPayload {
+  kind: string; key: string;
+  speaker?: { key: string; name: string; color: string; face: string };
+  when?: string | null; lines?: string[];
+  choices?: { label: string; target: string; guard: string | null }[];
+  role?: string; tab?: string;
+  name?: string; color?: string; face?: string; display?: string; body?: string;
+}
+let previewPanel: vscode.WebviewPanel | undefined;
+
+// "Preview" entry — resolve the node at the cursor and render its payload.
+async function showPreview(): Promise<void> {
+  if (!client) { return; }
+  const ed = vscode.window.activeTextEditor;
+  if (!ed || ed.document.languageId !== 'amd') {
+    vscode.window.showInformationMessage('Artemis AMD: open an .amd file and place the cursor in a node to preview it.');
+    return;
+  }
+  const uri = ed.document.uri.toString();
+  const line = ed.selection.active.line;
+  let key: string | undefined;
+  try {
+    const at = await client.sendRequest<NodeDetail | null>('amd/nodeAtLine', { textDocument: { uri }, line });
+    key = at?.key;
+  } catch { /* ignore */ }
+  if (!key) { vscode.window.showWarningMessage('Artemis AMD: no node at the cursor to preview.'); return; }
+
+  let payload: PreviewPayload | null;
+  try { payload = await client.sendRequest<PreviewPayload | null>('amd/preview', { textDocument: { uri }, key }); }
+  catch (e) { output.appendLine(`Preview failed: ${e}`); return; }
+  if (!payload) { vscode.window.showWarningMessage(`Artemis AMD: node '${key}' not found.`); return; }
+
+  if (!previewPanel) {
+    previewPanel = vscode.window.createWebviewPanel('amdPreview', 'AMD Preview',
+      vscode.ViewColumn.Beside, { enableScripts: true, localResourceRoots: faceWebviewRoots() });
+    previewPanel.onDidDispose(() => { previewPanel = undefined; });
+  }
+  const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+  previewPanel.webview.html = renderPreviewHtml(payload, nonce, faceInjection(previewPanel.webview, nonce), previewPanel.webview);
+  previewPanel.title = `AMD Preview — ${payload.speaker?.name || payload.name || payload.key}`;
+  previewPanel.reveal(vscode.ViewColumn.Beside, true);
+}
+
+// A self-contained webview that draws the preview payload client-side: a dialogue
+// comms card (coloured speaker + face + lines + choices), a scan (tab + variants),
+// or a lifeform face. The face uses FaceRender (face.js) via faceInjection.
+function renderPreviewHtml(p: PreviewPayload, nonce: string,
+                          inj: { scripts: string; imgCsp: string; available: boolean },
+                          webview: vscode.Webview): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inj.imgCsp} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { margin:0; padding:16px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: 14px; }
+  .card { max-width: 560px; }
+  .hdr { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .face { width:96px; height:96px; border:1px solid var(--vscode-input-border,#8884); border-radius:6px; background: var(--vscode-input-background); flex:0 0 auto; }
+  .who { font-size:1.2em; font-weight:600; }
+  .sub { color: var(--vscode-descriptionForeground); font-size:.8em; }
+  .lines { margin: 6px 0 14px; }
+  .line { padding:8px 12px; margin:6px 0; border-left:3px solid var(--vscode-focusBorder,#58f); background: var(--vscode-textBlockQuote-background,#8881); border-radius:3px; }
+  .variant { color: var(--vscode-descriptionForeground); font-size:.75em; text-transform:uppercase; letter-spacing:.05em; }
+  .choices { display:flex; flex-direction:column; gap:6px; }
+  .choice { padding:7px 12px; border:1px solid var(--vscode-input-border,#8884); border-radius:6px; background: var(--vscode-button-secondaryBackground,#333); }
+  .choice .arrow { color: var(--vscode-descriptionForeground); }
+  .choice .guard { color: var(--vscode-descriptionForeground); font-size:.8em; font-style:italic; }
+  h4 { margin: 14px 0 6px; color: var(--vscode-descriptionForeground); font-weight:600; }
+  .tab { display:inline-block; padding:2px 10px; border-radius:10px; background: var(--vscode-badge-background,#333); color: var(--vscode-badge-foreground,#fff); font-size:.8em; }
+</style></head><body>
+<div id="root" class="card"></div>
+${inj.scripts}
+<script nonce="${nonce}">
+  const P = ${JSON.stringify(p)};
+  const esc = (x) => String(x==null?'':x).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const faceStr = (P.speaker && P.speaker.face) || P.face || '';
+  const root = document.getElementById('root');
+  function faceHtml(){ return faceStr ? '<canvas class="face" id="pv-face" width="192" height="192"></canvas>' : ''; }
+  if (P.kind === 'dialogue') {
+    const who = (P.speaker && P.speaker.name) || P.key;
+    const color = (P.speaker && P.speaker.color) || '#0cf';
+    const lines = (P.lines||[]).map((l,i)=>'<div class="line">'+(P.lines.length>1?'<span class="variant">variant '+(i+1)+'</span><br>':'')+esc(l)+'</div>').join('');
+    const choices = (P.choices||[]).map((c)=>'<div class="choice">'+esc(c.label)+' <span class="arrow">&rarr; '+esc(c.target)+'</span>'+(c.guard?' <span class="guard">if '+esc(c.guard)+'</span>':'')+'</div>').join('');
+    root.innerHTML = '<div class="hdr">'+faceHtml()+'<div><div class="who" style="color:'+esc(color)+'">'+esc(who)+'</div><div class="sub">'+(P.when?('when: '+esc(P.when)):'')+'</div></div></div>'
+      + (lines?('<h4>Says</h4><div class="lines">'+lines+'</div>'):'')
+      + (choices?('<h4>Choices</h4><div class="choices">'+choices+'</div>'):'');
+  } else if (P.kind === 'scan') {
+    const lines = (P.lines||[]).map((l,i)=>'<div class="line">'+((P.lines.length>1)?'<span class="variant">variant '+(i+1)+'</span><br>':'')+esc(l)+'</div>').join('');
+    root.innerHTML = '<div class="hdr"><div><div class="who">'+esc(P.role||P.key)+'</div><div class="sub"><span class="tab">'+esc(P.tab||'scan')+'</span></div></div></div><div class="lines">'+lines+'</div>';
+  } else if (P.kind === 'face') {
+    root.innerHTML = '<div class="hdr">'+faceHtml()+'<div class="who" style="color:'+esc(P.color||'#0cf')+'">'+esc(P.name||P.key)+'</div></div>';
+  } else {
+    root.innerHTML = '<div class="who">'+esc(P.display||P.key)+'</div><div class="lines"><div class="line">'+esc(P.body||'')+'</div></div>';
+  }
+  const fc = document.getElementById('pv-face');
+  if (fc && window.FaceRender && faceStr) { FaceRender.drawString(fc, fc.getContext('2d'), faceStr); }
+</script></body></html>`;
+}
+
 // Docked, cursor-following Inspector in the panel area.
 class InspectorViewProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -1825,6 +1923,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
 
   // Docked, cursor-following Inspector view.
