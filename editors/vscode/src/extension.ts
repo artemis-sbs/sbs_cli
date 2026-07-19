@@ -2127,9 +2127,96 @@ class MastDebugConfigurationProvider implements vscode.DebugConfigurationProvide
   }
 }
 
+// --- Mission Inspector (live signals + world, over `mast/inspect` events) ---
+let missionInspectorPanel: vscode.WebviewPanel | undefined;
+
+function inspectorNonce(): string {
+  const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  for (let i = 0; i < 24; i++) { s += c[Math.floor(Math.random() * c.length)]; }
+  return s;
+}
+
+function missionInspectorHtml(nonce: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
+  .split { display:flex; flex:1; min-height:0; }
+  .pane { flex:1; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); }
+  .pane:last-child { border-right:none; }
+  .bar { padding:4px 10px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); border-bottom:1px solid var(--vscode-panel-border,#8882); display:flex; gap:8px; align-items:center; }
+  .bar b { color:var(--vscode-foreground); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { text-align:left; padding:2px 8px; border-bottom:1px solid var(--vscode-panel-border,#8882); white-space:nowrap; }
+  .muted { color: var(--vscode-descriptionForeground); }
+  .empty { padding:10px; color: var(--vscode-descriptionForeground); }
+  .sig { font-family: var(--vscode-editor-font-family); font-size:12px; padding:2px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
+  .sig .name { color: var(--vscode-symbolIcon-eventForeground, #c586c0); font-weight:600; }
+  button { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:1px 8px; cursor:pointer; font-size:11px; }
+</style></head><body>
+<div class="split">
+  <div class="pane">
+    <div class="bar"><b>World</b><span class="muted" id="worldCount"></span></div>
+    <table><thead><tr><th>Name</th><th>Side</th><th>Kind</th><th>Roles</th></tr></thead>
+    <tbody id="worldBody"><tr><td colspan="4" class="empty">Waiting for a running mission…</td></tr></tbody></table>
+  </div>
+  <div class="pane">
+    <div class="bar"><b>Signals</b><button id="clear">Clear</button><span class="muted" id="sigCount"></span></div>
+    <div id="sigLog"></div>
+  </div>
+</div>
+<script nonce="${nonce}">
+  const worldBody = document.getElementById('worldBody');
+  const sigLog = document.getElementById('sigLog');
+  let sigN = 0;
+  document.getElementById('clear').onclick = () => { sigLog.innerHTML=''; sigN=0; document.getElementById('sigCount').textContent=''; };
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  window.addEventListener('message', (e) => {
+    const m = e.data; if (!m || !m.kind) return;
+    if (m.kind === 'agents') {
+      const a = (m.payload && m.payload.agents) || [];
+      document.getElementById('worldCount').textContent = a.length ? '('+a.length+')' : '';
+      worldBody.innerHTML = a.length ? a.map(o =>
+        '<tr><td>'+esc(o.name)+'</td><td>'+esc(o.side)+'</td><td>'+esc(o.kind)+'</td><td class="muted">'+esc((o.roles||[]).join(', '))+'</td></tr>').join('')
+        : '<tr><td colspan="4" class="empty">No space objects.</td></tr>';
+    } else if (m.kind === 'signal') {
+      const p = m.payload || {};
+      const row = document.createElement('div'); row.className = 'sig';
+      row.innerHTML = '<span class="name">'+esc(p.name)+'</span> <span class="muted">→ '+esc(p.routes)+' route(s)</span> '+esc(JSON.stringify(p.data||{}));
+      sigLog.appendChild(row);
+      while (sigLog.childNodes.length > 500) sigLog.removeChild(sigLog.firstChild);
+      document.getElementById('sigCount').textContent = '('+(++sigN)+')';
+      row.scrollIntoView(false);
+    }
+  });
+</script></body></html>`;
+}
+
+function showMissionInspector(): void {
+  if (missionInspectorPanel) { missionInspectorPanel.reveal(vscode.ViewColumn.Beside, true); return; }
+  missionInspectorPanel = vscode.window.createWebviewPanel(
+    'amdMissionInspector', 'Mission Inspector',
+    { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+    { enableScripts: true, retainContextWhenHidden: true });
+  missionInspectorPanel.webview.html = missionInspectorHtml(inspectorNonce());
+  missionInspectorPanel.onDidDispose(() => { missionInspectorPanel = undefined; });
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('Artemis AMD');
   extensionUri = context.extensionUri;
+
+  // Mission Inspector: open it on a mast session, and feed it mast/inspect events.
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showMissionInspector', showMissionInspector));
+  context.subscriptions.push(vscode.debug.onDidStartDebugSession((s) => {
+    if (s.type === 'mast') { showMissionInspector(); }
+  }));
+  context.subscriptions.push(vscode.debug.onDidReceiveDebugSessionCustomEvent((e) => {
+    if (e.event === 'mast/inspect' && missionInspectorPanel) {
+      void missionInspectorPanel.webview.postMessage(e.body);
+    }
+  }));
 
   // MAST source debugger.
   context.subscriptions.push(

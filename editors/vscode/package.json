@@ -2,7 +2,7 @@
   "name": "amd-language",
   "displayName": "Artemis AMD",
   "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, diagnostics/navigation/formatting via the sbs AMD language server, plus a MAST source debugger.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "artemis-sbs",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/artemis-sbs/sbs_cli" },
@@ -52,6 +52,12 @@
         "command": "amd.newFile",
         "title": "New Content File",
         "category": "Artemis AMD"
+      },
+      {
+        "command": "amd.showMissionInspector",
+        "title": "Mission Inspector (live signals & world)",
+        "category": "Artemis AMD",
+        "icon": "$(pulse)"
       }
     ],
     "menus": {
