@@ -40,6 +40,12 @@
         "icon": "$(eye)"
       },
       {
+        "command": "amd.previewInSession",
+        "title": "Preview Node in Running Session",
+        "category": "Artemis AMD",
+        "icon": "$(broadcast)"
+      },
+      {
         "command": "amd.newFile",
         "title": "New Content File",
         "category": "Artemis AMD"
@@ -50,12 +56,14 @@
         { "command": "amd.showMap", "when": "editorLangId == amd" },
         { "command": "amd.showGraph", "when": "editorLangId == amd" },
         { "command": "amd.showPreview", "when": "editorLangId == amd" },
+        { "command": "amd.previewInSession", "when": "editorLangId == amd" },
         { "command": "amd.newFile" }
       ],
       "editor/title": [
         { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.showGraph", "when": "editorLangId == amd", "group": "navigation" },
-        { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation" }
+        { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation" },
+        { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation" }
       ]
     },
     "languages": [
@@ -91,6 +99,11 @@
           "items": { "type": "string" },
           "default": ["lint", "--lsp"],
           "description": "Arguments that start the LSP server on stdio (appended after sbs.pyz or amd.server.command)."
+        },
+        "amd.sessionPort": {
+          "type": "number",
+          "default": 8765,
+          "markdownDescription": "Port of a running **`sbs debug`** browser-mock session, used by **Preview Node in Running Session** to push an authored node in live (POST to `/debug/command`). Matches the runner's `--port` (default 8765)."
         }
       }
     }

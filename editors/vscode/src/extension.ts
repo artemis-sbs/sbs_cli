@@ -11,6 +11,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as http from 'http';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -873,6 +874,51 @@ async function showPreview(): Promise<void> {
   previewPanel.webview.html = renderPreviewHtml(payload, nonce, faceInjection(previewPanel.webview, nonce), previewPanel.webview);
   previewPanel.title = `AMD Preview — ${payload.speaker?.name || payload.name || payload.key}`;
   previewPanel.reveal(vscode.ViewColumn.Beside, true);
+}
+
+// POST a debug command to a running `sbs debug` mock session (its stdlib server
+// exposes POST /debug/command). Node's http (no extra dep); resolves on 2xx.
+function postDebugCommand(port: number, body: unknown): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const data = Buffer.from(JSON.stringify(body), 'utf8');
+    const req = http.request(
+      { host: '127.0.0.1', port, path: '/debug/command', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }, timeout: 2000 },
+      (res) => { res.resume(); (res.statusCode && res.statusCode < 300) ? resolve() : reject(new Error(`HTTP ${res.statusCode}`)); });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+    req.write(data); req.end();
+  });
+}
+
+// "Preview in Running Session" — push the node at the cursor into a live `sbs debug`
+// browser-mock session, rendered as a story dialog (highest-fidelity preview).
+async function previewInSession(): Promise<void> {
+  if (!client) { return; }
+  const ed = vscode.window.activeTextEditor;
+  if (!ed || ed.document.languageId !== 'amd') {
+    vscode.window.showInformationMessage('Artemis AMD: open an .amd file and place the cursor in a node.'); return;
+  }
+  const uri = ed.document.uri.toString();
+  let key: string | undefined;
+  try {
+    const at = await client.sendRequest<NodeDetail | null>('amd/nodeAtLine', { textDocument: { uri }, line: ed.selection.active.line });
+    key = at?.key;
+  } catch { /* ignore */ }
+  if (!key) { vscode.window.showWarningMessage('Artemis AMD: no node at the cursor.'); return; }
+
+  let payload: PreviewPayload | null;
+  try { payload = await client.sendRequest<PreviewPayload | null>('amd/preview', { textDocument: { uri }, key }); }
+  catch (e) { output.appendLine(`Preview failed: ${e}`); return; }
+  if (!payload) { vscode.window.showWarningMessage(`Artemis AMD: node '${key}' not found.`); return; }
+
+  const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+  try {
+    await postDebugCommand(port, { action: 'preview', payload });
+    vscode.window.setStatusBarMessage(`$(broadcast) Previewed '${key}' in session`, 3000);
+  } catch (e) {
+    vscode.window.showWarningMessage(`Artemis AMD: no running session on port ${port} (start one with \`sbs debug .\`). ${e}`);
+  }
 }
 
 // A self-contained webview that draws the preview payload client-side: a dialogue
@@ -1924,6 +1970,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
 
   // Docked, cursor-following Inspector view.
