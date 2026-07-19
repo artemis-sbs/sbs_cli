@@ -1538,6 +1538,171 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp }, initialView);
 }
 
+// --- Story Outline: a scalable list/tree + focus-detail view over the SAME
+// `amd/graph` model as the diagram. Where the diagram becomes a hairball past a
+// few dozen nodes, this never renders the whole graph — you navigate it: a
+// searchable/filterable outline on the left, and the selected node's direct
+// incoming/outgoing connections (each a clickable chip) on the right. See
+// MISSION_TOOLS_PLAN.md §3.5.1.
+function storyOutlineHtml(graph: MissionGraph, nonce: string): string {
+  const data = JSON.stringify(graph).replace(/</g, '\\u003c');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
+  .top { display:flex; gap:6px; align-items:center; padding:6px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
+  .top input[type=search] { flex:1; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:4px; padding:3px 8px; font-size:12px; }
+  .filters { display:flex; gap:8px; padding:3px 10px; flex-wrap:wrap; border-bottom:1px solid var(--vscode-panel-border,#8882); font-size:11px; color:var(--vscode-descriptionForeground); }
+  .filters label { cursor:pointer; user-select:none; }
+  .split { display:flex; flex:1; min-height:0; }
+  .list { width:42%; min-width:220px; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); }
+  .detail { flex:1; overflow:auto; padding:8px 12px; }
+  .sec { padding:4px 10px 2px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); }
+  .row { padding:2px 10px 2px 20px; font-size:13px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-left:2px solid transparent; }
+  .row:hover { background: var(--vscode-list-hoverBackground,#8881); }
+  .row.sel { background: var(--vscode-list-activeSelectionBackground,#0a63c9); color: var(--vscode-list-activeSelectionForeground,#fff); border-left-color: var(--vscode-focusBorder,#4ec9b0); }
+  .row .k { color: var(--vscode-descriptionForeground); font-size:11px; }
+  .row.sel .k { color: inherit; }
+  .badge { font-size:10px; border-radius:6px; padding:0 5px; margin-left:4px; }
+  .badge.err { background: var(--vscode-inputValidation-errorBackground,#5a1d1d); color:#f88; }
+  .badge.warn { background: var(--vscode-inputValidation-warningBackground,#5a4a1d); color:#fc8; }
+  .dtitle { font-size:16px; font-weight:600; margin:0 0 2px; }
+  .dkey { color: var(--vscode-descriptionForeground); font-size:12px; font-family: var(--vscode-editor-font-family); }
+  .dactions { margin:6px 0 12px; display:flex; gap:6px; }
+  .grp { margin:10px 0 4px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); }
+  .chip { display:inline-flex; align-items:center; gap:6px; margin:2px 4px 2px 0; padding:2px 8px; border-radius:12px; font-size:12px; cursor:pointer; background: var(--vscode-badge-background,#333); color: var(--vscode-badge-foreground,#eee); }
+  .chip:hover { outline:1px solid var(--vscode-focusBorder,#4ec9b0); }
+  .chip .ek { color: var(--vscode-symbolIcon-eventForeground,#c586c0); font-size:10px; text-transform:uppercase; }
+  .src { color: var(--vscode-textLink-foreground,#4daafc); font-size:11px; cursor:pointer; margin-left:6px; }
+  .muted { color: var(--vscode-descriptionForeground); }
+  .empty { padding:10px; color: var(--vscode-descriptionForeground); }
+  button { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:2px 10px; cursor:pointer; font-size:12px; }
+</style></head><body>
+<div class="top">
+  <input id="q" type="search" placeholder="Search nodes…" autofocus>
+  <span class="muted" id="count"></span>
+</div>
+<div class="filters" id="filters"></div>
+<div class="split">
+  <div class="list" id="list"></div>
+  <div class="detail" id="detail"><div class="empty">Select a node to see what connects to it.</div></div>
+</div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const graph = ${data};
+  const nodes = graph.nodes || [], edges = graph.edges || [];
+  const byKey = {}; for (const n of nodes) byKey[n.key] = n;
+  const sections = [...new Set(nodes.map(n => n.section || 'other'))].sort();
+  const hidden = new Set();
+  let sel = null;
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // filters (one toggle per section)
+  const fbox = document.getElementById('filters');
+  fbox.innerHTML = sections.map(s => '<label><input type="checkbox" data-s="'+esc(s)+'" checked> '+esc(s)+'</label>').join('');
+  fbox.querySelectorAll('input').forEach(cb => cb.onchange = () => {
+    if (cb.checked) hidden.delete(cb.dataset.s); else hidden.add(cb.dataset.s); renderList();
+  });
+  document.getElementById('q').oninput = renderList;
+
+  function renderList() {
+    const q = document.getElementById('q').value.trim().toLowerCase();
+    const list = document.getElementById('list');
+    let shown = 0; const parts = [];
+    for (const s of sections) {
+      if (hidden.has(s)) continue;
+      const group = nodes.filter(n => (n.section||'other') === s &&
+        (!q || (n.display||'').toLowerCase().includes(q) || (n.key||'').toLowerCase().includes(q)));
+      if (!group.length) continue;
+      parts.push('<div class="sec">'+esc(s)+' ('+group.length+')</div>');
+      for (const n of group) {
+        shown++;
+        parts.push('<div class="row'+(n.key===sel?' sel':'')+'" data-k="'+esc(n.key)+'">'
+          + esc(n.display||n.key) + ' <span class="k">'+esc(n.key)+'</span>' + badges(n) + '</div>');
+      }
+    }
+    list.innerHTML = parts.join('') || '<div class="empty">No matching nodes.</div>';
+    document.getElementById('count').textContent = shown + ' / ' + nodes.length;
+    list.querySelectorAll('.row').forEach(r => r.onclick = () => select(r.dataset.k));
+  }
+  function badges(n){ const p=n.problems; if(!p) return '';
+    return (p.error?' <span class="badge err">'+p.error+'</span>':'')+(p.warning?' <span class="badge warn">'+p.warning+'</span>':''); }
+
+  function select(key) {
+    sel = key;
+    document.querySelectorAll('.row').forEach(r => r.classList.toggle('sel', r.dataset.k===key));
+    const n = byKey[key];
+    const d = document.getElementById('detail');
+    if (!n) { d.innerHTML = '<div class="empty">Unknown node.</div>'; return; }
+    const out = edges.filter(e => e.from === key);
+    const inc = edges.filter(e => e.to === key);
+    d.innerHTML =
+      '<div class="dtitle">'+esc(n.display||n.key)+badges(n)+'</div>'
+      + '<div class="dkey">'+esc(n.key)+' · '+esc(n.section||'')+'</div>'
+      + '<div class="dactions"><button id="open">Open source</button><button id="edit">Edit…</button></div>'
+      + group('Leads to', out, 'to') + group('Reached from', inc, 'from');
+    document.getElementById('open').onclick = () => vscode.postMessage({ type:'goto', uri:n.uri, line:n.line });
+    document.getElementById('edit').onclick = () => vscode.postMessage({ type:'inspect', uri:n.uri, key:n.key });
+    d.querySelectorAll('.chip').forEach(c => c.onclick = () => select(c.dataset.k));
+    d.querySelectorAll('.src').forEach(s => s.onclick = (ev) => { ev.stopPropagation();
+      vscode.postMessage({ type:'goto', uri:s.dataset.uri, line:+s.dataset.line }); });
+  }
+  function group(title, list, endpoint) {
+    if (!list.length) return '<div class="grp">'+title+'</div><div class="muted" style="padding-left:4px">none</div>';
+    const chips = list.map(e => {
+      const other = e[endpoint]; const on = byKey[other];
+      return '<span class="chip" data-k="'+esc(other)+'"><span class="ek">'+esc(e.kind)+'</span>'
+        + esc(on ? (on.display||other) : other)
+        + '</span><span class="src" data-uri="'+esc(e.uri)+'" data-line="'+esc(e.line)+'">↪ src</span>';
+    }).join(' ');
+    return '<div class="grp">'+title+' ('+list.length+')</div><div>'+chips+'</div>';
+  }
+  renderList();
+</script></body></html>`;
+}
+
+async function showStoryOutline(): Promise<void> {
+  if (!client) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
+    return;
+  }
+  const uri = vscode.window.activeTextEditor?.document.uri.toString();
+  if (!uri) { return; }
+  let graph: MissionGraph;
+  try {
+    graph = await client.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+  } catch (e) {
+    vscode.window.showErrorMessage(`Artemis AMD: could not build the outline (${e}).`);
+    return;
+  }
+  const panel = vscode.window.createWebviewPanel(
+    'amdStoryOutline', 'Story Outline', vscode.ViewColumn.Beside, { enableScripts: true });
+  const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
+  panel.webview.html = storyOutlineHtml(graph, nonce());
+
+  const refresh = async () => {
+    try {
+      const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+      panel.webview.html = storyOutlineHtml(g, nonce());
+    } catch (e) { output.appendLine(`Outline refresh failed: ${e}`); }
+  };
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (e.document.languageId === 'amd') {
+      clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { void refresh(); }, 300);
+    }
+  });
+  panel.onDidDispose(() => docSub.dispose());
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg?.type === 'goto') {
+      openLocation(msg.uri, msg.line);
+    } else if (msg?.type === 'inspect') {
+      showInspector(msg.uri, msg.key);
+    }
+  });
+}
+
 async function showGraph(): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
@@ -2313,6 +2478,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', showStoryOutline));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));

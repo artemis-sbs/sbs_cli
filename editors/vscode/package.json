@@ -37,6 +37,12 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "amd.showStoryOutline",
+        "title": "Show Story Outline (scalable)",
+        "category": "Artemis AMD",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "amd.showPreview",
         "title": "Preview Node",
         "category": "Artemis AMD",
@@ -64,6 +70,7 @@
       "commandPalette": [
         { "command": "amd.showMap", "when": "editorLangId == amd" },
         { "command": "amd.showGraph", "when": "editorLangId == amd" },
+        { "command": "amd.showStoryOutline", "when": "editorLangId == amd" },
         { "command": "amd.showPreview", "when": "editorLangId == amd" },
         { "command": "amd.previewInSession", "when": "editorLangId == amd" },
         { "command": "amd.newFile" }
@@ -71,6 +78,7 @@
       "editor/title": [
         { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.showGraph", "when": "editorLangId == amd", "group": "navigation" },
+        { "command": "amd.showStoryOutline", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation" }
       ]
