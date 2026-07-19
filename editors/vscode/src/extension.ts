@@ -2142,9 +2142,8 @@ function missionInspectorHtml(nonce: string): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
-  .split { display:flex; flex:1; min-height:0; }
-  .pane { flex:1; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); }
-  .pane:last-child { border-right:none; }
+  .split { display:grid; flex:1; min-height:0; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
+  .pane { overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); border-bottom:1px solid var(--vscode-panel-border,#8883); min-height:0; }
   .bar { padding:4px 10px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); border-bottom:1px solid var(--vscode-panel-border,#8882); display:flex; gap:8px; align-items:center; }
   .bar b { color:var(--vscode-foreground); }
   table { width:100%; border-collapse:collapse; font-size:12px; }
@@ -2158,6 +2157,12 @@ function missionInspectorHtml(nonce: string): string {
   .wnode .wtype { color: var(--vscode-symbolIcon-classForeground,#4ec9b0); }
   .wnode .wtag { color: var(--vscode-foreground); }
   .wnode .wrect { color: var(--vscode-descriptionForeground); }
+  .bagent { font-size:12px; padding:3px 10px 1px; font-weight:600; border-top:1px solid var(--vscode-panel-border,#8882); }
+  .bagent .pz { color: var(--vscode-descriptionForeground); font-weight:400; }
+  .bnode { font-family: var(--vscode-editor-font-family); font-size:12px; padding:1px 10px; white-space:nowrap; }
+  .bnode .btype { color: var(--vscode-symbolIcon-classForeground,#4ec9b0); }
+  .bnode.on { color: var(--vscode-testing-iconPassed,#89d185); }
+  .bnode .bres { color: var(--vscode-descriptionForeground); }
 </style></head><body>
 <div class="split">
   <div class="pane">
@@ -2172,6 +2177,10 @@ function missionInspectorHtml(nonce: string): string {
   <div class="pane">
     <div class="bar"><b>Widgets</b><select id="wClient" class="sel"></select><span class="muted" id="wCount"></span></div>
     <div id="wTree"><div class="empty">Waiting for a GUI frame…</div></div>
+  </div>
+  <div class="pane">
+    <div class="bar"><b>Brains</b><span class="muted" id="bCount"></span></div>
+    <div id="bTree"><div class="empty">Waiting for agent brains…</div></div>
   </div>
 </div>
 <script nonce="${nonce}">
@@ -2201,8 +2210,30 @@ function missionInspectorHtml(nonce: string): string {
       wFrames[p.client] = p.widgets || [];
       syncClients();
       renderWidgets();
+    } else if (m.kind === 'brains') {
+      renderBrains((m.payload && m.payload.brains) || []);
     }
   });
+
+  // --- Brains pane: render each agent's behaviour tree, marking the active node ---
+  function renderBrains(brains) {
+    const tree = document.getElementById('bTree');
+    document.getElementById('bCount').textContent = brains.length ? '('+brains.length+')' : '';
+    if (!brains.length) { tree.innerHTML = '<div class="empty">No agent brains.</div>'; return; }
+    const lines = [];
+    for (const b of brains) {
+      lines.push('<div class="bagent">'+esc(b.name || b.agent)
+        + (b.paused ? ' <span class="pz">(paused)</span>' : '')+'</div>');
+      (function walk(node, depth) {
+        if (!node) return;
+        lines.push('<div class="bnode'+(node.active?' on':'')+'" style="padding-left:'+(10+depth*14)+'px">'
+          + '<span class="btype">'+esc(node.type)+'</span> '+esc(node.label||'')
+          + (node.result ? ' <span class="bres">['+esc(node.result)+']</span>' : '')+'</div>');
+        for (const c of (node.children||[])) walk(c, depth+1);
+      })(b.tree, 0);
+    }
+    tree.innerHTML = lines.join('');
+  }
 
   // --- Widgets pane: build a tree from parent/tag and render it indented ---
   const wFrames = {};                 // client -> [widget]
