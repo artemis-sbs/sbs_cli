@@ -2153,7 +2153,11 @@ function missionInspectorHtml(nonce: string): string {
   .empty { padding:10px; color: var(--vscode-descriptionForeground); }
   .sig { font-family: var(--vscode-editor-font-family); font-size:12px; padding:2px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
   .sig .name { color: var(--vscode-symbolIcon-eventForeground, #c586c0); font-weight:600; }
-  button { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:1px 8px; cursor:pointer; font-size:11px; }
+  button, .sel { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:1px 8px; cursor:pointer; font-size:11px; }
+  .wnode { font-family: var(--vscode-editor-font-family); font-size:12px; padding:1px 10px; white-space:nowrap; }
+  .wnode .wtype { color: var(--vscode-symbolIcon-classForeground,#4ec9b0); }
+  .wnode .wtag { color: var(--vscode-foreground); }
+  .wnode .wrect { color: var(--vscode-descriptionForeground); }
 </style></head><body>
 <div class="split">
   <div class="pane">
@@ -2164,6 +2168,10 @@ function missionInspectorHtml(nonce: string): string {
   <div class="pane">
     <div class="bar"><b>Signals</b><button id="clear">Clear</button><span class="muted" id="sigCount"></span></div>
     <div id="sigLog"></div>
+  </div>
+  <div class="pane">
+    <div class="bar"><b>Widgets</b><select id="wClient" class="sel"></select><span class="muted" id="wCount"></span></div>
+    <div id="wTree"><div class="empty">Waiting for a GUI frame…</div></div>
   </div>
 </div>
 <script nonce="${nonce}">
@@ -2188,8 +2196,47 @@ function missionInspectorHtml(nonce: string): string {
       while (sigLog.childNodes.length > 500) sigLog.removeChild(sigLog.firstChild);
       document.getElementById('sigCount').textContent = '('+(++sigN)+')';
       row.scrollIntoView(false);
+    } else if (m.kind === 'widgets') {
+      const p = m.payload || {};
+      wFrames[p.client] = p.widgets || [];
+      syncClients();
+      renderWidgets();
     }
   });
+
+  // --- Widgets pane: build a tree from parent/tag and render it indented ---
+  const wFrames = {};                 // client -> [widget]
+  const wSel = document.getElementById('wClient');
+  wSel.onchange = renderWidgets;
+  function syncClients() {
+    const ids = Object.keys(wFrames);
+    const cur = wSel.value;
+    wSel.innerHTML = ids.map(id => '<option value="'+esc(id)+'">console '+esc(id)+'</option>').join('');
+    if (ids.indexOf(cur) >= 0) wSel.value = cur;
+  }
+  function fmtRect(r){ return (r && r.length===4) ? '['+r.map(n => Math.round(n*1000)/1000).join(', ')+']' : ''; }
+  function renderWidgets() {
+    const tree = document.getElementById('wTree');
+    const widgets = wFrames[wSel.value] || [];
+    document.getElementById('wCount').textContent = widgets.length ? '('+widgets.length+')' : '';
+    if (!widgets.length) { tree.innerHTML = '<div class="empty">No widgets this frame.</div>'; return; }
+    const kids = {};                  // parent tag -> [widget]
+    const tags = new Set(widgets.map(w => w.tag).filter(Boolean));
+    for (const w of widgets) { (kids[w.parent] = kids[w.parent] || []).push(w); }
+    const roots = widgets.filter(w => !w.parent || !tags.has(w.parent));
+    const seen = new Set(); const lines = [];
+    (function walk(list, depth) {
+      for (const w of list) {
+        if (seen.has(w)) continue; seen.add(w);
+        lines.push('<div class="wnode" style="padding-left:'+(10+depth*14)+'px">'
+          + '<span class="wtype">'+esc(w.type)+'</span> '
+          + '<span class="wtag">'+esc(w.tag||'')+'</span> '
+          + '<span class="wrect">'+esc(fmtRect(w.rect))+'</span></div>');
+        if (w.tag && kids[w.tag]) walk(kids[w.tag], depth+1);
+      }
+    })(roots, 0);
+    tree.innerHTML = lines.join('');
+  }
 </script></body></html>`;
 }
 
