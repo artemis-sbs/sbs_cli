@@ -2,7 +2,7 @@
   "name": "amd-language",
   "displayName": "Artemis AMD",
   "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, diagnostics/navigation/formatting via the sbs AMD language server, plus a MAST source debugger.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "artemis-sbs",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/artemis-sbs/sbs_cli" },
@@ -101,7 +101,23 @@
               },
               "mission": {
                 "type": "string",
-                "description": "Mission folder passed to `sbs dap` (defaults to the .mast's folder)."
+                "description": "Mission folder. When set, the extension launches the mission (sbs debug --dap-port) itself, waits for it, attaches, and stops it when you end the session — one click, no task.",
+                "default": "${workspaceFolder}"
+              },
+              "map": {
+                "type": "string",
+                "description": "Map index or name to auto-start (held until you attach). Omit for the GUI map picker.",
+                "default": "0"
+              },
+              "port": {
+                "type": "number",
+                "description": "Localhost port for the debug adapter (--dap-port).",
+                "default": 4711
+              },
+              "useWorkingTree": {
+                "type": "boolean",
+                "description": "Load sbs_utils from source (--use-working-tree) so library Python is editable. Off = read library source from the .sbslib zip.",
+                "default": false
               }
             }
           },
@@ -124,11 +140,23 @@
           {
             "type": "mast",
             "request": "launch",
-            "name": "Debug MAST",
-            "program": "${file}"
+            "name": "Debug mission",
+            "mission": "${workspaceFolder}",
+            "map": "0"
           }
         ],
         "configurationSnippets": [
+          {
+            "label": "MAST: Debug mission (one click)",
+            "description": "Launch this mission and attach the MAST debugger — the extension starts and stops the runner for you.",
+            "body": {
+              "type": "mast",
+              "request": "launch",
+              "name": "Debug mission",
+              "mission": "^\"\\${workspaceFolder}\"",
+              "map": "0"
+            }
+          },
           {
             "label": "MAST: Debug current file",
             "description": "Run the open .mast under sbs dap and stop at breakpoints.",

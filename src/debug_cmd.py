@@ -269,8 +269,11 @@ def build_settings_override(set_opts, auto_start, autoplay, players):
 @click.option("--dap-wait", is_flag=True, default=False,
               help="With --dap-port, hold map auto-start until a debugger attaches "
                    "(so breakpoints that run at map start aren't missed)")
+@click.option("--use-working-tree", is_flag=True, default=False,
+              help="Load sbs_utils from the source working tree instead of the "
+                   "packaged .sbslib, so library Python is editable while debugging")
 def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs,
-          set_opts, auto_start, autoplay, players, dap_port, dap_wait):
+          set_opts, auto_start, autoplay, players, dap_port, dap_wait, use_working_tree):
     """Run MISSION_PATH in debug mode using the cosmos_dev mission runner.
 
     MISSION_PATH defaults to the current directory.
@@ -323,4 +326,5 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs
         tick_rate=tick_rate,
         dap_port=dap_port,
         dap_wait=dap_wait,
+        use_working_tree=use_working_tree,
     )

@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 import * as net from 'net';
+import * as cp from 'child_process';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -2013,21 +2014,92 @@ function waitForPort(host: string, port: number, timeoutMs: number): Promise<voi
   });
 }
 
+/** How to invoke `sbs`: the Cosmos install's python + sbs.pyz, else `sbs` on PATH. */
+function resolveSbsBase(): { command: string; args: string[]; cwd?: string } {
+  const root = detectCosmosRoot();
+  if (root) {
+    const py = pythonExe(root);
+    const missions = path.join(root, 'data', 'missions');
+    const sbsPyz = path.join(missions, 'sbs.pyz');
+    if (fs.existsSync(py) && fs.existsSync(sbsPyz)) {
+      return { command: py, args: [sbsPyz], cwd: missions };
+    }
+  }
+  return { command: 'sbs', args: [] };
+}
+
+// Runners the extension spawned, keyed by debug session id, so a session end can
+// kill its runner (and the mission's self-cleanup is the backstop).
+const missionRunners = new Map<string, cp.ChildProcess>();
+
+function killTree(pid: number | undefined): void {
+  if (!pid) { return; }
+  try {
+    if (process.platform === 'win32') {
+      cp.spawn('taskkill', ['/F', '/T', '/PID', String(pid)]);
+    } else {
+      process.kill(pid, 'SIGTERM');
+    }
+  } catch { /* already gone */ }
+}
+
+/** Spawn `sbs debug <mission> --dap-port <port> --dap-wait [--map …]` PLAIN (no
+ *  debugpy), streaming its output to the Artemis AMD channel. */
+function spawnMissionRunner(session: vscode.DebugSession, port: number): cp.ChildProcess {
+  const cfg = session.configuration || {};
+  let mission: string = cfg.mission || session.workspaceFolder?.uri.fsPath || '.';
+  if (session.workspaceFolder) {
+    mission = mission.replace(/\$\{workspaceFolder\}/g, session.workspaceFolder.uri.fsPath);
+  }
+  const base = resolveSbsBase();
+  const args = [...base.args, 'debug', mission, '--dap-port', String(port), '--dap-wait'];
+  if (cfg.map !== undefined && cfg.map !== null && String(cfg.map) !== '') {
+    args.push('--map', String(cfg.map));
+  }
+  if (cfg.useWorkingTree) { args.push('--use-working-tree'); }
+  output.show(true);
+  output.appendLine(`Launching mission: ${base.command} ${args.join(' ')}`);
+  const child = cp.spawn(base.command, args, { cwd: base.cwd, windowsHide: true });
+  child.stdout?.on('data', (d: Buffer) => output.append(d.toString()));
+  child.stderr?.on('data', (d: Buffer) => output.append(d.toString()));
+  child.on('exit', (code) => output.appendLine(`[mission runner exited: ${code}]`));
+  child.on('error', (err) => output.appendLine(`[mission runner failed to start: ${err.message}]`));
+  return child;
+}
+
 class MastDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory {
   createDebugAdapterDescriptor(
     session: vscode.DebugSession,
   ): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-    // attach: connect to a mission already serving DAP (mission_runner/sbs debug
-    // --dap-port). launch: spawn `sbs dap` over stdio.
-    if (session.configuration.request === 'attach') {
-      const port = session.configuration.port ?? 4711;
-      const host = session.configuration.host ?? '127.0.0.1';
+    const cfg = session.configuration;
+    const host = cfg.host ?? '127.0.0.1';
+    const port = cfg.port ?? 4711;
+
+    // launch + mission: the extension OWNS the runner — spawn `sbs debug` plain,
+    // wait for it, connect, and kill it when the session ends. One click, no task.
+    if (cfg.request === 'launch' && cfg.mission) {
+      const child = spawnMissionRunner(session, port);
+      missionRunners.set(session.id, child);
+      output.appendLine(`DAP launch: waiting for ${host}:${port} …`);
+      return waitForPort(host, port, 60000).then(
+        () => {
+          output.appendLine(`DAP launch: connected ${host}:${port}`);
+          return new vscode.DebugAdapterServer(port, host);
+        },
+        (err) => { killTree(child.pid); missionRunners.delete(session.id); throw err; },
+      );
+    }
+
+    // attach: connect to a mission already serving DAP.
+    if (cfg.request === 'attach') {
       output.appendLine(`DAP attach: waiting for ${host}:${port} …`);
       return waitForPort(host, port, 30000).then(() => {
         output.appendLine(`DAP attach: connected ${host}:${port}`);
         return new vscode.DebugAdapterServer(port, host);
       });
     }
+
+    // launch a single .mast via `sbs dap` over stdio.
     return resolveDapExecutable(session);
   }
 }
@@ -2047,7 +2119,8 @@ class MastDebugConfigurationProvider implements vscode.DebugConfigurationProvide
         config.program = '${file}';
       }
     }
-    if (config.type === 'mast' && !config.program) {
+    // A mission launch uses `mission`; only default `program` for a single-.mast launch.
+    if (config.type === 'mast' && !config.program && !config.mission) {
       config.program = '${file}';
     }
     return config;
@@ -2063,6 +2136,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.debug.registerDebugAdapterDescriptorFactory('mast', new MastDebugAdapterFactory()));
   context.subscriptions.push(
     vscode.debug.registerDebugConfigurationProvider('mast', new MastDebugConfigurationProvider()));
+  // When a mast debug session ends, stop the runner the extension spawned for it.
+  context.subscriptions.push(vscode.debug.onDidTerminateDebugSession((s) => {
+    const child = missionRunners.get(s.id);
+    if (child) {
+      missionRunners.delete(s.id);
+      output.appendLine('Stopping mission runner (debug session ended).');
+      killTree(child.pid);
+    }
+  }));
 
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
