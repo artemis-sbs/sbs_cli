@@ -263,8 +263,14 @@ def build_settings_override(set_opts, auto_start, autoplay, players):
               help="Enable autoplay (sets AUTO_PLAY.enable=true)")
 @click.option("--players", type=int, default=None,
               help="Shortcut for --set PLAYER_COUNT=N")
+@click.option("--dap-port", type=int, default=None, metavar="PORT",
+              help="Serve the MAST source debugger (DAP) on this localhost port so "
+                   "VS Code can attach and set breakpoints in .mast (dev-only)")
+@click.option("--dap-wait", is_flag=True, default=False,
+              help="With --dap-port, hold map auto-start until a debugger attaches "
+                   "(so breakpoints that run at map start aren't missed)")
 def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs,
-          set_opts, auto_start, autoplay, players):
+          set_opts, auto_start, autoplay, players, dap_port, dap_wait):
     """Run MISSION_PATH in debug mode using the cosmos_dev mission runner.
 
     MISSION_PATH defaults to the current directory.
@@ -315,4 +321,6 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs
         gui=not no_gui,
         port=port,
         tick_rate=tick_rate,
+        dap_port=dap_port,
+        dap_wait=dap_wait,
     )

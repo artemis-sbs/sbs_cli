@@ -12,6 +12,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
+import * as net from 'net';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -1963,9 +1964,105 @@ async function newContentFile(): Promise<void> {
   showMap(); showGraph();
 }
 
+// --- MAST debugger (Debug Adapter Protocol) --------------------------------
+// The adapter is `sbs dap`, launched over stdio exactly like the lint LSP
+// server. All debug logic lives in cosmos_dev/mast_dap.py; this just spawns it.
+
+/** Build the DebugAdapterExecutable that runs `sbs dap <mission>` over stdio. */
+function resolveDapExecutable(session: vscode.DebugSession): vscode.DebugAdapterExecutable {
+  const cfg = session.configuration || {};
+  let mission: string | undefined = cfg.mission;
+  const program: string | undefined = cfg.program;
+  if (!mission && program) { mission = path.dirname(program); }
+  if (!mission) { mission = session.workspaceFolder?.uri.fsPath; }
+  if (!mission) { mission = '.'; }
+
+  const dapArgs = ['dap', mission];
+  const root = detectCosmosRoot();
+  if (root) {
+    const py = pythonExe(root);
+    const missions = path.join(root, 'data', 'missions');
+    const sbsPyz = path.join(missions, 'sbs.pyz');
+    if (fs.existsSync(py) && fs.existsSync(sbsPyz)) {
+      output.appendLine(`DAP: ${py} ${sbsPyz} ${dapArgs.join(' ')}`);
+      return new vscode.DebugAdapterExecutable(py, [sbsPyz, ...dapArgs], { cwd: missions });
+    }
+  }
+  output.appendLine('DAP: no Cosmos install found — falling back to `sbs` on PATH.');
+  return new vscode.DebugAdapterExecutable('sbs', dapArgs);
+}
+
+/** Poll a TCP port until it accepts a connection (the mission takes a few
+ *  seconds to boot and bind), so a one-click compound attach doesn't race it. */
+function waitForPort(host: string, port: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const sock = net.connect({ host, port });
+      sock.once('connect', () => { sock.destroy(); resolve(); });
+      sock.once('error', () => {
+        sock.destroy();
+        if (Date.now() > deadline) {
+          reject(new Error(`no MAST debug adapter on ${host}:${port} — is the mission running with --dap-port?`));
+        } else {
+          setTimeout(attempt, 300);
+        }
+      });
+    };
+    attempt();
+  });
+}
+
+class MastDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory {
+  createDebugAdapterDescriptor(
+    session: vscode.DebugSession,
+  ): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+    // attach: connect to a mission already serving DAP (mission_runner/sbs debug
+    // --dap-port). launch: spawn `sbs dap` over stdio.
+    if (session.configuration.request === 'attach') {
+      const port = session.configuration.port ?? 4711;
+      const host = session.configuration.host ?? '127.0.0.1';
+      output.appendLine(`DAP attach: waiting for ${host}:${port} …`);
+      return waitForPort(host, port, 30000).then(() => {
+        output.appendLine(`DAP attach: connected ${host}:${port}`);
+        return new vscode.DebugAdapterServer(port, host);
+      });
+    }
+    return resolveDapExecutable(session);
+  }
+}
+
+/** Fill in sensible defaults so F5 works on the open .mast with no launch.json. */
+class MastDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
+  resolveDebugConfiguration(
+    _folder: vscode.WorkspaceFolder | undefined,
+    config: vscode.DebugConfiguration,
+  ): vscode.ProviderResult<vscode.DebugConfiguration> {
+    if (!config.type && !config.request && !config.name) {
+      const doc = vscode.window.activeTextEditor?.document;
+      if (doc && doc.fileName.endsWith('.mast')) {
+        config.type = 'mast';
+        config.name = 'Debug MAST';
+        config.request = 'launch';
+        config.program = '${file}';
+      }
+    }
+    if (config.type === 'mast' && !config.program) {
+      config.program = '${file}';
+    }
+    return config;
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('Artemis AMD');
   extensionUri = context.extensionUri;
+
+  // MAST source debugger.
+  context.subscriptions.push(
+    vscode.debug.registerDebugAdapterDescriptorFactory('mast', new MastDebugAdapterFactory()));
+  context.subscriptions.push(
+    vscode.debug.registerDebugConfigurationProvider('mast', new MastDebugConfigurationProvider()));
 
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));

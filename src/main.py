@@ -12,6 +12,7 @@ from watch_cmd import watch
 from compile_cmd import compile
 from lint_cmd import lint
 from fmt_cmd import fmt
+from dap_cmd import dap
 import click
 
 

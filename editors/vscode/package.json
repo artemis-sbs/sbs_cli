@@ -1,14 +1,17 @@
 {
   "name": "amd-language",
   "displayName": "Artemis AMD",
-  "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, plus diagnostics/navigation/formatting via the sbs AMD language server.",
-  "version": "0.1.0",
+  "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, diagnostics/navigation/formatting via the sbs AMD language server, plus a MAST source debugger.",
+  "version": "0.2.2",
   "publisher": "artemis-sbs",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/artemis-sbs/sbs_cli" },
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages", "Linters", "Formatters"],
   "main": "./out/extension.js",
+  "activationEvents": [
+    "onDebug"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -72,6 +75,82 @@
         "aliases": ["AMD", "amd"],
         "extensions": [".amd"],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "mast",
+        "aliases": ["MAST", "mast"],
+        "extensions": [".mast", ".mastlib"]
+      }
+    ],
+    "breakpoints": [
+      { "language": "mast" },
+      { "language": "amd" }
+    ],
+    "debuggers": [
+      {
+        "type": "mast",
+        "label": "MAST",
+        "languages": ["mast"],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Absolute path of the .mast to debug.",
+                "default": "${file}"
+              },
+              "mission": {
+                "type": "string",
+                "description": "Mission folder passed to `sbs dap` (defaults to the .mast's folder)."
+              }
+            }
+          },
+          "attach": {
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Host serving the MAST debug adapter.",
+                "default": "127.0.0.1"
+              },
+              "port": {
+                "type": "number",
+                "description": "Port passed to `--dap-port` on the running mission.",
+                "default": 4711
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "mast",
+            "request": "launch",
+            "name": "Debug MAST",
+            "program": "${file}"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "MAST: Debug current file",
+            "description": "Run the open .mast under sbs dap and stop at breakpoints.",
+            "body": {
+              "type": "mast",
+              "request": "launch",
+              "name": "Debug MAST",
+              "program": "^\"\\${file}\""
+            }
+          },
+          {
+            "label": "MAST: Attach to running mission",
+            "description": "Attach to a mission started with --dap-port and set breakpoints live.",
+            "body": {
+              "type": "mast",
+              "request": "attach",
+              "name": "Attach to MAST",
+              "host": "127.0.0.1",
+              "port": 4711
+            }
+          }
+        ]
       }
     ],
     "grammars": [
