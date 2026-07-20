@@ -3612,6 +3612,8 @@ function missionInspectorHtml(nonce: string): string {
   .wrow:hover { background: var(--vscode-list-hoverBackground,#8881); }
   .invcell { font-family: var(--vscode-editor-font-family); font-size:11px; white-space:normal; padding-left:18px; }
   .sig .ts { color: var(--vscode-descriptionForeground); font-size:11px; margin-right:6px; }
+  .sig .siglink { color: var(--vscode-textLink-foreground,#4daafc); font-size:11px; margin-left:6px; cursor:pointer; }
+  .sig .siglink:hover { text-decoration:underline; }
   .sig { font-family: var(--vscode-editor-font-family); font-size:12px; padding:2px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
   .sig .name { color: var(--vscode-symbolIcon-eventForeground, #c586c0); font-weight:600; }
   button, .sel { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:1px 8px; cursor:pointer; font-size:11px; }
@@ -3712,7 +3714,12 @@ ${amdToolbar('inspector')}
       const row = document.createElement('div'); row.className = 'sig';
       row.dataset.name = p.name || '';
       const ts = new Date().toLocaleTimeString();
-      row.innerHTML = '<span class="ts">'+esc(ts)+'</span><span class="name">'+esc(p.name)+'</span> <span class="muted">→ '+esc(p.routes)+' route(s)</span> '+esc(JSON.stringify(p.data||{}));
+      const base = function(pp){ return String(pp||'').replace(/\\\\/g,'/').split('/').pop(); };
+      let src = '';
+      if (p.emitter && p.emitter.path) { src += ' <span class="siglink" data-path="'+esc(p.emitter.path)+'" data-line="'+p.emitter.line+'" title="emitter — '+esc(p.emitter.path)+':'+p.emitter.line+'">↪ emit</span>'; }
+      (p.route_list||[]).forEach(function(r){ if (r && r.path) { src += ' <span class="siglink" data-path="'+esc(r.path)+'" data-line="'+r.line+'" title="route — '+esc(r.path)+':'+r.line+'">↪ '+esc(base(r.path))+':'+r.line+'</span>'; } });
+      row.innerHTML = '<span class="ts">'+esc(ts)+'</span><span class="name">'+esc(p.name)+'</span> <span class="muted">→ '+esc(p.routes)+' route(s)</span> '+esc(JSON.stringify(p.data||{}))+src;
+      row.querySelectorAll('.siglink').forEach(function(a){ a.onclick = function(ev){ ev.stopPropagation(); vscode.postMessage({ type:'goto', path:a.dataset.path, line:+a.dataset.line }); }; });
       const on = matchSig(row); row.style.display = on ? '' : 'none';
       sigLog.appendChild(row); sigN++; if (on) sigShown++;
       while (sigLog.childNodes.length > 500) { const g = sigLog.firstChild; if (g.style.display !== 'none') sigShown--; sigN--; sigLog.removeChild(g); }
@@ -3793,6 +3800,9 @@ function showMissionInspector(column: vscode.ViewColumn = vscode.ViewColumn.Besi
   missionInspectorPanel.webview.html = missionInspectorHtml(inspectorNonce());
   missionInspectorPanel.webview.onDidReceiveMessage((msg) => {
     if (msg?.type === 'openTool') { openAmdTool(msg.tool, undefined, missionInspectorPanel?.viewColumn); }
+    else if (msg?.type === 'goto' && msg.path) {   // a Signals-pane source link (emitter / route)
+      openLocation(vscode.Uri.file(msg.path).toString(), Math.max(0, (msg.line || 1) - 1), { preserveFocus: true });
+    }
   });
   missionInspectorPanel.onDidDispose(() => { missionInspectorPanel = undefined; });
 }
