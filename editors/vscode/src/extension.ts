@@ -1642,7 +1642,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const DOCMODE = ${docMode};                    // true = backing a .gui.mast file (two-way sync)
-  let idc = 0, model = { id:0, type:'root', children: [] }, sel = null;
+  let idc = 0, model = { id:0, type:'root', props:{ label:'my_gui' }, children: [] }, sel = null;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
   // Element catalog + code-gen + parser come from the shared media/guiModel.js
@@ -1880,7 +1880,14 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     const box = document.getElementById('props'); const n = selNode();
     if (!n) { box.innerHTML = '<div class="empty">Select an element to edit its properties.</div>'; return; }
     const c = CAT[n.type] || { label:n.type, fields:[] };
-    if (n.type==='root'){ box.innerHTML = '<div class="prow"><b>Screen</b></div><div class="muted">The layout root. Sections live directly under it; drop a Section here.</div>'; return; }
+    if (n.type==='root'){
+      box.innerHTML = '<div class="prow"><b>Screen</b></div>'
+        + '<div class="prow"><label>Label name</label><input data-k="label" value="'+esc((n.props&&n.props.label)||'my_gui')+'"></div>'
+        + '<div class="muted" style="padding:4px 0">The gui is written under <b>=== '+esc((n.props&&n.props.label)||'my_gui')+'</b> and ends with await gui(). Sections live under it.</div>';
+      const inp = box.querySelector('[data-k]');
+      inp.oninput = function(){ n.props.label = inp.value; renderCode(); recordHistorySoon(); };
+      return;
+    }
     let h = '<div class="prow"><b>'+c.label+'</b></div>';
     h += '<div class="actions">'
        + '<button data-act="up">↑</button><button data-act="down">↓</button>'
@@ -1913,7 +1920,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   document.getElementById('insert').onclick = function(){ vscode.postMessage({ type:'insert', code: code() }); };
   document.getElementById('mock').onclick = function(){ vscode.postMessage({ type:'mockPreview', code: code() }); };
   document.getElementById('load').onclick = function(){ vscode.postMessage({ type:'loadRequest' }); };
-  document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', children: [] }; sel = null; recordHistory(); render(); };
+  document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', props:{ label:'my_gui' }, children: [] }; sel = null; recordHistory(); render(); };
 
   // --- round-trip: parse the editor's own generated block back into the model
   //     (shared media/guiModel.js). Unrecognised lines become 'raw' and re-emit

@@ -36,20 +36,22 @@ const back = GuiModel.parse(code1);
 const code2 = GuiModel.generate(back.model);
 check('model -> gen -> parse -> gen is byte-stable', code1 === code2);
 
-// 2) A hand-written complete gui (comments + a raw ~~…~~ line + a handler)
-//    round-trips verbatim.
+// 2) A hand-written complete gui under its label (comments + a raw ~~…~~ line +
+//    a handler) round-trips verbatim.
 const src = [
-  '# a hand comment survives',
-  'gui_section("area: 5,5,95,90;")',
-  'gui_text("$text:Fleet;justify:center;")',
-  'gui_button("Hail")',
-  '~~ custom = 1 ~~',
-  'on gui_message(gui_button("Hail")):',
-  '    jump hail',
-  'await gui()',
+  '=== my_gui',
+  '    # a hand comment survives',
+  '    gui_section("area: 5,5,95,90;")',
+  '    gui_text("$text:Fleet;justify:center;")',
+  '    gui_button("Hail")',
+  '    ~~ custom = 1 ~~',
+  '    on gui_message(gui_button("Hail")):',
+  '        jump hail',
+  '    await gui()',
 ].join('\n');
 const round = GuiModel.generate(GuiModel.parse(src).model);
 check('hand-written file survives byte-for-byte', round === src);
+check('label parsed', GuiModel.parse(src).model.props.label === 'my_gui');
 check('comments kept', round.includes('# a hand comment'));
 check('raw ~~…~~ line kept', round.includes('~~ custom = 1 ~~'));
 
@@ -63,15 +65,16 @@ check('empty model -> empty string', GuiModel.generate({ children: [] }) === '')
 
 // 5) button style + on_click (on gui_message) + list row_height round-trip.
 const forms = [
-  'gui_section("area: 0,0,100,100;")',
-  'gui_button("Plain")',
-  'gui_button("Styled", "color:red;")',
-  'gui_button("Go")',
-  'with gui_list(ships, select=True, title="Ships", row_height="3em") as ship:',
-  '    gui_text("$text:hi;")',
-  'on gui_message(gui_button("Go")):',
-  '    jump other',
-  'await gui()',
+  '=== my_gui',
+  '    gui_section("area: 0,0,100,100;")',
+  '    gui_button("Plain")',
+  '    gui_button("Styled", "color:red;")',
+  '    gui_button("Go")',
+  '    with gui_list(ships, select=True, title="Ships", row_height="3em") as ship:',
+  '        gui_text("$text:hi;")',
+  '    on gui_message(gui_button("Go")):',
+  '        jump other',
+  '    await gui()',
 ].join('\n');
 check('button style / on_click / list row_height round-trip', GuiModel.generate(GuiModel.parse(forms).model) === forms);
 const b = GuiModel.parse('gui_button("X", "color:red;")').model.children[0];
@@ -82,15 +85,23 @@ const lst = GuiModel.parse('with gui_list(a, row_height="3em") as x:\n    gui_te
 check('list row_height parsed', lst.props.row_height === '3em');
 
 // 5b) gui_table container (with form) + headers round-trip.
-const tbl = 'with gui_table(fleet, headers=["Ship", "Hull"], select=True) as row:\n    gui_text("$text:{row[\'name\']};")\n    gui_text("$text:{row[\'hull\']};")\nawait gui()';
+const tbl = [
+  '=== my_gui',
+  '    with gui_table(fleet, headers=["Ship", "Hull"], select=True) as row:',
+  '        gui_text("$text:{row[\'name\']};")',
+  '        gui_text("$text:{row[\'hull\']};")',
+  '    await gui()',
+].join('\n');
 check('gui_table with-form round-trip', GuiModel.generate(GuiModel.parse(tbl).model) === tbl);
 const tn = GuiModel.parse(tbl).model.children[0];
 check('table is a container with cells', tn.type === 'table' && tn.children && tn.children.length === 2);
 check('table headers parsed', tn.props.headers === 'Ship, Hull' && tn.props.as === 'row');
 
 // 6) section style round-trips; a plain section (no style) is unchanged.
-check('section style round-trip', GuiModel.generate(GuiModel.parse('gui_section("area: 5,5,95,95;background:#123;")\nawait gui()').model) === 'gui_section("area: 5,5,95,95;background:#123;")\nawait gui()');
-check('plain section unchanged', GuiModel.generate(GuiModel.parse('gui_section("area: 5,5,95,95;")\nawait gui()').model) === 'gui_section("area: 5,5,95,95;")\nawait gui()');
+const styled = '=== my_gui\n    gui_section("area: 5,5,95,95;background:#123;")\n    await gui()';
+check('section style round-trip', GuiModel.generate(GuiModel.parse(styled).model) === styled);
+const plain = '=== my_gui\n    gui_section("area: 5,5,95,95;")\n    await gui()';
+check('plain section unchanged', GuiModel.generate(GuiModel.parse(plain).model) === plain);
 const sec = GuiModel.parse('gui_section("area: 0,0,50,50;background:#1;")').model.children[0];
 check('section area/style split', sec.props.area === '0,0,50,50' && sec.props.style === 'background:#1;');
 

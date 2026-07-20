@@ -17,7 +17,7 @@
   // container flag (cont), whether it's a `with` block, default props, and the
   // fields the inspector edits.
   const CAT = {
-    root:        { label: 'Screen',       cont: true,  fields: [] },
+    root:        { label: 'Screen',       cont: true,  props: { label: 'my_gui' }, fields: [['label', 'Label name']] },
     section:     { label: 'Section',      cont: true,  props: { area: '5,5,95,95', style: '' }, fields: [['area', 'Area  l,t,r,b'], ['style', 'Style (background, border…)']] },
     sub_section: { label: 'Sub-section',  cont: true,  with: true, props: { style: '' }, fields: [['style', 'Style']] },
     row:         { label: 'Row',          cont: true,  props: { style: '' }, fields: [['style', 'Style']] },
@@ -92,8 +92,9 @@
     }
     return out;
   }
-  // A complete, presentable gui body: layout, then a `on gui_message(...)` block
-  // per button with a click handler, then `await gui()`.
+  // A complete, presentable gui UNDER ITS OWN LABEL (a gui must never sit in the
+  // implicit `main`): `=== <label>` then the indented layout, on gui_message
+  // handler blocks, and a trailing `await gui()`.
   function generate(model) {
     const lines = gen(model.children, 0);
     if (!lines.length) { return ''; }
@@ -104,7 +105,8 @@
       oc.split('\n').forEach(function (ln) { lines.push('    ' + ln); });
     });
     lines.push('await gui()');
-    return lines.join('\n');
+    const label = (model.props && model.props.label) || 'my_gui';
+    return '=== ' + label + '\n' + lines.map(function (l) { return l ? '    ' + l : l; }).join('\n');
   }
 
   // --- round-trip parse: MAST lines -> model ---
@@ -194,8 +196,12 @@
       }
     }
     const lines = String(text || '').replace(/\r/g, '').split('\n');
-    const r = parseStatements(lines, 0, 0);
-    const rootNode = { id: 0, type: 'root', children: [] };
+    // A leading `=== <label>` names the gui; its body is indented one level.
+    let start = 0, base = 0, label = 'my_gui';
+    const lm = (lines[0] || '').match(/^===+\s*(\w+)/);
+    if (lm) { label = lm[1]; start = 1; base = 4; }
+    const r = parseStatements(lines, start, base);
+    const rootNode = { id: 0, type: 'root', props: { label: label }, children: [] };
     // Handlers (on gui_message) sit after the layout — pull them out, build the
     // layout, then attach each handler's body to its button as on_click.
     const handlers = [];
