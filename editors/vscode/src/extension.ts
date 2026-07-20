@@ -3350,6 +3350,10 @@ function missionInspectorHtml(nonce: string): string {
   .muted { color: var(--vscode-descriptionForeground); }
   .empty { padding:10px; color: var(--vscode-descriptionForeground); }
   .foe { color: var(--vscode-errorForeground,#f66); font-weight:600; }
+  .wrow { cursor:pointer; }
+  .wrow:hover { background: var(--vscode-list-hoverBackground,#8881); }
+  .invcell { font-family: var(--vscode-editor-font-family); font-size:11px; white-space:normal; padding-left:18px; }
+  .sig .ts { color: var(--vscode-descriptionForeground); font-size:11px; margin-right:6px; }
   .sig { font-family: var(--vscode-editor-font-family); font-size:12px; padding:2px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
   .sig .name { color: var(--vscode-symbolIcon-eventForeground, #c586c0); font-weight:600; }
   button, .sel { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:1px 8px; cursor:pointer; font-size:11px; }
@@ -3370,7 +3374,7 @@ function missionInspectorHtml(nonce: string): string {
 </style></head><body>
 <div class="split">
   <div class="pane">
-    <div class="bar"><b>World</b><input id="worldFilter" class="flt" type="search" placeholder="filter…"><span class="sp"></span><span class="muted" id="worldCount"></span></div>
+    <div class="bar"><b>World</b><input id="worldFilter" class="flt" type="search" placeholder="filter…"><label style="text-transform:none"><input type="checkbox" id="foesOnly"> enemies</label><span class="sp"></span><span class="muted" id="worldCount"></span></div>
     <table><thead><tr><th>Name</th><th>Side</th><th>Kind</th><th title="Diplomatically hostile to a player side">Enemy?</th><th>Roles</th></tr></thead>
     <tbody id="worldBody"><tr><td colspan="5" class="empty">Waiting for a running mission…</td></tr></tbody></table>
   </div>
@@ -3402,16 +3406,32 @@ function missionInspectorHtml(nonce: string): string {
 
   // --- World pane: keep the last snapshot; filter client-side ---
   let worldData = [];
+  const foesOnly = document.getElementById('foesOnly');
   worldFilter.oninput = renderWorld;
+  foesOnly.onchange = renderWorld;
+  function invText(o){
+    const inv = o.inventory || {}; const keys = Object.keys(inv);
+    if (!keys.length) return 'id '+o.id+'  ·  (no inventory)';
+    return 'id '+o.id+'  ·  ' + keys.map(k => k+': '+JSON.stringify(inv[k])).join('   ');
+  }
   function renderWorld() {
     const q = worldFilter.value.trim().toLowerCase();
-    const rows = q ? worldData.filter(o => ((o.name||'')+' '+(o.side||'')+' '+(o.kind||'')+' '+(o.roles||[]).join(' ')).toLowerCase().includes(q)) : worldData;
-    worldCount.textContent = worldData.length ? (q ? '('+rows.length+'/'+worldData.length+')' : '('+worldData.length+')') : '';
-    worldBody.innerHTML = rows.length ? rows.map(o =>
-      '<tr><td>'+esc(o.name)+'</td><td>'+esc(o.side)+'</td><td>'+esc(o.kind)+'</td>'
+    let rows = foesOnly.checked ? worldData.filter(o => o.enemy) : worldData;
+    if (q) rows = rows.filter(o => ((o.name||'')+' '+(o.side||'')+' '+(o.kind||'')+' '+(o.roles||[]).join(' ')).toLowerCase().includes(q));
+    const filtered = q || foesOnly.checked;
+    worldCount.textContent = worldData.length ? (filtered ? '('+rows.length+'/'+worldData.length+')' : '('+worldData.length+')') : '';
+    worldBody.innerHTML = rows.length ? rows.map((o,i) =>
+      '<tr class="wrow" data-idx="'+i+'" title="Click to show inventory"><td>'+esc(o.name)+'</td><td>'+esc(o.side)+'</td><td>'+esc(o.kind)+'</td>'
       + '<td>'+(o.enemy ? '<span class="foe">enemy</span>' : '<span class="muted">—</span>')+'</td>'
-      + '<td class="muted">'+esc((o.roles||[]).join(', '))+'</td></tr>').join('')
+      + '<td class="muted">'+esc((o.roles||[]).join(', '))+'</td></tr>'
+      + '<tr class="winv" data-inv="'+i+'" style="display:none"><td colspan="5" class="muted invcell"></td></tr>').join('')
       : '<tr><td colspan="5" class="empty">'+(worldData.length ? 'No matches.' : 'No space objects.')+'</td></tr>';
+    worldBody.querySelectorAll('.wrow').forEach(r => r.onclick = () => {
+      const inv = worldBody.querySelector('.winv[data-inv="'+r.dataset.idx+'"]');
+      if (!inv) return;
+      if (inv.style.display === 'none') { inv.querySelector('.invcell').textContent = invText(rows[+r.dataset.idx]); inv.style.display=''; }
+      else inv.style.display = 'none';
+    });
   }
 
   // --- Signals pane: filter by name; Pause freezes auto-scroll (still collecting) ---
@@ -3429,7 +3449,8 @@ function missionInspectorHtml(nonce: string): string {
       const p = m.payload || {};
       const row = document.createElement('div'); row.className = 'sig';
       row.dataset.name = p.name || '';
-      row.innerHTML = '<span class="name">'+esc(p.name)+'</span> <span class="muted">→ '+esc(p.routes)+' route(s)</span> '+esc(JSON.stringify(p.data||{}));
+      const ts = new Date().toLocaleTimeString();
+      row.innerHTML = '<span class="ts">'+esc(ts)+'</span><span class="name">'+esc(p.name)+'</span> <span class="muted">→ '+esc(p.routes)+' route(s)</span> '+esc(JSON.stringify(p.data||{}));
       const on = matchSig(row); row.style.display = on ? '' : 'none';
       sigLog.appendChild(row); sigN++; if (on) sigShown++;
       while (sigLog.childNodes.length > 500) { const g = sigLog.firstChild; if (g.style.display !== 'none') sigShown--; sigN--; sigLog.removeChild(g); }
