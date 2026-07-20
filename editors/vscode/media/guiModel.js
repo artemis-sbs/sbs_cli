@@ -25,9 +25,9 @@
     list:        { label: 'List',         cont: true,  with: true, props: { items: 'items', as: 'item', select: 'true', title: '', row_height: '' }, fields: [['items', 'Items variable'], ['as', 'Row variable'], ['select', 'Select (true/false)'], ['title', 'Title (optional)'], ['row_height', 'Row height (e.g. 1.6em)']] },
     text:        { label: 'Text',         cont: false, props: { text: 'Hello', style: '' }, fields: [['text', 'Text'], ['style', 'Style (optional)']] },
     button:      { label: 'Button',       cont: false, props: { text: 'OK', style: '', on_click: '' }, fields: [['text', 'Label'], ['style', 'Style (optional)'], ['on_click', 'On click (e.g. jump hail)']] },
-    checkbox:    { label: 'Checkbox',     cont: false, props: { props: 'state:False;', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
-    slider:      { label: 'Slider',       cont: false, props: { props: 'low:0;high:100;', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
-    input:       { label: 'Input',        cont: false, props: { var: 'value', style: '' }, fields: [['var', 'Bind variable'], ['style', 'Style']] },
+    checkbox:    { label: 'Checkbox',     cont: false, props: { props: 'state:False;', style: '', on_message: '', ref: '' }, fields: [['props', 'Props'], ['style', 'Style'], ['on_message', 'On message (handler)'], ['ref', 'Ref var (optional)']] },
+    slider:      { label: 'Slider',       cont: false, props: { props: 'low:0;high:100;', style: '', on_message: '', ref: '' }, fields: [['props', 'Props'], ['style', 'Style'], ['on_message', 'On message (handler)'], ['ref', 'Ref var (optional)']] },
+    input:       { label: 'Input',        cont: false, props: { var: 'value', style: '', on_message: '', ref: '' }, fields: [['var', 'Bind variable'], ['style', 'Style'], ['on_message', 'On message (handler)'], ['ref', 'Ref var (optional)']] },
     face:        { label: 'Face',         cont: false, props: { var: 'face', style: '' }, fields: [['var', 'Face variable'], ['style', 'Style']] },
     icon:        { label: 'Icon',         cont: false, props: { props: 'icon_index:1;', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
     image:       { label: 'Image',        cont: false, props: { props: '', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
@@ -37,10 +37,16 @@
     // rich text area, dropdown/radio/int-slider, an icon button).
     text_area:   { label: 'Text area',    cont: false, props: { text: '## Status', style: '' }, fields: [['text', 'Markdown text'], ['style', 'Style (optional)']] },
     ship:        { label: 'Ship (3D)',    cont: false, props: { props: 'battleship', style: '' }, fields: [['props', 'Ship type (e.g. battleship)'], ['style', 'Style (area…)']] },
-    dropdown:    { label: 'Dropdown',     cont: false, props: { items: 'items:Red,Green,Blue;', var: 'choice', style: '' }, fields: [['items', 'Options (items:A,B,C;)'], ['var', 'Bind variable'], ['style', 'Style']] },
-    int_slider:  { label: 'Int slider',   cont: false, props: { props: 'low:0;high:100;', var: 'value', style: '' }, fields: [['props', 'Props (low;high)'], ['var', 'Bind variable'], ['style', 'Style']] },
-    radio:       { label: 'Radio',        cont: false, props: { items: 'items:Red,Green,Blue;', var: 'choice', style: '' }, fields: [['items', 'Options (items:A,B,C;)'], ['var', 'Bind variable'], ['style', 'Style']] },
+    dropdown:    { label: 'Dropdown',     cont: false, props: { items: 'items:Red,Green,Blue;', var: 'choice', style: '', on_message: '', ref: '' }, fields: [['items', 'Options (items:A,B,C;)'], ['var', 'Bind variable'], ['style', 'Style'], ['on_message', 'On message (handler)'], ['ref', 'Ref var (optional)']] },
+    int_slider:  { label: 'Int slider',   cont: false, props: { props: 'low:0;high:100;', var: 'value', style: '', on_message: '', ref: '' }, fields: [['props', 'Props (low;high)'], ['var', 'Bind variable'], ['style', 'Style'], ['on_message', 'On message (handler)'], ['ref', 'Ref var (optional)']] },
+    radio:       { label: 'Radio',        cont: false, props: { items: 'items:Red,Green,Blue;', var: 'choice', style: '', on_message: '', ref: '' }, fields: [['items', 'Options (items:A,B,C;)'], ['var', 'Bind variable'], ['style', 'Style'], ['on_message', 'On message (handler)'], ['ref', 'Ref var (optional)']] },
     icon_button: { label: 'Icon button',  cont: false, props: { props: 'icon_index:1;', style: '' }, fields: [['props', 'Props (icon_index:N;)'], ['style', 'Style']] },
+    // Engine console widgets & console setup (see plan): placed by name, plus the
+    // whole-console presets and cinematic camera.
+    layout_widget:   { label: 'Engine widget',  cont: false, props: { widget: '2dview' }, fields: [['widget', 'Engine widget name']] },
+    console_preset:  { label: 'Console preset',  cont: false, props: { console: 'helm' }, fields: [['console', 'Console (helm/weapons/…)']] },
+    activate_console:{ label: 'Activate console',cont: false, props: { name: 'cinematic' }, fields: [['name', 'Console name']] },
+    cinematic:       { label: 'Cinematic camera',cont: false, props: { mode: 'auto', args: '' }, fields: [['mode', 'Mode (auto/full)'], ['args', 'Full args: camera, offset, target, offset']] },
   };
 
   // --- code generation: model -> MAST lines ---
@@ -48,6 +54,12 @@
   function textProps(p) { let s = '$text:' + q(p.text) + ';'; if (p.style) { s += q(p.style); } return s; }
   function pad(n) { let s = ''; for (let i = 0; i < n; i++) { s += '    '; } return s; }
   function body(n, ind) { const g = gen(n.children, ind); return g.length ? g : [pad(ind) + 'gui_blank()']; }
+  // Interactive controls can carry an `on gui_message(<ref>)` handler; when they
+  // do, the control line becomes an assignment `<ref> = gui_...`. `ref` is the
+  // author's variable, else a stable auto name from the node id.
+  const INTERACTIVE = { checkbox: 1, slider: 1, int_slider: 1, input: 1, dropdown: 1, radio: 1 };
+  function refOf(n) { const p = n.props || {}; return (p.on_message || p.ref) ? (p.ref || ('w' + n.id)) : ''; }
+  function pre(n) { const r = refOf(n); return r ? (r + ' = ') : ''; }
   function gen(nodes, ind) {
     let out = [];
     for (const n of nodes) {
@@ -74,19 +86,23 @@
           out.push(pad(ind) + a + ')');
           break;
         }
-        case 'checkbox': out.push(pad(ind) + 'gui_checkbox("' + q(p.props) + '", "' + q(p.style) + '")'); break;
-        case 'slider': out.push(pad(ind) + 'gui_slider("' + q(p.props) + '", "' + q(p.style) + '")'); break;
-        case 'input': out.push(pad(ind) + 'gui_input("", var="' + q(p.var) + '")'); break;
+        case 'checkbox': out.push(pad(ind) + pre(n) + 'gui_checkbox("' + q(p.props) + '", "' + q(p.style) + '")'); break;
+        case 'slider': out.push(pad(ind) + pre(n) + 'gui_slider("' + q(p.props) + '", "' + q(p.style) + '")'); break;
+        case 'input': out.push(pad(ind) + pre(n) + 'gui_input("", var="' + q(p.var) + '")'); break;
         case 'face': out.push(pad(ind) + 'gui_face(' + q(p.var) + ')'); break;
         case 'icon': out.push(pad(ind) + 'gui_icon("' + q(p.props) + '", "' + q(p.style) + '")'); break;
         case 'image': out.push(pad(ind) + 'gui_image("' + q(p.props) + '", "' + q(p.style) + '")'); break;
         case 'blank': out.push(pad(ind) + 'gui_blank(' + q(p.count) + ')'); break;
         case 'text_area': out.push(pad(ind) + 'gui_text_area("' + q(p.text) + '"' + (p.style ? ', "' + q(p.style) + '"' : '') + ')'); break;
         case 'ship': out.push(pad(ind) + 'gui_ship("' + q(p.props) + '"' + (p.style ? ', "' + q(p.style) + '"' : '') + ')'); break;
-        case 'dropdown': out.push(pad(ind) + 'gui_drop_down("' + q(p.items) + '", var="' + q(p.var) + '")'); break;
-        case 'int_slider': out.push(pad(ind) + 'gui_int_slider("' + q(p.props) + '", var="' + q(p.var) + '")'); break;
-        case 'radio': out.push(pad(ind) + 'gui_radio("' + q(p.items) + '", var="' + q(p.var) + '")'); break;
+        case 'dropdown': out.push(pad(ind) + pre(n) + 'gui_drop_down("' + q(p.items) + '", var="' + q(p.var) + '")'); break;
+        case 'int_slider': out.push(pad(ind) + pre(n) + 'gui_int_slider("' + q(p.props) + '", var="' + q(p.var) + '")'); break;
+        case 'radio': out.push(pad(ind) + pre(n) + 'gui_radio("' + q(p.items) + '", var="' + q(p.var) + '")'); break;
         case 'icon_button': out.push(pad(ind) + 'gui_icon_button("' + q(p.props) + '", "' + q(p.style) + '")'); break;
+        case 'layout_widget': out.push(pad(ind) + 'gui_layout_widget("' + q(p.widget) + '")'); break;
+        case 'console_preset': out.push(pad(ind) + 'gui_console("' + q(p.console) + '")'); break;
+        case 'activate_console': out.push(pad(ind) + 'gui_activate_console("' + q(p.name) + '")'); break;
+        case 'cinematic': out.push(pad(ind) + (p.mode === 'full' ? 'gui_cinematic_full_control(client_id, ' + q(p.args) + ')' : 'gui_cinematic_auto(client_id)')); break;
         case 'table': {
           let a = 'gui_table(' + q(p.items);
           if (p.headers) { a += ', headers=[' + q(p.headers).split(',').map(function (h) { return '"' + h.trim() + '"'; }).join(', ') + ']'; }
@@ -99,10 +115,14 @@
     }
     return out;
   }
-  function collectButtons(nodes, out) {
+  // Handlers: a button's on_click matches by label; an interactive control's
+  // on_message matches by its ref var. Both emit an `on gui_message(...)` block.
+  function collectHandlers(nodes, out) {
     for (const n of nodes) {
-      if (n.type === 'button') { out.push(n); }
-      if (n.children) { collectButtons(n.children, out); }
+      const p = n.props || {};
+      if (n.type === 'button' && q(p.on_click)) { out.push({ head: 'gui_button("' + q(p.text) + '")', body: p.on_click }); }
+      else if (INTERACTIVE[n.type] && q(p.on_message)) { out.push({ head: refOf(n), body: p.on_message }); }
+      if (n.children) { collectHandlers(n.children, out); }
     }
     return out;
   }
@@ -112,11 +132,9 @@
   function generate(model) {
     const lines = gen(model.children, 0);
     if (!lines.length) { return ''; }
-    collectButtons(model.children, []).forEach(function (b) {
-      const oc = q(b.props.on_click);
-      if (!oc) { return; }
-      lines.push('on gui_message(gui_button("' + q(b.props.text) + '")):');
-      oc.split('\n').forEach(function (ln) { lines.push('    ' + ln); });
+    collectHandlers(model.children, []).forEach(function (h) {
+      lines.push('on gui_message(' + h.head + '):');
+      q(h.body).split('\n').forEach(function (ln) { lines.push('    ' + ln); });
     });
     lines.push('await gui()');
     const label = (model.props && model.props.label) || 'my_gui';
@@ -138,7 +156,17 @@
     } else { p.items = s.trim(); }
     return p;
   }
+  // Strip a leading `<ref> = ` off an interactive-control line (the assignment form
+  // used with `on gui_message(<ref>)`), remember the ref, then parse the control.
   function parseLine(s) {
+    let ref = '';
+    const am = s.match(/^([A-Za-z_]\w*)\s*=\s*(gui_(?:checkbox|slider|int_slider|input|drop_down|radio)\(.*)$/);
+    if (am) { ref = am[1]; s = am[2]; }
+    const r = parseLineInner(s);
+    if (ref && r && r.props) { r.props.ref = ref; }
+    return r;
+  }
+  function parseLineInner(s) {
     let m;
     if ((m = s.match(/^gui_section\("area:\s*([^;]*);?([\s\S]*)"\)$/))) { return { type: 'section', props: { area: m[1].trim(), style: m[2] } }; }
     if ((m = s.match(/^gui_row\("(.*)"\)$/))) { return { type: 'row', props: { style: m[1] } }; }
@@ -155,6 +183,7 @@
       return { type: 'table', with: true, props: p };
     }
     if ((m = s.match(/^on gui_message\(gui_button\("(.*?)"\)\):$/))) { return { type: '__onmsg__', target: m[1], handler: true }; }
+    if ((m = s.match(/^on gui_message\((\w+)\):$/))) { return { type: '__onmsg__', ref: m[1], handler: true }; }
     if ((m = s.match(/^gui_text\("(.*)"\)$/))) { return { type: 'text', props: parseTextProps(m[1]) }; }
     if ((m = s.match(/^gui_button\("(.*?)"(?:,\s*"(.*)")?\)$/))) { return { type: 'button', props: { text: m[1], style: m[2] || '', on_click: '' } }; }
     if ((m = s.match(/^gui_checkbox\("(.*)",\s*"(.*)"\)$/))) { return { type: 'checkbox', props: { props: m[1], style: m[2] } }; }
@@ -171,6 +200,12 @@
     if ((m = s.match(/^gui_int_slider\("(.*)",\s*var="(.*?)"\)$/))) { return { type: 'int_slider', props: { props: m[1], var: m[2], style: '' } }; }
     if ((m = s.match(/^gui_radio\("(.*)",\s*var="(.*?)"\)$/))) { return { type: 'radio', props: { items: m[1], var: m[2], style: '' } }; }
     if ((m = s.match(/^gui_icon_button\("(.*)",\s*"(.*)"\)$/))) { return { type: 'icon_button', props: { props: m[1], style: m[2] } }; }
+    // Engine console widgets & console setup.
+    if ((m = s.match(/^gui_layout_widget\("(.*)"\)$/))) { return { type: 'layout_widget', props: { widget: m[1] } }; }
+    if ((m = s.match(/^gui_console\("(.*)"\)$/))) { return { type: 'console_preset', props: { console: m[1] } }; }
+    if ((m = s.match(/^gui_activate_console\("(.*)"\)$/))) { return { type: 'activate_console', props: { name: m[1] } }; }
+    if ((m = s.match(/^gui_cinematic_auto\(client_id\)$/))) { return { type: 'cinematic', props: { mode: 'auto', args: '' } }; }
+    if ((m = s.match(/^gui_cinematic_full_control\(client_id,\s*(.*)\)$/))) { return { type: 'cinematic', props: { mode: 'full', args: m[1] } }; }
     // Declarative gui_table(items, [cols]) is kept verbatim as 'raw' (the editor's
     // table is the `with` block form above).
     return { type: 'raw', props: { line: s } };
@@ -232,8 +267,13 @@
     });
     buildFlow(layout, rootNode.children);
     handlers.forEach(function (h) {
-      const b = findButton(rootNode, h.target);
-      if (b) { b.props.on_click = h.body || ''; }
+      if (h.ref) {                                   // on gui_message(<ref>) — a control handler
+        const c = findByRef(rootNode, h.ref);
+        if (c) { c.props.on_message = h.body || ''; }
+      } else {                                        // on gui_message(gui_button("X")) — by label
+        const b = findButton(rootNode, h.target);
+        if (b) { b.props.on_click = h.body || ''; }
+      }
     });
     return { model: rootNode, nextId: idc };
   }
@@ -241,6 +281,11 @@
   function findButton(node, text) {
     if (node.type === 'button' && node.props.text === text) { return node; }
     for (const c of (node.children || [])) { const f = findButton(c, text); if (f) { return f; } }
+    return null;
+  }
+  function findByRef(node, ref) {
+    if (node.props && node.props.ref === ref) { return node; }
+    for (const c of (node.children || [])) { const f = findByRef(c, ref); if (f) { return f; } }
     return null;
   }
 

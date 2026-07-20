@@ -126,5 +126,49 @@ check('dropdown items/var parsed', dd.props.items === 'items:A,B;' && dd.props.v
 const ta = GuiModel.parse('gui_ship("cruiser", "area:0,0,50,50;")').model.children[0];
 check('ship type/style parsed', ta.props.props === 'cruiser' && ta.props.style === 'area:0,0,50,50;');
 
+// 8) engine console widgets + console setup (layout_widget / console / activate / cinematic).
+const con = [
+  '=== my_gui',
+  '    gui_section("area: 0,0,100,100;")',
+  '    gui_layout_widget("3dview")',
+  '    gui_activate_console("cinematic")',
+  '    gui_console("helm")',
+  '    gui_cinematic_auto(client_id)',
+  '    gui_cinematic_full_control(client_id, sel, source, sel, Vec3())',
+  '    await gui()',
+].join('\n');
+check('console widgets round-trip', GuiModel.generate(GuiModel.parse(con).model) === con);
+const walk = (model) => { const out = []; (function w(ns){ for (const n of ns) { out.push(n); if (n.children) w(n.children); } })(model.children); return out; };
+const cnodes = walk(GuiModel.parse(con).model);
+const ctypes = cnodes.map(n => n.type);
+check('console types all present', ['layout_widget','activate_console','console_preset','cinematic'].every(t => ctypes.includes(t)));
+check('layout_widget widget parsed', cnodes.find(n => n.type === 'layout_widget').props.widget === '3dview');
+const cins = cnodes.filter(n => n.type === 'cinematic');
+check('cinematic auto + full parsed',
+  cins.some(n => n.props.mode === 'auto') &&
+  cins.some(n => n.props.mode === 'full' && n.props.args === 'sel, source, sel, Vec3()'));
+
+// 9) control event handlers: ref-form (dl = gui_slider) + label-form button round-trip and reattach.
+const h = [
+  '=== my_gui',
+  '    gui_section("area: 0,0,100,100;")',
+  '    dl = gui_slider("low:0;high:300;", "")',
+  '    cb = gui_checkbox("state:False;", "")',
+  '    gui_button("Go")',
+  '    on gui_message(dl):',
+  '        set_dolly()',
+  '    on gui_message(cb):',
+  '        toggle()',
+  '    on gui_message(gui_button("Go")):',
+  '        jump other',
+  '    await gui()',
+].join('\n');
+check('control handlers round-trip', GuiModel.generate(GuiModel.parse(h).model) === h);
+const hk = GuiModel.parse(h).model.children[0].children;
+const sl = hk.find(c => c.type === 'slider'), cbn = hk.find(c => c.type === 'checkbox'), bn = hk.find(c => c.type === 'button');
+check('slider ref + on_message reattached', sl.props.ref === 'dl' && sl.props.on_message === 'set_dolly()');
+check('checkbox ref + on_message reattached', cbn.props.ref === 'cb' && cbn.props.on_message === 'toggle()');
+check('button on_click still by label', bn.props.on_click === 'jump other');
+
 if (failures) { console.log('\n' + failures + ' FAILED'); process.exit(1); }
 console.log('\nall passed');

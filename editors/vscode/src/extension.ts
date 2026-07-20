@@ -1590,6 +1590,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
   .top { display:flex; gap:6px; align-items:center; padding:5px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); flex-wrap:wrap; }
   .top b { font-size:12px; }
+  .top select { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:3px 6px; font-size:12px; cursor:pointer; }
   .cols { display:flex; flex:1; min-height:0; }
   .pal { width:150px; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); padding:4px; }
   .pal .grp { font-size:10px; text-transform:uppercase; color:var(--vscode-descriptionForeground); margin:8px 4px 2px; }
@@ -1638,6 +1639,17 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   .pv-w.btn { background:#294066; }
   .pv-w.face { background:#3a2a4a; }
   .pv-w.eng { background:#243b33; border-color:#4ec9b055; }
+  .pv-w.engview { flex-direction:column; padding:2px; overflow:hidden; }
+  .pv-svg { width:100%; height:100%; display:block; min-height:0; }
+  .engview.view3d, .engview.radar { padding:0; background:#05070e; }
+  .engview.shipdata, .engview.waterfall { align-items:stretch; justify-content:center; gap:3px; padding:5px; }
+  .engview .pv-bar { height:5px; border-radius:2px; background:linear-gradient(90deg,#4ec9b0,#2b6); width:100%; }
+  .engview .pv-line { height:3px; border-radius:2px; background:#7fb0c0aa; width:100%; }
+  .engview.redalert { background:#4a1414; color:#f88; font-weight:600; letter-spacing:.08em; border-color:#f66; }
+  .engview.zoom { flex-direction:row; gap:4px; font-size:11px; }
+  .engview.zoom span { background:#1b2a3a; border-radius:3px; padding:0 5px; }
+  .engview.named { color:#9bd; }
+  .pv-w.chip { flex:0 0 auto; background:#2a2440; color:#bcd; font-size:10px; }
   .pv-grid { display:grid; gap:3px; grid-auto-rows:1fr; }
   .pv-box { display:flex; flex-direction:column; gap:2px; border:1px solid #4ec9b055; border-radius:3px; padding:3px; cursor:pointer; }
   .pv-cap { flex:0 0 auto; font-size:9px; color:#7fb0c0; text-transform:uppercase; letter-spacing:.04em; }
@@ -1652,6 +1664,12 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   <button id="undo" title="Undo (Ctrl/Cmd-Z)">↶</button>
   <button id="redo" title="Redo (Ctrl/Cmd-Shift-Z)">↷</button>
   <button id="load" title="Load a # &lt;gui-designer&gt; block from the active .mast back into the editor">Load from file</button>
+  <select id="tmpl" title="Start from a console screen template">
+    <option value="">Template…</option>
+    <option value="cinematic">Cinematic (full 3D)</option>
+    <option value="cockpit">Cockpit (bg + views)</option>
+    <option value="science">Science (3 columns)</option>
+  </select>
   <button id="clear">New</button>
 </div>
 <div class="cols">
@@ -1683,34 +1701,78 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   // Element catalog + code-gen + parser come from the shared media/guiModel.js
   // (also unit-tested in Node). See top of file.
   const CAT = GuiModel.CAT;
+  // Palette entries are a type name OR a preset object {t, label, props}.
   const PALETTE = [
     ['Containers', ['section','sub_section','row','grid','list','table']],
-    ['Widgets', ['text','button','checkbox','slider','input','face','icon','image','blank']],
-    ['Engine widgets', ['text_area','ship','dropdown','int_slider','radio','icon_button']],
+    ['Widgets', ['text','button','checkbox','slider','input','face','icon','image','blank',
+                 'text_area','dropdown','int_slider','radio','icon_button']],
+    ['Console views', [
+      {t:'layout_widget', label:'3D View',        props:{widget:'3dview'}},
+      {t:'layout_widget', label:'2D Radar',       props:{widget:'2dview'}},
+      {t:'layout_widget', label:'Science 2D',     props:{widget:'science_2d_view'}},
+      {t:'layout_widget', label:'Weapons 2D',     props:{widget:'weapon_2d_view'}},
+      {t:'layout_widget', label:'Comms 2D',       props:{widget:'comms_2d_view'}},
+      {t:'layout_widget', label:'Ship Data',      props:{widget:'ship_data'}},
+      {t:'layout_widget', label:'Text Waterfall', props:{widget:'text_waterfall'}},
+      {t:'layout_widget', label:'Radar Zoom',     props:{widget:'radar_zoom_ctrl'}},
+      {t:'layout_widget', label:'Ship Internal',  props:{widget:'ship_internal_view'}},
+      'ship',
+      {t:'layout_widget', label:'Comms Control',  props:{widget:'comms_control'}},
+      {t:'layout_widget', label:'Comms Face',     props:{widget:'comms_face'}},
+      {t:'layout_widget', label:'Comms List',     props:{widget:'comms_sorted_list'}},
+      {t:'layout_widget', label:'Red Alert',      props:{widget:'red_alert'}},
+    ]],
+    ['Console setup', ['console_preset','activate_console','cinematic']],
   ];
 
-  function mk(type){ const c = CAT[type]; const n = { id:++idc, type, props: Object.assign({}, c.props||{}) }; if (c.cont) n.children = []; return n; }
+  function mk(type, over){ const c = CAT[type]; const n = { id:++idc, type, props: Object.assign({}, c.props||{}, over||{}) }; if (c.cont) n.children = []; return n; }
   function find(id, nodes, parent){ if (id===0) return {n:model, parent:null, list:null}; nodes = nodes || model.children; for (const n of nodes){ if (n.id===id) return {n, parent:parent||model, list:nodes}; if (n.children){ const r = find(id, n.children, n); if (r) return r; } } return null; }
   function selNode(){ return sel==null ? null : (find(sel)||{}).n; }
 
-  // --- palette ---
+  // --- palette --- entries are a type string or a preset {t,label,props}; flatten
+  // into a registry so a button can carry preset props by index.
+  const REG = [];
   const pal = document.getElementById('pal');
   pal.innerHTML = PALETTE.map(function(g){
-    return '<div class="grp">'+g[0]+'</div>' + g[1].map(function(t){ return '<button data-add="'+t+'">'+CAT[t].label+'</button>'; }).join('');
+    return '<div class="grp">'+g[0]+'</div>' + g[1].map(function(e){
+      const type = (typeof e === 'string') ? e : e.t;
+      const label = (typeof e === 'string') ? CAT[type].label : e.label;
+      const idx = REG.length; REG.push({ type: type, props: (typeof e === 'string') ? null : e.props });
+      return '<button data-idx="'+idx+'" title="'+esc(type)+'">'+esc(label)+'</button>';
+    }).join('');
   }).join('');
-  pal.querySelectorAll('button[data-add]').forEach(function(b){ b.onclick = function(){ addNode(b.dataset.add); }; });
+  pal.querySelectorAll('button[data-idx]').forEach(function(b){ b.onclick = function(){ addNode(REG[+b.dataset.idx]); }; });
 
-  function addNode(type){
-    const n = mk(type);
-    if (type==='section'){ model.children.push(n); }        // sections live only at root
+  // Screen-level nodes (sections + console setup) live at the root; everything else
+  // drops into the selected container (or as a sibling of a selected leaf).
+  const ROOT_TYPES = { section:1, console_preset:1, activate_console:1, cinematic:1 };
+  function addNode(item){
+    const n = mk(item.type, item.props);
+    if (ROOT_TYPES[item.type]){ model.children.push(n); }
     else {
       const s = selNode();
-      if (s && s.children) { s.children.push(n); }          // into selected container (incl root)
-      else if (s) { const r = find(sel); (r.list||model.children).push(n); }  // sibling of a leaf
+      if (s && s.children) { s.children.push(n); }
+      else if (s) { const r = find(sel); (r.list||model.children).push(n); }
       else { model.children.push(n); }
     }
     sel = n.id; recordHistory(); render();
   }
+
+  // --- console screen templates (match the real LM skeletons) ---
+  function box(area, widget){ const s = mk('section', {area:area}); s.children.push(mk('layout_widget', {widget:widget})); return s; }
+  function col(area, widgets){ const s = mk('section', {area:area}); widgets.forEach(function(w){ s.children.push(mk('layout_widget', {widget:w})); }); return s; }
+  const TEMPLATES = {
+    cinematic: function(){ const s = mk('section', {area:'0,0,100,100'}); s.children.push(mk('layout_widget', {widget:'3dview'}));
+      return [s, mk('activate_console', {name:'cinematic'}), mk('cinematic', {mode:'auto'})]; },
+    cockpit: function(){ const bg = mk('section', {area:'0,0,100,100'}); bg.children.push(mk('image', {props:'cockpit_overlay', style:''}));
+      return [mk('activate_console', {name:'cockpit'}), bg,
+        box('0,11,100,100','3dview'), box('20,72,37.5,99','2dview'), box('88,50,100,100','ship_data'), box('41,90,60,99','text_waterfall')]; },
+    science: function(){ return [col('0,0,30,100', []), col('30,0,72,100', ['science_2d_view']),
+        col('72,0,100,100', ['science_data_tabs','science_data_freq','science_data','science_sorted_list'])]; },
+  };
+  const tmplSel = document.getElementById('tmpl');
+  tmplSel.onchange = function(){ const k = tmplSel.value; tmplSel.value = '';
+    if (TEMPLATES[k]){ model.children = TEMPLATES[k](); sel = null; recordHistory(); render(); } };
 
   // --- render: preview + code (middle tabs), tree + inspector (right) ---
   function render(){ renderPreview(); renderTree(); renderProps(); renderCode(); if (DOCMODE) maybeSync(); }
@@ -1886,7 +1948,35 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     for (let i=0;i<2;i++){ s += '<div class="pv-row-sample">'+(cells||'<span class="pv-w">row…</span>')+'</div>'; }
     return s+'</div>';
   }
+  // Engine console widgets get recognizable placeholders (they fill their section).
+  function pvEngine(n){
+    const w = (n.props&&n.props.widget)||''; const s = n.id===sel?' sel':'';
+    const radar = '<svg class="pv-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">'
+      + '<circle cx="50" cy="50" r="46" fill="none" stroke="#3c8" stroke-opacity=".55"/>'
+      + '<circle cx="50" cy="50" r="30" fill="none" stroke="#3c8" stroke-dasharray="2 3" stroke-opacity=".4"/>'
+      + '<circle cx="50" cy="50" r="15" fill="none" stroke="#3c8" stroke-dasharray="2 3" stroke-opacity=".4"/>'
+      + '<line x1="50" y1="4" x2="50" y2="96" stroke="#3c8" stroke-opacity=".2"/><line x1="4" y1="50" x2="96" y2="50" stroke="#3c8" stroke-opacity=".2"/>'
+      + '<circle cx="62" cy="40" r="2.6" fill="#e66"/><circle cx="41" cy="61" r="2.6" fill="#5cf"/></svg>';
+    const view3d = '<svg class="pv-svg" viewBox="0 0 100 60" preserveAspectRatio="xMidYMid slice">'
+      + '<rect width="100" height="60" fill="#05070e"/>'
+      + '<g fill="#fff" fill-opacity=".75"><circle cx="12" cy="12" r=".6"/><circle cx="82" cy="18" r=".6"/><circle cx="30" cy="46" r=".6"/><circle cx="66" cy="40" r=".6"/><circle cx="50" cy="8" r=".5"/></g>'
+      + '<polygon points="50,24 59,39 41,39" fill="#8ab" stroke="#cde" stroke-width=".7"/></svg>';
+    let inner, cls;
+    if (w==='3dview'){ cls='view3d'; inner=view3d; }
+    else if (/2d_?view$|^2dview$|radar/.test(w)){ cls='radar'; inner=radar; }
+    else if (w==='ship_data'){ cls='shipdata'; inner='<div class="pv-bar"></div><div class="pv-bar" style="width:62%"></div><div class="pv-bar" style="width:80%"></div>'; }
+    else if (w==='text_waterfall'){ cls='waterfall'; inner='<div class="pv-line"></div><div class="pv-line" style="width:72%"></div><div class="pv-line" style="width:86%"></div>'; }
+    else if (w==='red_alert'){ cls='redalert'; inner='RED ALERT'; }
+    else if (w==='radar_zoom_ctrl'){ cls='zoom'; inner='<span>−</span><span>+</span><span>SIDE</span>'; }
+    else if (/^comms/.test(w)){ cls='comms'; inner='<div class="pv-cap">'+esc(w.replace(/_/g,' '))+'</div>'; }
+    else { cls='named'; inner='<span>⚙ '+esc(w)+'</span>'; }
+    return '<div class="pv-w eng engview '+cls+s+'" data-id="'+n.id+'" title="'+esc(w)+'">'+inner+'</div>';
+  }
   function pvWidget(n){
+    if (n.type==='layout_widget') return pvEngine(n);
+    if (n.type==='console_preset') return '<div class="pv-w eng engview named'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" title="gui_console"><span>🖥 console: '+esc((n.props&&n.props.console)||'')+'</span></div>';
+    if (n.type==='activate_console') return '<span class="pv-w chip'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" title="gui_activate_console">activate: '+esc((n.props&&n.props.name)||'')+'</span>';
+    if (n.type==='cinematic') return '<span class="pv-w chip'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" title="cinematic camera">🎥 '+esc((n.props&&n.props.mode)||'auto')+'</span>';
     const ENG = ['ship','text_area','dropdown','int_slider','radio','icon_button'];
     let cls = (n.type==='button'||n.type==='icon_button') ? ' btn' : (n.type==='face' ? ' face' : '');
     if (ENG.indexOf(n.type)>=0) cls += ' eng';
@@ -1919,6 +2009,8 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
       case 'text_area': return p.text; case 'ship': return p.props;
       case 'dropdown': case 'radio': return (p.items||'')+' → '+(p.var||'');
       case 'int_slider': return (p.props||'')+' → '+(p.var||'');
+      case 'layout_widget': return p.widget; case 'console_preset': return 'console: '+(p.console||'');
+      case 'activate_console': return 'activate '+(p.name||''); case 'cinematic': return 'camera: '+(p.mode||'auto');
       default: return p.props||'';
     }
   }
