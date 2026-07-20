@@ -1545,7 +1545,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
 // panel that generate `gui_*` MAST into a marked region — the safe one-way author
 // direction. Not a pixel canvas (that's a later phase); this composes the layout
 // as a tree (like the Story Outline) and emits code you can see live.
-function guiEditorHtml(nonce: string): string {
+function guiEditorHtml(nonce: string, docMode = false): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
@@ -1630,6 +1630,7 @@ function guiEditorHtml(nonce: string): string {
 </div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  const DOCMODE = ${docMode};                    // true = backing a .gui.mast file (two-way sync)
   let idc = 0, model = { id:0, type:'root', children: [] }, sel = null;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -1681,7 +1682,13 @@ function guiEditorHtml(nonce: string): string {
   }
 
   // --- render: preview + code (middle tabs), tree + inspector (right) ---
-  function render(){ renderPreview(); renderTree(); renderProps(); renderCode(); }
+  function render(){ renderPreview(); renderTree(); renderProps(); renderCode(); if (DOCMODE) maybeSync(); }
+  // In file mode, push generated MAST back to the document when it actually
+  // changes (debounced). lastSent guards the loop: receiving an 'update' sets it,
+  // so re-rendering doesn't echo the change back.
+  let lastSent = null, syncTimer = null;
+  function maybeSync(){ const c = code(); if (c === lastSent) return;
+    clearTimeout(syncTimer); syncTimer = setTimeout(function(){ lastSent = c; vscode.postMessage({ type:'apply', code: c }); }, 250); }
   // Middle tabs switch Preview vs Code; the tree lives on the right, always shown.
   function pickTab(t){
     document.getElementById('preview').classList.toggle('hidden', t!=='preview');
@@ -1962,10 +1969,24 @@ function guiEditorHtml(nonce: string): string {
     const lines = String(codeText||'').replace(/\\r/g,'').split('\\n');
     const r = parseStatements(lines, 0, 0);
     const root = { id:0, type:'root', children: [] }; buildFlow(r.out, root.children);
-    model = root; sel = null; render();
+    model = root; sel = null;
+    if (DOCMODE) { lastSent = code(); }            // opening must not rewrite the file
+    render();
   }
-  window.addEventListener('message', function(e){ const m = e.data; if (m && m.type==='loadBlock') loadFromCode(m.code); });
+  window.addEventListener('message', function(e){ const m = e.data; if (!m) return;
+    if (m.type==='loadBlock') { loadFromCode(m.code); }
+    else if (m.type==='update') {
+      // Ignore the document echoing back our own just-applied edit (keeps selection).
+      if (lastSent != null && String(m.code).trim() === String(lastSent).trim()) return;
+      loadFromCode(m.code);
+    }
+  });
 
+  if (DOCMODE) {
+    // The document is the source of truth; hide the marked-region / new actions.
+    ['load','insert','clear'].forEach(function(idv){ const el = document.getElementById(idv); if (el) el.style.display='none'; });
+    vscode.postMessage({ type:'ready' });          // ask the provider for the current document text
+  }
   render();
 </script></body></html>`;
 }
@@ -2006,6 +2027,44 @@ function readDesignerBlock(): string | null {
   const ei = text.indexOf(end);
   if (bi < 0 || ei < 0 || ei < bi) { return null; }
   return text.slice(bi + begin.length, ei).replace(/^\r?\n/, '').replace(/\r?\n[ \t]*$/, '');
+}
+
+// Custom editor for *.gui.mast: the whole file IS the design, so opening one
+// shows the GUI Editor. Two-way synced — the document is the source of truth
+// (parse text → model), and model edits regenerate the whole document.
+class GuiFileEditorProvider implements vscode.CustomTextEditorProvider {
+  public static register(): vscode.Disposable {
+    return vscode.window.registerCustomEditorProvider('amd.guiFileEditor', new GuiFileEditorProvider(),
+      { webviewOptions: { retainContextWhenHidden: true } });
+  }
+
+  resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+    panel.webview.options = { enableScripts: true };
+    const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+    panel.webview.html = guiEditorHtml(nonce, true);
+
+    let writing = false;   // suppress the change we cause ourselves
+    const update = () => { void panel.webview.postMessage({ type: 'update', code: document.getText() }); };
+    const sub = vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.document.uri.toString() === document.uri.toString() && !writing) { update(); }
+    });
+    panel.onDidDispose(() => sub.dispose());
+
+    panel.webview.onDidReceiveMessage(async (msg) => {
+      if (msg?.type === 'ready') { update(); }                       // webview loaded → send current text
+      else if (msg?.type === 'copy') { await vscode.env.clipboard.writeText(msg.code || ''); }
+      else if (msg?.type === 'apply') {
+        writing = true;
+        try {
+          const edit = new vscode.WorkspaceEdit();
+          const text = (msg.code || '');
+          edit.replace(document.uri, new vscode.Range(0, 0, document.lineCount, 0),
+            text.endsWith('\n') ? text : text + '\n');
+          await vscode.workspace.applyEdit(edit);
+        } finally { writing = false; }
+      }
+    });
+  }
 }
 
 // Replace a `# <gui-designer> … # </gui-designer>` block in the active .mast
@@ -3023,6 +3082,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', showStoryOutline));
   context.subscriptions.push(vscode.commands.registerCommand('amd.guiEditor', showGuiEditor));
+  context.subscriptions.push(GuiFileEditorProvider.register());   // *.gui.mast opens as the GUI Editor
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));

@@ -13,6 +13,16 @@
     "onDebug"
   ],
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "amd.guiFileEditor",
+        "displayName": "GUI Editor",
+        "selector": [
+          { "filenamePattern": "*.gui.mast" }
+        ],
+        "priority": "default"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         { "id": "amdPanel", "title": "AMD Inspector", "icon": "media/amd-icon.svg" }
