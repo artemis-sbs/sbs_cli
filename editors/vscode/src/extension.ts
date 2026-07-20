@@ -1607,6 +1607,7 @@ function guiEditorHtml(nonce: string): string {
   <b>GUI Editor</b>
   <span class="muted">compose a layout → generate MAST</span>
   <span style="flex:1"></span>
+  <button id="load" title="Load a # &lt;gui-designer&gt; block from the active .mast back into the editor">Load from file</button>
   <button id="clear">New</button>
 </div>
 <div class="cols">
@@ -1872,6 +1873,7 @@ function guiEditorHtml(nonce: string): string {
         case 'image': out.push(pad(ind)+'gui_image("'+q(p.props)+'", "'+q(p.style)+'")'); break;
         case 'blank': out.push(pad(ind)+'gui_blank('+q(p.count)+')'); break;
         case 'table': { let a = 'gui_table('+q(p.items)+', '+q(p.columns); if (p.select==='true') a+=', select=True'; a+=')'; out.push(pad(ind)+a); break; }
+        case 'raw': out.push(pad(ind)+q(p.line)); break;   // a line the editor didn't model — re-emit verbatim
       }
     }
     return out;
@@ -1882,7 +1884,72 @@ function guiEditorHtml(nonce: string): string {
 
   document.getElementById('copy').onclick = function(){ vscode.postMessage({ type:'copy', code: code() }); };
   document.getElementById('insert').onclick = function(){ vscode.postMessage({ type:'insert', code: code() }); };
+  document.getElementById('load').onclick = function(){ vscode.postMessage({ type:'loadRequest' }); };
   document.getElementById('clear').onclick = function(){ model = { children: [] }; sel = null; render(); };
+
+  // --- round-trip: parse the editor's own generated block back into the model.
+  // We only parse what we generate (a bounded dialect), so it's tractable. Lines
+  // we don't recognise become 'raw' nodes and are re-emitted verbatim (lossless);
+  // a known element's full style string is kept, so extra style props survive too.
+  function indentOf(s){ let n=0; while (s.charAt(n)===' ') n++; return n; }
+  function parseTextProps(s){ const m = s.match(/^\\$text:([\\s\\S]*?);([\\s\\S]*)$/); return m ? {text:m[1], style:m[2]} : {text:s, style:''}; }
+  function parseListArgs(s){ const p = {items:'', as:'item', select:'false', title:''};
+    const ci = s.indexOf(','); if (ci>=0){ p.items = s.slice(0,ci).trim(); const rest = s.slice(ci+1);
+      if (/select\\s*=\\s*True/.test(rest)) p.select='true'; const tm = rest.match(/title\\s*=\\s*"([^"]*)"/); if (tm) p.title = tm[1];
+    } else { p.items = s.trim(); } return p; }
+  function parseLine(s){ let m;
+    if (m=s.match(/^gui_section\\("area:\\s*(.+?);?"\\)$/)) return {type:'section', props:{area:m[1].trim()}};
+    if (m=s.match(/^gui_row\\("(.*)"\\)$/)) return {type:'row', props:{style:m[1]}};
+    if (m=s.match(/^with gui_sub_section\\("(.*)"\\):$/)) return {type:'sub_section', with:true, props:{style:m[1]}};
+    if (m=s.match(/^with gui_grid\\((.+?)\\):$/)) return {type:'grid', with:true, props:{columns:m[1].trim()}};
+    if (m=s.match(/^with gui_list\\((.+)\\) as (\\w+):$/)) { const p=parseListArgs(m[1]); p.as=m[2]; return {type:'list', with:true, props:p}; }
+    if (m=s.match(/^gui_text\\("(.*)"\\)$/)) return {type:'text', props:parseTextProps(m[1])};
+    if (m=s.match(/^gui_button\\("(.*?)"\\)(:?)$/)) return {type:'button', props:{text:m[1], jump:''}, needsJump:m[2]===':'};
+    if (m=s.match(/^gui_checkbox\\("(.*)",\\s*"(.*)"\\)$/)) return {type:'checkbox', props:{props:m[1], style:m[2]}};
+    if (m=s.match(/^gui_slider\\("(.*)",\\s*"(.*)"\\)$/)) return {type:'slider', props:{props:m[1], style:m[2]}};
+    if (m=s.match(/^gui_icon\\("(.*)",\\s*"(.*)"\\)$/)) return {type:'icon', props:{props:m[1], style:m[2]}};
+    if (m=s.match(/^gui_image\\("(.*)",\\s*"(.*)"\\)$/)) return {type:'image', props:{props:m[1], style:m[2]}};
+    if (m=s.match(/^gui_input\\("",\\s*var="(.+?)"\\)$/)) return {type:'input', props:{var:m[1], style:''}};
+    if (m=s.match(/^gui_face\\((.+?)\\)$/)) return {type:'face', props:{var:m[1], style:''}};
+    if (m=s.match(/^gui_blank\\((.+?)\\)$/)) return {type:'blank', props:{count:m[1]}};
+    if (m=s.match(/^gui_table\\((.+?),\\s*(\\[[\\s\\S]*\\])(,\\s*select\\s*=\\s*True)?\\)$/)) return {type:'table', props:{items:m[1].trim(), columns:m[2], select:m[3]?'true':'false'}};
+    return {type:'raw', props:{line:s}};
+  }
+  function parseStatements(lines, i, base){
+    const out = [];
+    while (i < lines.length){
+      const raw = lines[i];
+      if (!raw.trim() || raw.trim().charAt(0)==='#'){ i++; continue; }
+      const ind = indentOf(raw);
+      if (ind < base) break;
+      if (ind > base){ i++; continue; }
+      const st = parseLine(raw.trim()); i++;
+      if (st.with){ const r = parseStatements(lines, i, base+4); st.children = r.out; i = r.i; }
+      else if (st.type==='button' && st.needsJump && i<lines.length && indentOf(lines[i])>base){
+        const jm = lines[i].trim().match(/^jump\\s+(\\S+)/); if (jm) st.props.jump = jm[1]; i++;
+      }
+      out.push(st);
+    }
+    return { out:out, i:i };
+  }
+  function mkParsed(st){ const n = { id:++idc, type:st.type, props:Object.assign({}, st.props) };
+    const c = CAT[st.type]; if ((c && c.cont) || st.with) n.children = []; return n; }
+  function buildFlow(stmts, list){ let curSec=null, curRow=null;
+    for (const st of stmts){ const n = mkParsed(st);
+      if (st.type==='section'){ list.push(n); curSec=n; curRow=null; }
+      else if (st.type==='row'){ (curSec?curSec.children:list).push(n); curRow=n; }
+      else { (curRow?curRow.children:(curSec?curSec.children:list)).push(n); }
+      if (st.children && n.children) buildFlow(st.children, n.children);
+    }
+  }
+  function loadFromCode(codeText){
+    idc = 0;
+    const lines = String(codeText||'').replace(/\\r/g,'').split('\\n');
+    const r = parseStatements(lines, 0, 0);
+    const root = { children: [] }; buildFlow(r.out, root.children);
+    model = root; sel = null; render();
+  }
+  window.addEventListener('message', function(e){ const m = e.data; if (m && m.type==='loadBlock') loadFromCode(m.code); });
 
   render();
 </script></body></html>`;
@@ -1899,8 +1966,31 @@ async function showGuiEditor(): Promise<void> {
       vscode.window.showInformationMessage('GUI Editor: MAST copied to clipboard.');
     } else if (msg?.type === 'insert') {
       await insertGeneratedGui(msg.code || '');
+    } else if (msg?.type === 'loadRequest') {
+      const block = readDesignerBlock();
+      if (block == null) {
+        vscode.window.showWarningMessage('GUI Editor: no # <gui-designer> block found in the active .mast.');
+      } else {
+        panel.webview.postMessage({ type: 'loadBlock', code: block });
+        vscode.window.showInformationMessage('GUI Editor: loaded the designer block.');
+      }
     }
   });
+}
+
+// Extract the body between `# <gui-designer>` and `# </gui-designer>` in the
+// active .mast (null if there's no such block) — the source for round-trip load.
+function readDesignerBlock(): string | null {
+  const ed = vscode.window.visibleTextEditors.find((e) => e.document.languageId === 'mast')
+    || vscode.window.activeTextEditor;
+  if (!ed) { return null; }
+  const text = ed.document.getText();
+  const begin = '# <gui-designer>';
+  const end = '# </gui-designer>';
+  const bi = text.indexOf(begin);
+  const ei = text.indexOf(end);
+  if (bi < 0 || ei < 0 || ei < bi) { return null; }
+  return text.slice(bi + begin.length, ei).replace(/^\r?\n/, '').replace(/\r?\n[ \t]*$/, '');
 }
 
 // Replace a `# <gui-designer> … # </gui-designer>` block in the active .mast
