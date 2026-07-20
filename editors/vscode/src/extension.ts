@@ -1566,6 +1566,9 @@ function guiEditorHtml(nonce: string): string {
   .node { padding:2px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; }
   .node:hover { background: var(--vscode-list-hoverBackground,#8881); }
   .node.sel { background: var(--vscode-list-activeSelectionBackground,#0a63c9); color:#fff; }
+  .node[draggable=true] { cursor:grab; }
+  .node.drop-into { outline:2px solid var(--vscode-focusBorder,#4ec9b0); outline-offset:-1px; }
+  .node.drop-after { border-bottom:2px solid var(--vscode-focusBorder,#4ec9b0); }
   .node .ty { color: var(--vscode-symbolIcon-classForeground,#4ec9b0); }
   .node.sel .ty { color:#cff; }
   .node .lbl { color: var(--vscode-descriptionForeground); font-size:11px; }
@@ -1591,6 +1594,8 @@ function guiEditorHtml(nonce: string): string {
   .pv-box { border:1px solid #4ec9b055; border-radius:3px; margin:2px 0; padding:3px; cursor:pointer; }
   .pv-cap { font-size:9px; color:#7fb0c0; text-transform:uppercase; letter-spacing:.04em; }
   .pv-row-sample { display:flex; gap:3px; border-top:1px solid #ffffff14; padding-top:2px; margin-top:2px; }
+  .pv-hand { position:absolute; right:-1px; bottom:-1px; width:12px; height:12px; background:var(--vscode-focusBorder,#4ec9b0); cursor:nwse-resize; z-index:3; }
+  .pv-grip { position:absolute; left:-1px; top:-1px; width:14px; height:14px; background:#4ec9b0aa; cursor:move; z-index:3; }
 </style></head><body>
 <div class="top">
   <b>GUI Editor</b>
@@ -1670,9 +1675,38 @@ function guiEditorHtml(nonce: string): string {
 
   function renderTree(){
     const t = document.getElementById('tree');
-    if (!model.children.length) { t.innerHTML = '<div class="empty">Add elements from the palette. A layout is Sections → Rows → widgets.</div>'; return; }
+    if (!model.children.length) { t.innerHTML = '<div class="empty">Add elements from the palette. A layout is Sections → Rows → widgets. Drag nodes to move them.</div>'; return; }
     t.innerHTML = model.children.map(nodeHtml).join('');
-    t.querySelectorAll('.node').forEach(function(el){ el.onclick = function(ev){ ev.stopPropagation(); sel = +el.dataset.id; render(); }; });
+    t.querySelectorAll('.node').forEach(function(el){
+      const id = +el.dataset.id;
+      el.onclick = function(ev){ ev.stopPropagation(); sel = id; render(); };
+      // Drag to move: onto a container = into it; onto a leaf = after it.
+      el.draggable = true;
+      el.ondragstart = function(ev){ ev.dataTransfer.setData('text/plain', String(id)); ev.dataTransfer.effectAllowed='move'; ev.stopPropagation(); };
+      el.ondragover = function(ev){ ev.preventDefault(); ev.stopPropagation();
+        el.classList.remove('drop-into','drop-after');
+        el.classList.add(selNodeById(id) && selNodeById(id).children ? 'drop-into' : 'drop-after'); };
+      el.ondragleave = function(){ el.classList.remove('drop-into','drop-after'); };
+      el.ondrop = function(ev){ ev.preventDefault(); ev.stopPropagation(); el.classList.remove('drop-into','drop-after');
+        moveNode(+ev.dataTransfer.getData('text/plain'), id); };
+    });
+  }
+  function selNodeById(id){ const r = find(id); return r ? r.n : null; }
+  function isDescendant(ancestorId, nodeId){
+    const r = find(ancestorId); if (!r || !r.n.children) return false;
+    function walk(ns){ for (const n of ns){ if (n.id===nodeId) return true; if (n.children && walk(n.children)) return true; } return false; }
+    return walk(r.n.children);
+  }
+  function moveNode(dragId, targetId){
+    if (dragId===targetId || isDescendant(dragId, targetId)) return;   // no self / into-own-child
+    const dr = find(dragId); if (!dr) return;
+    const node = dr.n;
+    dr.list.splice(dr.list.indexOf(node), 1);
+    const tr = find(targetId);
+    if (!tr) { model.children.push(node); }
+    else if (tr.n.children) { tr.n.children.push(node); }              // into container
+    else { tr.list.splice(tr.list.indexOf(tr.n)+1, 0, node); }         // after leaf
+    sel = dragId; render();
   }
 
   // Approximate spatial preview: sections positioned by their area, contents
@@ -1687,13 +1721,43 @@ function guiEditorHtml(nonce: string): string {
     if (loose.length) inner += pvSection({ id:-1, type:'section', props:{area:'0,0,100,100'}, children:loose });
     t.innerHTML = '<div class="pv-screen">'+inner+'</div>';
     bindPicks(t);
+    // Sized sections get move (top-left grip) + resize (bottom-right) handles.
+    t.querySelectorAll('[data-move]').forEach(function(h){ h.onmousedown = function(ev){ beginSecDrag(ev, +h.dataset.move, 'move'); }; });
+    t.querySelectorAll('[data-resize]').forEach(function(h){ h.onmousedown = function(ev){ beginSecDrag(ev, +h.dataset.resize, 'resize'); }; });
   }
   function pvSection(n){
     const a = (n.props.area||'0,0,100,100').split(',').map(function(x){ return parseFloat(x)||0; });
     const l=a[0]||0, tp=a[1]||0, r=(a[2]==null?100:a[2]), b=(a[3]==null?100:a[3]);
     const st = 'left:'+l+'%;top:'+tp+'%;width:'+Math.max(0,r-l)+'%;height:'+Math.max(0,b-tp)+'%;';
-    return '<div class="pv-sec'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" style="'+st+'">'+pvFlow(n.children||[])+'</div>';
+    const handles = n.id>=0 ? '<div class="pv-grip" data-move="'+n.id+'" title="Move section"></div><div class="pv-hand" data-resize="'+n.id+'" title="Resize section"></div>' : '';
+    return '<div class="pv-sec'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" style="'+st+'">'+handles+pvFlow(n.children||[])+'</div>';
   }
+  // Drag a section on the preview to move/resize it; writes back to props.area live.
+  let secDrag = null;
+  function beginSecDrag(ev, id, mode){
+    ev.preventDefault(); ev.stopPropagation();
+    const n = selNodeById(id); if (!n) return;
+    const a = (n.props.area||'0,0,100,100').split(',').map(function(x){ return parseFloat(x)||0; });
+    const screen = document.querySelector('.pv-screen');
+    secDrag = { id, mode, sx:ev.clientX, sy:ev.clientY, orig:a, rect: screen ? screen.getBoundingClientRect() : null };
+    sel = id;
+    window.addEventListener('mousemove', onSecDrag);
+    window.addEventListener('mouseup', endSecDrag);
+  }
+  function clampN(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function round1(v){ return Math.round(v*10)/10; }
+  function onSecDrag(ev){
+    if (!secDrag || !secDrag.rect) return;
+    const dx = (ev.clientX-secDrag.sx)/secDrag.rect.width*100;
+    const dy = (ev.clientY-secDrag.sy)/secDrag.rect.height*100;
+    let l=secDrag.orig[0], tp=secDrag.orig[1], r=secDrag.orig[2], b=secDrag.orig[3];
+    if (secDrag.mode==='move'){ const w=r-l, h=b-tp; l=clampN(l+dx,0,100-w); tp=clampN(tp+dy,0,100-h); r=l+w; b=tp+h; }
+    else { r=clampN(r+dx, l+3, 100); b=clampN(b+dy, tp+3, 100); }
+    const n = selNodeById(secDrag.id); if (!n) return;
+    n.props.area = [round1(l),round1(tp),round1(r),round1(b)].join(',');
+    renderPreview(); renderCode(); renderProps();
+  }
+  function endSecDrag(){ window.removeEventListener('mousemove', onSecDrag); window.removeEventListener('mouseup', endSecDrag); secDrag = null; }
   function pvFlow(nodes){
     let out=''; let band=[];
     function flush(){ if (band.length){ out += '<div class="pv-band">'+band.join('')+'</div>'; band=[]; } }
