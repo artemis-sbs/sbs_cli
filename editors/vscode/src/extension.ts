@@ -1895,7 +1895,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     if (n.type==='face') label = 'face';
     if (n.type==='blank') label = '·';
     if (n.type==='ship') label = '⛛ '+(p.props||'ship');
-    if (n.type==='text_area') label = (p.text||'text').split('\n')[0];
+    if (n.type==='text_area') label = (p.text||'text').split('\\n')[0];
     if (n.type==='dropdown') label = (p.items||'').replace(/^items:/,'').split(',')[0]+' ▾';
     if (n.type==='radio') label = '◉ '+(p.items||'').replace(/^items:/,'');
     if (n.type==='int_slider') label = '●──────';
