@@ -2435,6 +2435,23 @@ function openAmdTool(tool: string, uri?: string, column?: vscode.ViewColumn): vo
   else if (tool === 'inspector') { showMissionInspector(col); }
 }
 
+// One live panel per tool, keyed by tool name — so opening a tool reveals its
+// existing panel (for the same document) instead of stacking duplicates. A tool
+// re-opened for a DIFFERENT document replaces the stale panel.
+const toolPanels = new Map<string, { panel: vscode.WebviewPanel; uri: string }>();
+function reuseToolPanel(tool: string, uri: string, column: vscode.ViewColumn): boolean {
+  const cur = toolPanels.get(tool);
+  if (!cur) { return false; }
+  if (cur.uri === uri) { cur.panel.reveal(column, true); return true; }
+  cur.panel.dispose();                 // different document → rebuild fresh
+  toolPanels.delete(tool);
+  return false;
+}
+function registerToolPanel(tool: string, uri: string, panel: vscode.WebviewPanel): void {
+  toolPanels.set(tool, { panel, uri });
+  panel.onDidDispose(() => { if (toolPanels.get(tool)?.panel === panel) { toolPanels.delete(tool); } });
+}
+
 async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
@@ -2449,9 +2466,11 @@ async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vsc
     vscode.window.showErrorMessage(`Artemis AMD: could not build the outline (${e}).`);
     return;
   }
+  if (reuseToolPanel('outline', uri, column)) { return; }
   const panel = vscode.window.createWebviewPanel(
     'amdStoryOutline', 'Story Outline', column,
     { enableScripts: true, localResourceRoots: faceWebviewRoots() });
+  registerToolPanel('outline', uri, panel);
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   let selectedKey: string | undefined;
   panel.webview.html = storyOutlineHtml(graph, nonce(), panel.webview, selectedKey);
@@ -2756,8 +2775,10 @@ async function showAmdResolver(uriArg?: string, column: vscode.ViewColumn = vsco
     vscode.window.showErrorMessage(`Artemis AMD: could not resolve the model (${e}).`);
     return;
   }
+  if (reuseToolPanel('resolver', uri, column)) { return; }
   const panel = vscode.window.createWebviewPanel(
     'amdResolver', 'AMD Resolver', column, { enableScripts: true });
+  registerToolPanel('resolver', uri, panel);
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   panel.webview.html = amdResolverHtml(model, nonce());
 
@@ -2793,10 +2814,12 @@ async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     vscode.window.showErrorMessage(`Artemis AMD: could not build the graph (${e}).`);
     return;
   }
+  if (reuseToolPanel('graph', uri, column)) { return; }
   const panel = vscode.window.createWebviewPanel(
     'amdGraph', 'AMD Story Graph', column,
     { enableScripts: true, localResourceRoots: faceWebviewRoots() },
   );
+  registerToolPanel('graph', uri, panel);
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   let focus: Focus | null = null;
   let lastView: { zoom: number; sl: number; st: number } | null = null;
@@ -2981,10 +3004,12 @@ async function showMap(uriArg?: string, column: vscode.ViewColumn = vscode.ViewC
     vscode.window.showErrorMessage(`Artemis AMD: could not build the map (${e}).`);
     return;
   }
+  if (reuseToolPanel('map', uri, column)) { return; }
   const panel = vscode.window.createWebviewPanel(
     'amdMap', 'AMD Mission Map', column,
     { enableScripts: true, localResourceRoots: faceWebviewRoots() },
   );
+  registerToolPanel('map', uri, panel);
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   let lastView: { zoom: number; sl: number; st: number } | null = null;
   panel.webview.html = renderMap(map, nonce(), panel.webview);
