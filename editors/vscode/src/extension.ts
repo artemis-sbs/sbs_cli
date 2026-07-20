@@ -3653,7 +3653,7 @@ export function activate(context: vscode.ExtensionContext): void {
   extensionUri = context.extensionUri;
 
   // Mission Inspector: open it on a mast session, and feed it mast/inspect events.
-  context.subscriptions.push(vscode.commands.registerCommand('amd.showMissionInspector', showMissionInspector));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showMissionInspector', () => showMissionInspector()));
   context.subscriptions.push(vscode.debug.onDidStartDebugSession((s) => {
     if (s.type === 'mast') { showMissionInspector(); }
   }));
@@ -3678,10 +3678,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }));
 
-  context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
-  context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
-  context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', showStoryOutline));
-  context.subscriptions.push(vscode.commands.registerCommand('amd.showResolver', showAmdResolver));
+  // Wrap so a title-bar/context-menu invocation's Uri arg isn't forwarded as our
+  // (string) uriArg — a vscode.Uri would serialize to a dict and crash the server.
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', () => showMap()));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', () => showGraph()));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', () => showStoryOutline()));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showResolver', () => showAmdResolver()));
   context.subscriptions.push(vscode.commands.registerCommand('amd.guiEditor', showGuiEditor));
   context.subscriptions.push(GuiFileEditorProvider.register());   // *.gui.mast opens as the GUI Editor
   // Toggle a *.gui.mast text editor back into the visual GUI Editor.
