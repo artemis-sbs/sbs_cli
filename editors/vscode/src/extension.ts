@@ -1626,18 +1626,21 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   .muted { color: var(--vscode-descriptionForeground); }
   .actions { display:flex; gap:4px; margin:6px 0; flex-wrap:wrap; }
   .actions button { font-size:11px; padding:2px 6px; }
-  /* preview */
+  /* preview — mirrors the engine's flow layout: rows split a section's height,
+     columns split a row's width, so a lone widget fills its whole section. */
   .pv-screen { position:relative; width:100%; aspect-ratio:16/9; background:#0b0f16; border:1px solid var(--vscode-panel-border,#8883); overflow:hidden; }
-  .pv-sec { position:absolute; box-sizing:border-box; border:1px dashed #4ec9b077; padding:3px; overflow:hidden; }
+  .pv-sec { position:absolute; box-sizing:border-box; border:1px dashed #4ec9b077; padding:3px; overflow:hidden; display:flex; flex-direction:column; gap:3px; }
   .pv-sec.sel, .pv-w.sel, .pv-box.sel { outline:2px solid var(--vscode-focusBorder,#4ec9b0); outline-offset:-1px; }
-  .pv-band { display:flex; gap:3px; margin:2px 0; }
-  .pv-w { border:1px solid #ffffff22; border-radius:2px; padding:2px 4px; font-size:10px; background:#18202e; color:#cde; flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; cursor:pointer; }
-  .pv-w.btn { background:#294066; text-align:center; }
-  .pv-w.face { background:#3a2a4a; text-align:center; }
-  .pv-grid { display:grid; gap:3px; margin:2px 0; }
-  .pv-box { border:1px solid #4ec9b055; border-radius:3px; margin:2px 0; padding:3px; cursor:pointer; }
-  .pv-cap { font-size:9px; color:#7fb0c0; text-transform:uppercase; letter-spacing:.04em; }
-  .pv-row-sample { display:flex; gap:3px; border-top:1px solid #ffffff14; padding-top:2px; margin-top:2px; }
+  /* each flow row shares the section's height equally (like the engine's flex rows) */
+  .pv-band, .pv-grid, .pv-box { flex:1 1 0; min-height:0; }
+  .pv-band { display:flex; gap:3px; align-items:stretch; }
+  .pv-w { display:flex; align-items:center; justify-content:center; text-align:center; box-sizing:border-box; border:1px solid #ffffff22; border-radius:2px; padding:2px 4px; font-size:10px; background:#18202e; color:#cde; flex:1 1 0; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; cursor:pointer; }
+  .pv-w.btn { background:#294066; }
+  .pv-w.face { background:#3a2a4a; }
+  .pv-grid { display:grid; gap:3px; grid-auto-rows:1fr; }
+  .pv-box { display:flex; flex-direction:column; gap:2px; border:1px solid #4ec9b055; border-radius:3px; padding:3px; cursor:pointer; }
+  .pv-cap { flex:0 0 auto; font-size:9px; color:#7fb0c0; text-transform:uppercase; letter-spacing:.04em; }
+  .pv-row-sample { display:flex; gap:3px; flex:0 0 auto; }
   .pv-hand { position:absolute; right:-1px; bottom:-1px; width:12px; height:12px; background:var(--vscode-focusBorder,#4ec9b0); cursor:nwse-resize; z-index:3; }
   .pv-grip { position:absolute; left:-1px; top:-1px; width:14px; height:14px; background:#4ec9b0aa; cursor:move; z-index:3; }
 </style></head><body>
