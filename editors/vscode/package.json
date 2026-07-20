@@ -107,13 +107,14 @@
         { "command": "amd.newFile" }
       ],
       "editor/title": [
-        { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation" },
-        { "command": "amd.showGraph", "when": "editorLangId == amd", "group": "navigation" },
-        { "command": "amd.showStoryOutline", "when": "editorLangId == amd", "group": "navigation" },
-        { "command": "amd.showResolver", "when": "editorLangId == amd", "group": "navigation" },
-        { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation" },
-        { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation" },
-        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.gui\\.mast$/ && activeEditor == 'workbench.editors.files.textFileEditor'", "group": "navigation" }
+        { "command": "amd.showStoryOutline", "when": "editorLangId == amd", "group": "navigation@1" },
+        { "command": "amd.showGraph", "when": "editorLangId == amd", "group": "navigation@2" },
+        { "command": "amd.showResolver", "when": "editorLangId == amd", "group": "navigation@3" },
+        { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation@4" },
+        { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation@5" },
+        { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation@6" },
+        { "command": "amd.showMissionInspector", "when": "editorLangId == amd", "group": "navigation@7" },
+        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.gui\\.mast$/ && activeEditor == 'workbench.editors.files.textFileEditor'", "group": "navigation@8" }
       ]
     },
     "languages": [

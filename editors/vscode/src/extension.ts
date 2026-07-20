@@ -150,7 +150,7 @@ function esc(s: string): string {
 // bounded scroll area (real scrollbars), with zoom (buttons + Ctrl+wheel), fit-to-
 // window, drag-to-pan, and a minimap overview. `.lm`/`.nd` are click-to-jump.
 // `extraScript` is appended for view-specific behaviour (e.g. graph highlighting).
-function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string, extraScript = '', inspector?: { scripts: string; imgCsp: string }, initialView?: { zoom: number; sl: number; st: number } | null): string {
+function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string, extraScript = '', inspector?: { scripts: string; imgCsp: string }, initialView?: { zoom: number; sl: number; st: number } | null, toolbar = ''): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inspector ? inspector.imgCsp : ''} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
@@ -189,8 +189,10 @@ function webviewPage(title: string, legend: string, styles: string, body: string
     padding: 6px 10px; background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background));
     border-bottom: 1px solid var(--vscode-panel-border, #8883); font-size: 12px; color: var(--vscode-descriptionForeground); }
   #insp-close { cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+  ${AMD_TOOLBAR_CSS}
   ${styles}
 </style></head><body>
+${toolbar}
 <header>
   <h3>${title}</h3>
   <div class="row">${legend}<span class="spacer"></span>
@@ -208,6 +210,7 @@ ${inspector ? `<div id="insp-drawer" class="hidden"><div id="insp-drawer-bar"><s
 ${inspector ? inspector.scripts : ''}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  ${AMD_TOOLBAR_JS}
   const scroll = document.getElementById('scroll');
   // Shared right-click menu: items = [{label, action, danger} | {sep:true}]; send(action) posts.
   const ctxEl = document.getElementById('ctxmenu');
@@ -510,7 +513,7 @@ function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview, init
   `;
   const inj = faceInjection(webview, nonce);
   return webviewPage(title, '', styles, body, nonce, extraScript,
-    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp }, initialView);
+    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp }, initialView, amdToolbar('map'));
 }
 
 // --- Inspector: edit a node's display / fields / body as a form ------------
@@ -1603,7 +1606,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   `;
   const inj = faceInjection(webview, nonce);
   return webviewPage(title, legend, styles, body, nonce, extraScript,
-    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp }, initialView);
+    { scripts: inj.scripts + inspectorFormScript(webview, nonce), imgCsp: inj.imgCsp }, initialView, amdToolbar('graph'));
 }
 
 // --- Story Outline: a scalable list/tree + focus-detail view over the SAME
@@ -2257,7 +2260,9 @@ function storyOutlineHtml(graph: MissionGraph, nonce: string, webview: vscode.We
   .mini .mn.center text { fill: var(--vscode-list-activeSelectionForeground,#fff); }
   .mini .elabel { fill: var(--vscode-descriptionForeground); font-size:9px; text-transform:uppercase; }
   .mini .more { fill: var(--vscode-descriptionForeground); font-size:10px; }
+  ${AMD_TOOLBAR_CSS}
 </style></head><body>
+${amdToolbar('outline')}
 <div class="top">
   <input id="q" type="search" placeholder="Search nodes…" autofocus>
   <span class="muted" id="count"></span>
@@ -2396,15 +2401,46 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
   if (preselect && byKey[preselect]) { select(preselect);
     const r = document.querySelector('.row.sel'); if (r) r.scrollIntoView({ block:'nearest' }); }
   else { vscode.postMessage({ type:'inspReady' }); }
+  ${AMD_TOOLBAR_JS}
 </script></body></html>`;
 }
 
-async function showStoryOutline(): Promise<void> {
+// A cross-tool switcher shared by the AMD panels, so you can jump between the
+// Outline / Graph / Resolver / Map / Inspector without returning to the editor.
+// Ordered for a document's lifetime: authoring tools first, then live testing.
+const AMD_TOOLS: [string, string][] = [
+  ['outline', 'Outline'], ['graph', 'Graph'], ['resolver', 'Resolver'],
+  ['map', 'Map'], ['inspector', 'Inspector'],
+];
+function amdToolbar(current: string): string {
+  const btns = AMD_TOOLS.map(([k, l]) =>
+    `<button class="amdtool${k === current ? ' cur' : ''}" data-tool="${k}"${k === current ? ' disabled' : ''}>${l}</button>`).join('');
+  return `<div class="amdtools">${btns}</div>`;
+}
+const AMD_TOOLBAR_CSS = `
+  .amdtools { display:flex; gap:4px; padding:4px 8px; flex-wrap:wrap; align-items:center; border-bottom:1px solid var(--vscode-panel-border,#8882); }
+  .amdtools button { background:var(--vscode-button-secondaryBackground,#444); color:var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer; }
+  .amdtools button.cur { background:var(--vscode-button-background,#0a63c9); color:#fff; cursor:default; opacity:.85; }
+  .amdtools button:not(.cur):hover { background:var(--vscode-button-secondaryHoverBackground,#555); }`;
+const AMD_TOOLBAR_JS = `for (const b of document.querySelectorAll('.amdtools button')) { if (!b.disabled) b.addEventListener('click', () => vscode.postMessage({ type:'openTool', tool:b.dataset.tool })); }`;
+
+// Open a sibling tool for the same document, in the SAME editor group as the
+// launching panel (so tools stack as tabs, never split the layout further).
+function openAmdTool(tool: string, uri?: string, column?: vscode.ViewColumn): void {
+  const col = column ?? vscode.ViewColumn.Beside;
+  if (tool === 'outline') { void showStoryOutline(uri, col); }
+  else if (tool === 'graph') { void showGraph(uri, col); }
+  else if (tool === 'resolver') { void showAmdResolver(uri, col); }
+  else if (tool === 'map') { void showMap(uri, col); }
+  else if (tool === 'inspector') { showMissionInspector(col); }
+}
+
+async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
     return;
   }
-  const uri = vscode.window.activeTextEditor?.document.uri.toString();
+  const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
   let graph: MissionGraph;
   try {
@@ -2414,7 +2450,7 @@ async function showStoryOutline(): Promise<void> {
     return;
   }
   const panel = vscode.window.createWebviewPanel(
-    'amdStoryOutline', 'Story Outline', vscode.ViewColumn.Beside,
+    'amdStoryOutline', 'Story Outline', column,
     { enableScripts: true, localResourceRoots: faceWebviewRoots() });
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   let selectedKey: string | undefined;
@@ -2463,6 +2499,8 @@ async function showStoryOutline(): Promise<void> {
       // loads in the Outline's own inline detail pane on the next refresh.
       const key = await addEntityInSection(uri, msg.section, false);
       if (key) { selectedKey = key; }
+    } else if (msg?.type === 'openTool') {
+      openAmdTool(msg.tool, uri, panel.viewColumn);
     }
   });
 }
@@ -2518,7 +2556,9 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   .issue .code { color: var(--vscode-descriptionForeground); font-size:11px; font-family: var(--vscode-editor-font-family); }
   .issue .loc { color: var(--vscode-textLink-foreground,#4daafc); font-size:11px; }
   .empty { padding:12px; color: var(--vscode-descriptionForeground); }
+  ${AMD_TOOLBAR_CSS}
 </style></head><body>
+${amdToolbar('resolver')}
 <div class="top">
   <input id="q" type="search" placeholder="Filter entities…" autofocus>
   <label><input type="checkbox" id="probOnly"> problems only</label>
@@ -2678,6 +2718,7 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   document.getElementById('probOnly').onchange = renderTree;
   renderTree();
   renderIssues();
+  ${AMD_TOOLBAR_JS}
 </script></body></html>`;
 }
 
@@ -2701,12 +2742,12 @@ async function addEntityInSection(uri: string, section: string, openInspector = 
   return r.key;
 }
 
-async function showAmdResolver(): Promise<void> {
+async function showAmdResolver(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
     return;
   }
-  const uri = vscode.window.activeTextEditor?.document.uri.toString();
+  const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
   let model: ResolveModel;
   try {
@@ -2716,7 +2757,7 @@ async function showAmdResolver(): Promise<void> {
     return;
   }
   const panel = vscode.window.createWebviewPanel(
-    'amdResolver', 'AMD Resolver', vscode.ViewColumn.Beside, { enableScripts: true });
+    'amdResolver', 'AMD Resolver', column, { enableScripts: true });
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   panel.webview.html = amdResolverHtml(model, nonce());
 
@@ -2734,15 +2775,16 @@ async function showAmdResolver(): Promise<void> {
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') { openLocation(msg.uri, msg.line, { preserveFocus: true }); }
     else if (msg?.type === 'addEntity') { await addEntityInSection(uri, msg.section); }
+    else if (msg?.type === 'openTool') { openAmdTool(msg.tool, uri, panel.viewColumn); }
   });
 }
 
-async function showGraph(): Promise<void> {
+async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
     return;
   }
-  const uri = vscode.window.activeTextEditor?.document.uri.toString();
+  const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
   let graph: MissionGraph;
   try {
@@ -2752,7 +2794,7 @@ async function showGraph(): Promise<void> {
     return;
   }
   const panel = vscode.window.createWebviewPanel(
-    'amdGraph', 'AMD Story Graph', vscode.ViewColumn.Beside,
+    'amdGraph', 'AMD Story Graph', column,
     { enableScripts: true, localResourceRoots: faceWebviewRoots() },
   );
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
@@ -2788,6 +2830,9 @@ async function showGraph(): Promise<void> {
   panel.onDidDispose(() => { drawerInspectors.delete(drawer); if (faceHost === drawer) { faceHost = undefined; } docSub.dispose(); });
 
   panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg?.type === 'openTool') {
+      openAmdTool(msg.tool, uri, panel.viewColumn); return;
+    }
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line, { onlyIfVisible: true });   // scroll only if already on screen; never steal focus or open a tab
     } else if (msg?.type === 'viewState') {
@@ -2920,12 +2965,12 @@ async function showGraph(): Promise<void> {
   });
 }
 
-async function showMap(): Promise<void> {
+async function showMap(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
     return;
   }
-  const uri = vscode.window.activeTextEditor?.document.uri.toString();
+  const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) {
     return;
   }
@@ -2937,7 +2982,7 @@ async function showMap(): Promise<void> {
     return;
   }
   const panel = vscode.window.createWebviewPanel(
-    'amdMap', 'AMD Mission Map', vscode.ViewColumn.Beside,
+    'amdMap', 'AMD Mission Map', column,
     { enableScripts: true, localResourceRoots: faceWebviewRoots() },
   );
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
@@ -2970,6 +3015,9 @@ async function showMap(): Promise<void> {
   panel.onDidDispose(() => { drawerInspectors.delete(drawer); if (faceHost === drawer) { faceHost = undefined; } docSub.dispose(); });
 
   panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg?.type === 'openTool') {
+      openAmdTool(msg.tool, uri, panel.viewColumn); return;
+    }
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line, { onlyIfVisible: true });   // scroll only if already on screen; never steal focus or open a tab
     } else if (msg?.type === 'viewState') {
@@ -3373,7 +3421,9 @@ function missionInspectorHtml(nonce: string): string {
   .bnode .btype { color: var(--vscode-symbolIcon-classForeground,#4ec9b0); }
   .bnode.on { color: var(--vscode-testing-iconPassed,#89d185); }
   .bnode .bres { color: var(--vscode-descriptionForeground); }
+  ${AMD_TOOLBAR_CSS}
 </style></head><body>
+${amdToolbar('inspector')}
 <div class="split">
   <div class="pane">
     <div class="bar"><b>World</b><input id="worldFilter" class="flt" type="search" placeholder="filter…"><label style="text-transform:none"><input type="checkbox" id="foesOnly"> enemies</label><span class="sp"></span><span class="muted" id="worldCount"></span></div>
@@ -3394,6 +3444,8 @@ function missionInspectorHtml(nonce: string): string {
   </div>
 </div>
 <script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  ${AMD_TOOLBAR_JS}
   const worldBody = document.getElementById('worldBody');
   const worldCount = document.getElementById('worldCount');
   const worldFilter = document.getElementById('worldFilter');
@@ -3524,13 +3576,16 @@ function missionInspectorHtml(nonce: string): string {
 </script></body></html>`;
 }
 
-function showMissionInspector(): void {
-  if (missionInspectorPanel) { missionInspectorPanel.reveal(vscode.ViewColumn.Beside, true); return; }
+function showMissionInspector(column: vscode.ViewColumn = vscode.ViewColumn.Beside): void {
+  if (missionInspectorPanel) { missionInspectorPanel.reveal(column, true); return; }
   missionInspectorPanel = vscode.window.createWebviewPanel(
     'amdMissionInspector', 'Mission Inspector',
-    { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+    { viewColumn: column, preserveFocus: true },
     { enableScripts: true, retainContextWhenHidden: true });
   missionInspectorPanel.webview.html = missionInspectorHtml(inspectorNonce());
+  missionInspectorPanel.webview.onDidReceiveMessage((msg) => {
+    if (msg?.type === 'openTool') { openAmdTool(msg.tool, undefined, missionInspectorPanel?.viewColumn); }
+  });
   missionInspectorPanel.onDidDispose(() => { missionInspectorPanel = undefined; });
 }
 
