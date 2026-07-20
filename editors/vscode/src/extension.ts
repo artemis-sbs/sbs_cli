@@ -1402,7 +1402,8 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
       + `<button id="hinc" class="lbtn" title="More hops">+</button>`
     : '';
   const expandBar = (collapsed && collapsed.size) ? `<button id="expandall" class="lbtn">Expand all</button>` : '';
-  const legend = focusBar + expandBar
+  const searchBar = `<input id="gsearch" class="gsearch" type="search" placeholder="Search nodes…" title="Filter nodes by name — Enter cycles matches, Shift+Enter reverse"><span class="leg" id="gscount"></span>`;
+  const legend = searchBar + focusBar + expandBar
     + Object.entries(EDGE_COLOR)
       .map(([k, c]) => `<span class="leg"><i style="background:${c}"></i>${k}</span>`).join('')
     + allSections.map((s) => `<label class="filt"><input type="checkbox"${hiddenSections?.has(s) ? '' : ' checked'} data-section="${esc(s)}"> ${esc(s || 'ungrouped')}</label>`).join('');
@@ -1422,7 +1423,12 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   .blink:hover rect { fill-opacity: 0.35; }
   .blabel { fill: var(--vscode-foreground); font-size: 10px; pointer-events: none; }
   .filt { font-size: 11px; margin-right: 8px; color: var(--vscode-descriptionForeground); cursor: pointer; }
-  .filt input { vertical-align: middle; margin-right: 2px; }`;
+  .filt input { vertical-align: middle; margin-right: 2px; }
+  .gsearch { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #8883); border-radius: 4px; padding: 2px 8px; font-size: 11px; margin-right: 6px; width: 150px; }
+  .gsearch:focus { outline: 1px solid var(--vscode-focusBorder, #4ec9b0); }
+  .nd.ndim { opacity: 0.18; }
+  .nd.nmatch rect { stroke: var(--vscode-focusBorder, #4ec9b0); stroke-width: 2.5; }
+  path.edge.edim { opacity: 0.05; }`;
   const title = focus
     ? `Focus: ${esc(focusName)} — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`
     : `Story Graph — ${graph.nodes.length} node(s), ${graph.edges.length} link(s)`;
@@ -1439,6 +1445,43 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     for (const n of gnodes) { if (n.style.display !== 'none') n.style.opacity = adj.has(n.dataset.key) ? '1' : '0.2'; }
   }
   for (const n of gnodes) { n.addEventListener('mouseenter', () => highlight(n.dataset.key)); n.addEventListener('mouseleave', () => highlight(null)); }
+  // Search box: filter/spotlight matching nodes; Enter cycles + centers matches.
+  const gsearch = document.getElementById('gsearch');
+  const gscount = document.getElementById('gscount');
+  let gmatches = [], gidx = -1;
+  function centerNode(n) {
+    const cx = parseFloat(n.dataset.cx) * zoom, cy = parseFloat(n.dataset.cy) * zoom;
+    scroll.scrollTo({ left: cx - scroll.clientWidth / 2, top: cy - scroll.clientHeight / 2, behavior: 'smooth' });
+  }
+  function runSearch(q) {
+    q = (q || '').trim().toLowerCase();
+    gmatches = []; gidx = -1;
+    if (!q) {
+      for (const n of gnodes) n.classList.remove('nmatch', 'ndim');
+      for (const p of edges) p.classList.remove('edim');
+      gscount.textContent = ''; return;
+    }
+    for (const n of gnodes) {
+      if (n.style.display === 'none') { n.classList.remove('nmatch', 'ndim'); continue; }
+      const hit = (n.dataset.display || '').toLowerCase().includes(q) || (n.dataset.key || '').toLowerCase().includes(q);
+      n.classList.toggle('nmatch', hit); n.classList.toggle('ndim', !hit);
+      if (hit) gmatches.push(n);
+    }
+    const keys = new Set(gmatches.map(n => n.dataset.key));
+    for (const p of edges) p.classList.toggle('edim', !(keys.has(p.dataset.from) && keys.has(p.dataset.to)));
+    gscount.textContent = gmatches.length ? (gmatches.length + ' match' + (gmatches.length > 1 ? 'es' : '')) : 'no matches';
+    if (gmatches.length) { gidx = 0; centerNode(gmatches[0]); }
+  }
+  if (gsearch) {
+    gsearch.addEventListener('input', () => runSearch(gsearch.value));
+    gsearch.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && gmatches.length) {
+        e.preventDefault();
+        gidx = (gidx + (e.shiftKey ? -1 : 1) + gmatches.length) % gmatches.length;
+        centerNode(gmatches[gidx]); gscount.textContent = (gidx + 1) + '/' + gmatches.length;
+      } else if (e.key === 'Escape') { gsearch.value = ''; runSearch(''); gsearch.blur(); }
+    });
+  }
   // Toggling a section re-renders server-side (lanes recompact around it).
   for (const c of document.querySelectorAll('.filt input')) {
     c.addEventListener('change', () => vscode.postMessage({ type: 'toggleSection', section: c.dataset.section, hidden: !c.checked }));
@@ -2178,6 +2221,15 @@ function storyOutlineHtml(graph: MissionGraph, nonce: string, webview: vscode.We
   #detail-head { padding:8px 12px 0; }
   #detail-conns { padding:0 12px 12px; }
   .insp-sep { margin:8px 12px 0; border-top:1px solid var(--vscode-panel-border,#8883); }
+  .mini { width:100%; height:170px; display:block; margin:8px 0 2px; }
+  .mini line { stroke: var(--vscode-panel-border,#8886); stroke-width:1.2; }
+  .mini .mn rect { fill: var(--vscode-badge-background,#333); stroke: var(--vscode-panel-border,#8886); rx:4; cursor:pointer; }
+  .mini .mn:hover rect { stroke: var(--vscode-focusBorder,#4ec9b0); stroke-width:1.6; }
+  .mini .mn text { fill: var(--vscode-badge-foreground,#eee); font-size:11px; pointer-events:none; }
+  .mini .mn.center rect { fill: var(--vscode-list-activeSelectionBackground,#0a63c9); stroke: var(--vscode-focusBorder,#4ec9b0); }
+  .mini .mn.center text { fill: var(--vscode-list-activeSelectionForeground,#fff); }
+  .mini .elabel { fill: var(--vscode-descriptionForeground); font-size:9px; text-transform:uppercase; }
+  .mini .more { fill: var(--vscode-descriptionForeground); font-size:10px; }
 </style></head><body>
 <div class="top">
   <input id="q" type="search" placeholder="Search nodes…" autofocus>
@@ -2251,7 +2303,9 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
     const out = edges.filter(e => e.from === key);
     const inc = edges.filter(e => e.to === key);
     conns.innerHTML = '<div class="insp-sep"></div>'
+      + miniGraph(key, out, inc)
       + group('Leads to', out, 'to') + group('Reached from', inc, 'from');
+    conns.querySelectorAll('.mn').forEach(g => { if (g.dataset.k && g.dataset.k !== key) g.onclick = () => select(g.dataset.k); });
     conns.querySelectorAll('.chip').forEach(c => c.onclick = () => select(c.dataset.k));
     conns.querySelectorAll('.src').forEach(s => s.onclick = (ev) => { ev.stopPropagation();
       vscode.postMessage({ type:'goto', uri:s.dataset.uri, line:+s.dataset.line }); });
@@ -2265,6 +2319,33 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
         + '</span><span class="src" data-uri="'+esc(e.uri)+'" data-line="'+esc(e.line)+'">↪ src</span>';
     }).join(' ');
     return '<div class="grp">'+title+' ('+list.length+')</div><div>'+chips+'</div>';
+  }
+  // A 1-hop mini-graph: the selected node in the middle, incoming on the left,
+  // outgoing on the right. Neighbor nodes are clickable to re-focus.
+  function miniGraph(key, out, inc) {
+    const W=340, H=170, cx=W/2, cy=H/2, hw=44, hh=11;
+    const cap = 4;
+    const outN = out.slice(0, cap), incN = inc.slice(0, cap);
+    function label(k) { const n = byKey[k]; let t = (n && (n.display || k)) || k; return t.length > 13 ? t.slice(0,12)+'…' : t; }
+    function node(x, y, k, cls) {
+      return '<g class="mn '+cls+'" data-k="'+esc(k)+'">'
+        + '<rect x="'+(x-hw)+'" y="'+(y-hh)+'" width="'+(hw*2)+'" height="'+(hh*2)+'"/>'
+        + '<text x="'+x+'" y="'+(y+4)+'" text-anchor="middle">'+esc(label(k))+'</text></g>';
+    }
+    function spread(list, n) { const step = H/(list.length+1); return step*(n+1); }
+    let s = '';
+    incN.forEach((e,i) => { const y=spread(incN,i), x=hw+6;
+      s += '<line x1="'+(x+hw)+'" y1="'+y+'" x2="'+(cx-hw)+'" y2="'+cy+'"/>'
+        + '<text class="elabel" x="'+(x+hw+8)+'" y="'+(y-13)+'">'+esc(e.kind||'')+'</text>'
+        + node(x, y, e.from, 'in'); });
+    outN.forEach((e,i) => { const y=spread(outN,i), x=W-hw-6;
+      s += '<line x1="'+(cx+hw)+'" y1="'+cy+'" x2="'+(x-hw)+'" y2="'+y+'"/>'
+        + '<text class="elabel" x="'+(x-hw-8)+'" y="'+(y-13)+'" text-anchor="end">'+esc(e.kind||'')+'</text>'
+        + node(x, y, e.to, 'out'); });
+    s += node(cx, cy, key, 'center');
+    if (inc.length > cap) s += '<text class="more" x="'+(hw+6)+'" y="'+(H-3)+'" text-anchor="middle">+'+(inc.length-cap)+' more</text>';
+    if (out.length > cap) s += '<text class="more" x="'+(W-hw-6)+'" y="'+(H-3)+'" text-anchor="middle">+'+(out.length-cap)+' more</text>';
+    return '<svg class="mini" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+s+'</svg>';
   }
 
   // Integrated inspector: the extension answers 'inspect' with insp:render.
@@ -2965,6 +3046,10 @@ function missionInspectorHtml(nonce: string): string {
   .sig { font-family: var(--vscode-editor-font-family); font-size:12px; padding:2px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
   .sig .name { color: var(--vscode-symbolIcon-eventForeground, #c586c0); font-weight:600; }
   button, .sel { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:1px 8px; cursor:pointer; font-size:11px; }
+  button.on { background: var(--vscode-button-background,#0a63c9); color:#fff; }
+  .flt { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:4px; padding:1px 6px; font-size:11px; width:110px; }
+  .flt:focus { outline:1px solid var(--vscode-focusBorder,#4ec9b0); }
+  .bar .sp { flex:1; }
   .wnode { font-family: var(--vscode-editor-font-family); font-size:12px; padding:1px 10px; white-space:nowrap; }
   .wnode .wtype { color: var(--vscode-symbolIcon-classForeground,#4ec9b0); }
   .wnode .wtag { color: var(--vscode-foreground); }
@@ -2978,12 +3063,12 @@ function missionInspectorHtml(nonce: string): string {
 </style></head><body>
 <div class="split">
   <div class="pane">
-    <div class="bar"><b>World</b><span class="muted" id="worldCount"></span></div>
+    <div class="bar"><b>World</b><input id="worldFilter" class="flt" type="search" placeholder="filter…"><span class="sp"></span><span class="muted" id="worldCount"></span></div>
     <table><thead><tr><th>Name</th><th>Side</th><th>Kind</th><th>Roles</th></tr></thead>
     <tbody id="worldBody"><tr><td colspan="4" class="empty">Waiting for a running mission…</td></tr></tbody></table>
   </div>
   <div class="pane">
-    <div class="bar"><b>Signals</b><button id="clear">Clear</button><span class="muted" id="sigCount"></span></div>
+    <div class="bar"><b>Signals</b><input id="sigFilter" class="flt" type="search" placeholder="filter…"><span class="sp"></span><button id="sigPause" title="Freeze auto-scroll">Pause</button><button id="clear">Clear</button><span class="muted" id="sigCount"></span></div>
     <div id="sigLog"></div>
   </div>
   <div class="pane">
@@ -2997,26 +3082,50 @@ function missionInspectorHtml(nonce: string): string {
 </div>
 <script nonce="${nonce}">
   const worldBody = document.getElementById('worldBody');
+  const worldCount = document.getElementById('worldCount');
+  const worldFilter = document.getElementById('worldFilter');
   const sigLog = document.getElementById('sigLog');
-  let sigN = 0;
-  document.getElementById('clear').onclick = () => { sigLog.innerHTML=''; sigN=0; document.getElementById('sigCount').textContent=''; };
+  const sigCount = document.getElementById('sigCount');
+  const sigFilter = document.getElementById('sigFilter');
+  const sigPause = document.getElementById('sigPause');
+  let sigN = 0, paused = false;
+  document.getElementById('clear').onclick = () => { sigLog.innerHTML=''; sigN=0; updateSigCount(); };
+  sigPause.onclick = () => { paused = !paused; sigPause.textContent = paused ? 'Resume' : 'Pause'; sigPause.classList.toggle('on', paused); };
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // --- World pane: keep the last snapshot; filter client-side ---
+  let worldData = [];
+  worldFilter.oninput = renderWorld;
+  function renderWorld() {
+    const q = worldFilter.value.trim().toLowerCase();
+    const rows = q ? worldData.filter(o => ((o.name||'')+' '+(o.side||'')+' '+(o.kind||'')+' '+(o.roles||[]).join(' ')).toLowerCase().includes(q)) : worldData;
+    worldCount.textContent = worldData.length ? (q ? '('+rows.length+'/'+worldData.length+')' : '('+worldData.length+')') : '';
+    worldBody.innerHTML = rows.length ? rows.map(o =>
+      '<tr><td>'+esc(o.name)+'</td><td>'+esc(o.side)+'</td><td>'+esc(o.kind)+'</td><td class="muted">'+esc((o.roles||[]).join(', '))+'</td></tr>').join('')
+      : '<tr><td colspan="4" class="empty">'+(worldData.length ? 'No matches.' : 'No space objects.')+'</td></tr>';
+  }
+
+  // --- Signals pane: filter by name; Pause freezes auto-scroll (still collecting) ---
+  let sigShown = 0;
+  function matchSig(row){ return !sigFilter.value.trim() || (row.dataset.name||'').toLowerCase().includes(sigFilter.value.trim().toLowerCase()); }
+  function updateSigCount(){ sigCount.textContent = sigN ? (sigShown < sigN ? '('+sigShown+'/'+sigN+')' : '('+sigN+')') : ''; }
+  sigFilter.oninput = () => { sigShown = 0; for (const r of sigLog.children) { const on = matchSig(r); r.style.display = on ? '' : 'none'; if (on) sigShown++; } updateSigCount(); };
+
   window.addEventListener('message', (e) => {
     const m = e.data; if (!m || !m.kind) return;
     if (m.kind === 'agents') {
-      const a = (m.payload && m.payload.agents) || [];
-      document.getElementById('worldCount').textContent = a.length ? '('+a.length+')' : '';
-      worldBody.innerHTML = a.length ? a.map(o =>
-        '<tr><td>'+esc(o.name)+'</td><td>'+esc(o.side)+'</td><td>'+esc(o.kind)+'</td><td class="muted">'+esc((o.roles||[]).join(', '))+'</td></tr>').join('')
-        : '<tr><td colspan="4" class="empty">No space objects.</td></tr>';
+      worldData = (m.payload && m.payload.agents) || [];
+      renderWorld();
     } else if (m.kind === 'signal') {
       const p = m.payload || {};
       const row = document.createElement('div'); row.className = 'sig';
+      row.dataset.name = p.name || '';
       row.innerHTML = '<span class="name">'+esc(p.name)+'</span> <span class="muted">→ '+esc(p.routes)+' route(s)</span> '+esc(JSON.stringify(p.data||{}));
-      sigLog.appendChild(row);
-      while (sigLog.childNodes.length > 500) sigLog.removeChild(sigLog.firstChild);
-      document.getElementById('sigCount').textContent = '('+(++sigN)+')';
-      row.scrollIntoView(false);
+      const on = matchSig(row); row.style.display = on ? '' : 'none';
+      sigLog.appendChild(row); sigN++; if (on) sigShown++;
+      while (sigLog.childNodes.length > 500) { const g = sigLog.firstChild; if (g.style.display !== 'none') sigShown--; sigN--; sigLog.removeChild(g); }
+      updateSigCount();
+      if (on && !paused) row.scrollIntoView(false);
     } else if (m.kind === 'widgets') {
       const p = m.payload || {};
       wFrames[p.client] = p.widgets || [];
