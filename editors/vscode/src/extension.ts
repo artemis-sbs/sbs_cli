@@ -2137,9 +2137,37 @@ async function ensureMockRunning(missionDir: string, port: number): Promise<bool
 // pixel-faithful preview): store the design, then open (once) the dedicated
 // /web/gui_preview browser page that renders it as its own gui. Starts a mock for
 // the file's own mission if none is listening.
+// Kill an ORPHANED mock squatting `port` — its HTTP/WS server is alive (so the
+// browser loads) but its runner (parent) is dead, so nothing renders. Only kills a
+// mock-server process whose parent is gone; never a live session, never our own.
+function killStaleMockOnPort(port: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      const ps =
+        `$c = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue;` +
+        `foreach ($x in $c) { $p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $x.OwningProcess) -ErrorAction SilentlyContinue;` +
+        `if ($p -and $p.CommandLine -match 'multiprocessing.spawn' -and -not (Get-Process -Id $p.ParentProcessId -ErrorAction SilentlyContinue))` +
+        `{ Write-Output ('killed orphaned mock ' + $p.ProcessId); Stop-Process -Id $p.ProcessId -Force } }`;
+      cp.execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 5000 },
+        (_e, out) => { if (out && out.trim()) { output.appendLine('GUI Editor: ' + out.trim()); } resolve(); });
+    } else {
+      const sh = `for pid in $(lsof -ti tcp:${port} -sTCP:LISTEN 2>/dev/null); do ` +
+        `cmd=$(ps -p $pid -o command= 2>/dev/null); ppid=$(ps -o ppid= -p $pid 2>/dev/null | tr -d ' '); ` +
+        `if echo "$cmd" | grep -q multiprocessing.spawn && ! kill -0 "$ppid" 2>/dev/null; then kill -9 $pid && echo "killed orphaned mock $pid"; fi; done`;
+      cp.execFile('/bin/sh', ['-c', sh], { timeout: 5000 },
+        (_e, out) => { if (out && out.trim()) { output.appendLine('GUI Editor: ' + out.trim()); } resolve(); });
+    }
+  });
+}
+
 async function guiEditorMockPreview(code: string, missionDir?: string): Promise<void> {
   const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
   const post = () => postDebugCommand(port, { action: 'gui_preview', code });
+
+  // If we don't own a live mock on this port, first clear any orphaned mock
+  // squatting it (a dead runner behind a live server → browser loads, no render).
+  const owned = mockRunners.get(port);
+  if (!owned || owned.exitCode !== null) { await killStaleMockOnPort(port); }
 
   let stored = false;
   try { await post(); stored = true; } catch { /* nothing listening — start a mock */ }
