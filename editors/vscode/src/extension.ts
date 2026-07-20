@@ -565,12 +565,10 @@ interface Inspector {
   reveal(): void;
 }
 let panelInspector: Inspector | undefined;   // "Edit…" — a movable editor tab
-let viewInspector: Inspector | undefined;    // docked in the panel, follows the caret
 const drawerInspectors = new Set<Inspector>();  // in-webview drawers on the map/graph
 let faceHost: Inspector | undefined;         // which inspector opened the Face builder
-let viewFollowTimer: ReturnType<typeof setTimeout> | undefined;
 function liveInspectors(): Inspector[] {
-  return [panelInspector, viewInspector, ...drawerInspectors].filter(Boolean) as Inspector[];
+  return [panelInspector, ...drawerInspectors].filter(Boolean) as Inspector[];
 }
 // Fetch a node's detail and render it into a host (used by the map/graph drawer).
 async function loadNodeInto(insp: Inspector, uri: string, key: string): Promise<void> {
@@ -996,62 +994,6 @@ ${inj.scripts}
   const fc = document.getElementById('pv-face');
   if (fc && window.FaceRender && faceStr) { FaceRender.drawString(fc, fc.getContext('2d'), faceStr); }
 </script></body></html>`;
-}
-
-// Docked, cursor-following Inspector in the panel area.
-class InspectorViewProvider implements vscode.WebviewViewProvider {
-  resolveWebviewView(view: vscode.WebviewView): void {
-    view.webview.options = { enableScripts: true, localResourceRoots: faceWebviewRoots() };
-    const insp: Inspector = {
-      webview: view.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
-      prefix: '', render: standaloneRender(view.webview),
-      reveal: () => view.show?.(true),
-    };
-    viewInspector = insp;
-    wireInspector(insp);
-    view.webview.html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-      body { margin:0; padding:14px; color: var(--vscode-descriptionForeground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: 13px; }
-    </style></head><body>Open an <code>.amd</code> file and place the cursor in a node to edit it here.</body></html>`;
-    view.onDidDispose(() => { if (viewInspector === insp) { viewInspector = undefined; } if (faceHost === insp) { faceHost = undefined; } });
-    view.onDidChangeVisibility(() => { if (view.visible) { void flushPendingInspect(); void followCaretToView(); } });
-    void flushPendingInspect();
-    void followCaretToView();
-  }
-}
-
-// Selecting a node in the Map or Graph loads it into the docked Inspector. We
-// reveal the view (which resolves it if it wasn't shown yet) and load the node.
-// `pendingInspect` bridges the case where the view resolves after the request.
-let pendingInspect: { uri: string; key: string } | undefined;
-async function inspectInDockedView(uri: string, key: string): Promise<void> {
-  pendingInspect = { uri, key };
-  await vscode.commands.executeCommand('amd.inspectorView.focus');
-  await flushPendingInspect();
-}
-async function flushPendingInspect(): Promise<void> {
-  if (!pendingInspect || !viewInspector || !client) { return; }
-  const { uri, key } = pendingInspect; pendingInspect = undefined;
-  try {
-    const d = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri }, key });
-    if (d) { renderInspectorInto(viewInspector, uri, d); }
-  } catch { /* view will still follow the caret */ }
-}
-
-// Point the docked view at whichever node owns the active editor's caret. Only
-// re-renders when the node actually changes (moving within a node is a no-op;
-// value changes arrive via reverse-sync).
-async function followCaretToView(): Promise<void> {
-  if (!client || !viewInspector) { return; }
-  const ed = vscode.window.activeTextEditor;
-  if (!ed || ed.document.languageId !== 'amd') { return; }
-  const uri = ed.document.uri.toString();
-  const line = ed.selection.active.line;
-  let detail: NodeDetail | null;
-  try { detail = await client.sendRequest<NodeDetail | null>('amd/nodeAtLine', { textDocument: { uri }, line }); }
-  catch { return; }
-  if (!detail) { return; }
-  if (viewInspector.uri === uri && viewInspector.detail?.key === detail.key) { return; }
-  renderInspectorInto(viewInspector, uri, detail);
 }
 
 // Write the form's current state into the .amd — only the parts that changed —
@@ -3719,16 +3661,6 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
-
-  // Docked, cursor-following Inspector view.
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('amd.inspectorView', new InspectorViewProvider(),
-      { webviewOptions: { retainContextWhenHidden: true } }));
-  const followSoon = () => { clearTimeout(viewFollowTimer); viewFollowTimer = setTimeout(() => { void followCaretToView(); }, 120); };
-  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => followSoon()));
-  context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection((e) => {
-    if (e.textEditor === vscode.window.activeTextEditor) { followSoon(); }
-  }));
 
   // Reverse sync: when an Inspector's .amd changes elsewhere, mirror it back into
   // that host's form (debounced; a host's own edit is swallowed by its selfEdit).

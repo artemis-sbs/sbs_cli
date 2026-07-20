@@ -23,16 +23,6 @@
         "priority": "default"
       }
     ],
-    "viewsContainers": {
-      "activitybar": [
-        { "id": "amdPanel", "title": "AMD Inspector", "icon": "media/amd-icon.svg" }
-      ]
-    },
-    "views": {
-      "amdPanel": [
-        { "id": "amd.inspectorView", "name": "Inspector", "type": "webview", "contextualTitle": "AMD Inspector" }
-      ]
-    },
     "commands": [
       {
         "command": "amd.showMap",
