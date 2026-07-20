@@ -33,6 +33,14 @@
     image:       { label: 'Image',        cont: false, props: { props: '', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
     blank:       { label: 'Blank',        cont: false, props: { count: '1' }, fields: [['count', 'Count']] },
     table:       { label: 'Table',        cont: true,  with: true, props: { items: 'rows', headers: '', as: 'row', select: 'true' }, fields: [['items', 'Items variable'], ['headers', 'Headers (comma-separated)'], ['as', 'Row variable'], ['select', 'Select (true/false)']] },
+    // Engine widgets — the richer, engine-specific controls (a 3D ship view, a
+    // rich text area, dropdown/radio/int-slider, an icon button).
+    text_area:   { label: 'Text area',    cont: false, props: { text: '## Status', style: '' }, fields: [['text', 'Markdown text'], ['style', 'Style (optional)']] },
+    ship:        { label: 'Ship (3D)',    cont: false, props: { props: 'battleship', style: '' }, fields: [['props', 'Ship type (e.g. battleship)'], ['style', 'Style (area…)']] },
+    dropdown:    { label: 'Dropdown',     cont: false, props: { items: 'items:Red,Green,Blue;', var: 'choice', style: '' }, fields: [['items', 'Options (items:A,B,C;)'], ['var', 'Bind variable'], ['style', 'Style']] },
+    int_slider:  { label: 'Int slider',   cont: false, props: { props: 'low:0;high:100;', var: 'value', style: '' }, fields: [['props', 'Props (low;high)'], ['var', 'Bind variable'], ['style', 'Style']] },
+    radio:       { label: 'Radio',        cont: false, props: { items: 'items:Red,Green,Blue;', var: 'choice', style: '' }, fields: [['items', 'Options (items:A,B,C;)'], ['var', 'Bind variable'], ['style', 'Style']] },
+    icon_button: { label: 'Icon button',  cont: false, props: { props: 'icon_index:1;', style: '' }, fields: [['props', 'Props (icon_index:N;)'], ['style', 'Style']] },
   };
 
   // --- code generation: model -> MAST lines ---
@@ -73,6 +81,12 @@
         case 'icon': out.push(pad(ind) + 'gui_icon("' + q(p.props) + '", "' + q(p.style) + '")'); break;
         case 'image': out.push(pad(ind) + 'gui_image("' + q(p.props) + '", "' + q(p.style) + '")'); break;
         case 'blank': out.push(pad(ind) + 'gui_blank(' + q(p.count) + ')'); break;
+        case 'text_area': out.push(pad(ind) + 'gui_text_area("' + q(p.text) + '"' + (p.style ? ', "' + q(p.style) + '"' : '') + ')'); break;
+        case 'ship': out.push(pad(ind) + 'gui_ship("' + q(p.props) + '"' + (p.style ? ', "' + q(p.style) + '"' : '') + ')'); break;
+        case 'dropdown': out.push(pad(ind) + 'gui_drop_down("' + q(p.items) + '", var="' + q(p.var) + '")'); break;
+        case 'int_slider': out.push(pad(ind) + 'gui_int_slider("' + q(p.props) + '", var="' + q(p.var) + '")'); break;
+        case 'radio': out.push(pad(ind) + 'gui_radio("' + q(p.items) + '", var="' + q(p.var) + '")'); break;
+        case 'icon_button': out.push(pad(ind) + 'gui_icon_button("' + q(p.props) + '", "' + q(p.style) + '")'); break;
         case 'table': {
           let a = 'gui_table(' + q(p.items);
           if (p.headers) { a += ', headers=[' + q(p.headers).split(',').map(function (h) { return '"' + h.trim() + '"'; }).join(', ') + ']'; }
@@ -150,6 +164,13 @@
     if ((m = s.match(/^gui_input\("",\s*var="(.+?)"\)$/))) { return { type: 'input', props: { var: m[1], style: '' } }; }
     if ((m = s.match(/^gui_face\((.+?)\)$/))) { return { type: 'face', props: { var: m[1], style: '' } }; }
     if ((m = s.match(/^gui_blank\((.+?)\)$/))) { return { type: 'blank', props: { count: m[1] } }; }
+    // Engine widgets (round-trip the same forms generate() emits).
+    if ((m = s.match(/^gui_text_area\("(.*?)"(?:,\s*"(.*)")?\)$/))) { return { type: 'text_area', props: { text: m[1], style: m[2] || '' } }; }
+    if ((m = s.match(/^gui_ship\("(.*?)"(?:,\s*"(.*)")?\)$/))) { return { type: 'ship', props: { props: m[1], style: m[2] || '' } }; }
+    if ((m = s.match(/^gui_drop_down\("(.*)",\s*var="(.*?)"\)$/))) { return { type: 'dropdown', props: { items: m[1], var: m[2], style: '' } }; }
+    if ((m = s.match(/^gui_int_slider\("(.*)",\s*var="(.*?)"\)$/))) { return { type: 'int_slider', props: { props: m[1], var: m[2], style: '' } }; }
+    if ((m = s.match(/^gui_radio\("(.*)",\s*var="(.*?)"\)$/))) { return { type: 'radio', props: { items: m[1], var: m[2], style: '' } }; }
+    if ((m = s.match(/^gui_icon_button\("(.*)",\s*"(.*)"\)$/))) { return { type: 'icon_button', props: { props: m[1], style: m[2] } }; }
     // Declarative gui_table(items, [cols]) is kept verbatim as 'raw' (the editor's
     // table is the `with` block form above).
     return { type: 'raw', props: { line: s } };

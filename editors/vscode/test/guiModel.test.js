@@ -105,5 +105,26 @@ check('plain section unchanged', GuiModel.generate(GuiModel.parse(plain).model) 
 const sec = GuiModel.parse('gui_section("area: 0,0,50,50;background:#1;")').model.children[0];
 check('section area/style split', sec.props.area === '0,0,50,50' && sec.props.style === 'background:#1;');
 
+// 7) engine widgets round-trip and parse to their proper types.
+const eng = [
+  '=== my_gui',
+  '    gui_section("area: 0,0,100,100;")',
+  '    gui_text_area("## Status")',
+  '    gui_ship("battleship")',
+  '    gui_drop_down("items:Red,Green;", var="choice")',
+  '    gui_int_slider("low:0;high:100;", var="value")',
+  '    gui_radio("items:A,B;", var="pick")',
+  '    gui_icon_button("icon_index:1;", "color:red;")',
+  '    await gui()',
+].join('\n');
+check('engine widgets round-trip', GuiModel.generate(GuiModel.parse(eng).model) === eng);
+const ek = GuiModel.parse(eng).model.children[0].children.map(c => c.type);
+check('engine widgets parse to their types',
+  JSON.stringify(ek) === JSON.stringify(['text_area','ship','dropdown','int_slider','radio','icon_button']));
+const dd = GuiModel.parse('gui_drop_down("items:A,B;", var="speed")').model.children[0];
+check('dropdown items/var parsed', dd.props.items === 'items:A,B;' && dd.props.var === 'speed');
+const ta = GuiModel.parse('gui_ship("cruiser", "area:0,0,50,50;")').model.children[0];
+check('ship type/style parsed', ta.props.props === 'cruiser' && ta.props.style === 'area:0,0,50,50;');
+
 if (failures) { console.log('\n' + failures + ' FAILED'); process.exit(1); }
 console.log('\nall passed');

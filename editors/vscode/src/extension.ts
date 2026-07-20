@@ -1637,6 +1637,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   .pv-w { display:flex; align-items:center; justify-content:center; text-align:center; box-sizing:border-box; border:1px solid #ffffff22; border-radius:2px; padding:2px 4px; font-size:10px; background:#18202e; color:#cde; flex:1 1 0; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; cursor:pointer; }
   .pv-w.btn { background:#294066; }
   .pv-w.face { background:#3a2a4a; }
+  .pv-w.eng { background:#243b33; border-color:#4ec9b055; }
   .pv-grid { display:grid; gap:3px; grid-auto-rows:1fr; }
   .pv-box { display:flex; flex-direction:column; gap:2px; border:1px solid #4ec9b055; border-radius:3px; padding:3px; cursor:pointer; }
   .pv-cap { flex:0 0 auto; font-size:9px; color:#7fb0c0; text-transform:uppercase; letter-spacing:.04em; }
@@ -1685,6 +1686,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   const PALETTE = [
     ['Containers', ['section','sub_section','row','grid','list','table']],
     ['Widgets', ['text','button','checkbox','slider','input','face','icon','image','blank']],
+    ['Engine widgets', ['text_area','ship','dropdown','int_slider','radio','icon_button']],
   ];
 
   function mk(type){ const c = CAT[type]; const n = { id:++idc, type, props: Object.assign({}, c.props||{}) }; if (c.cont) n.children = []; return n; }
@@ -1885,11 +1887,20 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     return s+'</div>';
   }
   function pvWidget(n){
-    const cls = n.type==='button' ? ' btn' : (n.type==='face' ? ' face' : '');
+    const ENG = ['ship','text_area','dropdown','int_slider','radio','icon_button'];
+    let cls = (n.type==='button'||n.type==='icon_button') ? ' btn' : (n.type==='face' ? ' face' : '');
+    if (ENG.indexOf(n.type)>=0) cls += ' eng';
+    const p = n.props||{};
     let label = summary(n) || n.type;
     if (n.type==='face') label = 'face';
     if (n.type==='blank') label = '·';
-    return '<span class="pv-w'+cls+(n.id===sel?' sel':'')+'" data-id="'+n.id+'">'+esc(label)+'</span>';
+    if (n.type==='ship') label = '⛛ '+(p.props||'ship');
+    if (n.type==='text_area') label = (p.text||'text').split('\n')[0];
+    if (n.type==='dropdown') label = (p.items||'').replace(/^items:/,'').split(',')[0]+' ▾';
+    if (n.type==='radio') label = '◉ '+(p.items||'').replace(/^items:/,'');
+    if (n.type==='int_slider') label = '●──────';
+    if (n.type==='icon_button') label = '▣';
+    return '<span class="pv-w'+cls+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" title="'+esc(CAT[n.type]?CAT[n.type].label:n.type)+'">'+esc(label)+'</span>';
   }
   function nodeHtml(n){
     const c = CAT[n.type];
@@ -1905,6 +1916,9 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
       case 'grid': return p.columns+' cols'; case 'list': return p.items+' as '+(p.as||'item');
       case 'text': return p.text; case 'button': return p.text; case 'input': return p.var; case 'face': return p.var;
       case 'blank': return p.count; case 'table': return p.items; case 'raw': return p.line;
+      case 'text_area': return p.text; case 'ship': return p.props;
+      case 'dropdown': case 'radio': return (p.items||'')+' → '+(p.var||'');
+      case 'int_slider': return (p.props||'')+' → '+(p.var||'');
       default: return p.props||'';
     }
   }
