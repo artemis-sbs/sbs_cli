@@ -2711,6 +2711,9 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   .badge.err { background: var(--vscode-inputValidation-errorBackground,#5a1d1d); color:#f88; }
   .badge.warn { background: var(--vscode-inputValidation-warningBackground,#5a4a1d); color:#fc8; }
   .badge.orphan { background: #5a3a1d; color:#fc8; }
+  .badge.live-active { background:#1d4a2b; color:#8fe0a8; } .badge.live-complete { background:#1d3a5a; color:#8fbfe8; }
+  .badge.live-failed { background:#5a1d1d; color:#f88; } .badge.live-secret, .badge.live-idle, .badge.live-posting, .badge.live-none { background:#333; color:#aaa; }
+  .live-ind { font-size:11px; color: var(--vscode-descriptionForeground); } .live-ind.on { color: var(--vscode-testing-iconPassed,#89d185); }
   .refs { padding:0 0 2px 30px; }
   .refs .reflabel { color: var(--vscode-descriptionForeground); font-size:10px; text-transform:uppercase; letter-spacing:.04em; padding:3px 0 1px; }
   .ref { font-family: var(--vscode-editor-font-family); font-size:12px; padding:1px 10px; cursor:pointer; white-space:nowrap; }
@@ -2736,6 +2739,7 @@ ${amdToolbar('resolver')}
   <input id="q" type="search" placeholder="Filter entities…" autofocus>
   <label><input type="checkbox" id="probOnly"> problems only</label>
   <span class="muted" id="counts"></span>
+  <span class="live-ind" id="live" title="Attach a running mission (sbs debug) to overlay live quest state">○ static</span>
   <span style="flex:1"></span>
   <span class="muted" style="font-size:11px">single-click browses · double-click opens source</span>
 </div>
@@ -2752,7 +2756,19 @@ ${amdToolbar('resolver')}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const MODEL = ${data};
+  let liveQuests = {};                         // key -> {state, progress} from the live QuestTap
+  let liveActive = false;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  // Live overlay: a running mission (sbs debug) streams quest states via the DAP.
+  window.addEventListener('message', function(e){
+    const m = e.data; if (!m || m.kind !== 'quests') return;
+    const qs = (m.payload && m.payload.quests) || [];
+    liveQuests = {}; qs.forEach(function(q){ liveQuests[q.key] = q; });
+    liveActive = true;
+    const li = document.getElementById('live');
+    li.textContent = '● live · ' + qs.length + ' quest(s)'; li.classList.add('on');
+    renderTree();
+  });
   function goto(uri, line){ vscode.postMessage({ type:'goto', uri:uri, line:line }); }
 
   const byKey = {};
@@ -2837,6 +2853,9 @@ ${amdToolbar('resolver')}
     if (e.problems && e.problems.error) badges += ' <span class="badge err">'+e.problems.error+'</span>';
     if (e.problems && e.problems.warning) badges += ' <span class="badge warn">'+e.problems.warning+'</span>';
     if (e.orphan) badges += ' <span class="badge orphan" title="unreachable — nothing reveals it and it has no When:/signal trigger">orphan</span>';
+    const lq = liveQuests[e.key];
+    if (lq){ badges += ' <span class="badge live-'+esc(lq.state)+'" title="live quest state'+(lq.progress!=null?' · progress '+lq.progress:'')+'">'+esc(lq.state)+(lq.progress!=null?' '+lq.progress:'')+'</span>'; }
+    else if (liveActive && (e.archetype==='quest'||e.archetype==='scan')){ badges += ' <span class="badge live-none" title="not granted in the running mission yet">not granted</span>'; }
     let row = '<div class="ent'+(sel===e.key?' sel':'')+'" data-k="'+esc(e.key)+'">'
       + '<span class="car" data-car="'+esc(e.key)+'">'+caret+'</span>'
       + '<span class="dot" style="background:'+archColor(e.archetype || e.section)+'"></span>'
@@ -2952,6 +2971,7 @@ async function showAmdResolver(uriArg?: string, column: vscode.ViewColumn = vsco
   const panel = vscode.window.createWebviewPanel(
     'amdResolver', 'AMD Resolver', column, { enableScripts: true });
   registerToolPanel('resolver', uri, panel);
+  amdResolverPanel = panel;                              // receive live quest events
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   panel.webview.html = amdResolverHtml(model, nonce());
 
@@ -2965,7 +2985,7 @@ async function showAmdResolver(uriArg?: string, column: vscode.ViewColumn = vsco
   const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
     if (e.document.languageId === 'amd') { clearTimeout(timer); timer = setTimeout(() => { void refresh(); }, 300); }
   });
-  panel.onDidDispose(() => docSub.dispose());
+  panel.onDidDispose(() => { docSub.dispose(); if (amdResolverPanel === panel) { amdResolverPanel = undefined; } });
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') { openLocation(msg.uri, msg.line, { preserveFocus: true }); }
     else if (msg?.type === 'addEntity') { await addEntityInSection(uri, msg.section); }
@@ -3586,6 +3606,7 @@ class MastDebugConfigurationProvider implements vscode.DebugConfigurationProvide
 
 // --- Mission Inspector (live signals + world, over `mast/inspect` events) ---
 let missionInspectorPanel: vscode.WebviewPanel | undefined;
+let amdResolverPanel: vscode.WebviewPanel | undefined;   // receives live `quests` events for its overlay
 
 function inspectorNonce(): string {
   const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -3825,9 +3846,9 @@ export function activate(context: vscode.ExtensionContext): void {
     if (s.type === 'mast') { showMissionInspector(); }
   }));
   context.subscriptions.push(vscode.debug.onDidReceiveDebugSessionCustomEvent((e) => {
-    if (e.event === 'mast/inspect' && missionInspectorPanel) {
-      void missionInspectorPanel.webview.postMessage(e.body);
-    }
+    if (e.event !== 'mast/inspect') { return; }
+    if (missionInspectorPanel) { void missionInspectorPanel.webview.postMessage(e.body); }
+    if (amdResolverPanel) { void amdResolverPanel.webview.postMessage(e.body); }   // live quest overlay
   }));
 
   // MAST source debugger.
