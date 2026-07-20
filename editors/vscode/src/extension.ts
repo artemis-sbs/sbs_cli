@@ -1540,12 +1540,19 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
 
 // --- Story Outline: a scalable list/tree + focus-detail view over the SAME
 // `amd/graph` model as the diagram. Where the diagram becomes a hairball past a
+// localResourceRoots for a GUI Editor webview so it can load media/guiModel.js.
+function mediaRoots(): vscode.Uri[] {
+  return extensionUri ? [vscode.Uri.joinPath(extensionUri, 'media')] : [];
+}
+
 // --- GUI Editor: a structural composer that generates MAST -------------------
 // Per MISSION_TOOLS_PLAN.md §4 (phase G1): a palette + design tree + properties
 // panel that generate `gui_*` MAST into a marked region — the safe one-way author
 // direction. Not a pixel canvas (that's a later phase); this composes the layout
-// as a tree (like the Story Outline) and emits code you can see live.
-function guiEditorHtml(nonce: string, docMode = false): string {
+// as a tree (like the Story Outline) and emits code you can see live. Codegen +
+// parser live in the shared, unit-tested media/guiModel.js.
+function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false): string {
+  const modelUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri!, 'media', 'guiModel.js'));
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
@@ -1628,31 +1635,16 @@ function guiEditorHtml(nonce: string, docMode = false): string {
     <div class="props-wrap"><div class="rhdr">Inspector</div><div id="props"><div class="empty">Select an element to edit its properties.</div></div></div>
   </div>
 </div>
+<script nonce="${nonce}" src="${modelUri}"></script>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const DOCMODE = ${docMode};                    // true = backing a .gui.mast file (two-way sync)
   let idc = 0, model = { id:0, type:'root', children: [] }, sel = null;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  // Element catalog: container flag, default props, and which fields to edit.
-  const CAT = {
-    root:        { label:'Screen',       cont:true,  fields:[] },
-    section:     { label:'Section',      cont:true,  with:false, props:{area:'5,5,95,95'}, fields:[['area','Area  l,t,r,b']] },
-    sub_section: { label:'Sub-section',  cont:true,  with:true,  props:{style:''}, fields:[['style','Style']] },
-    row:         { label:'Row',          cont:true,  with:false, props:{style:''}, fields:[['style','Style']] },
-    grid:        { label:'Grid',         cont:true,  with:true,  props:{columns:'3'}, fields:[['columns','Columns']] },
-    list:        { label:'List',         cont:true,  with:true,  props:{items:'items', as:'item', select:'true', title:''}, fields:[['items','Items variable'],['as','Row variable'],['select','Select (true/false)'],['title','Title (optional)']] },
-    text:        { label:'Text',         cont:false, props:{text:'Hello', style:''}, fields:[['text','Text'],['style','Style (optional)']] },
-    button:      { label:'Button',       cont:false, props:{text:'OK', jump:''}, fields:[['text','Label'],['jump','Jump to label (optional)']] },
-    checkbox:    { label:'Checkbox',     cont:false, props:{props:'state:False;', style:''}, fields:[['props','Props'],['style','Style']] },
-    slider:      { label:'Slider',       cont:false, props:{props:'low:0;high:100;', style:''}, fields:[['props','Props'],['style','Style']] },
-    input:       { label:'Input',        cont:false, props:{var:'value', style:''}, fields:[['var','Bind variable'],['style','Style']] },
-    face:        { label:'Face',         cont:false, props:{var:'face', style:''}, fields:[['var','Face variable'],['style','Style']] },
-    icon:        { label:'Icon',         cont:false, props:{props:'icon_index:1;', style:''}, fields:[['props','Props'],['style','Style']] },
-    image:       { label:'Image',        cont:false, props:{props:'', style:''}, fields:[['props','Props'],['style','Style']] },
-    blank:       { label:'Blank',        cont:false, props:{count:'1'}, fields:[['count','Count']] },
-    table:       { label:'Table',        cont:false, props:{items:'rows', columns:'[{\\'key\\':\\'name\\',\\'label\\':\\'Name\\'}]', select:'true'}, fields:[['items','Items variable'],['columns','Columns (list of dicts)'],['select','Select (true/false)']] },
-  };
+  // Element catalog + code-gen + parser come from the shared media/guiModel.js
+  // (also unit-tested in Node). See top of file.
+  const CAT = GuiModel.CAT;
   const PALETTE = [
     ['Containers', ['section','sub_section','row','grid','list']],
     ['Widgets', ['text','button','checkbox','slider','input','face','icon','image','blank','table']],
@@ -1875,37 +1867,8 @@ function guiEditorHtml(nonce: string, docMode = false): string {
     render();
   }
 
-  // --- code generation (model -> MAST) ---
-  function q(s){ return String(s==null?'':s); }
-  function textProps(p){ let s = '$text:'+q(p.text)+';'; if (p.style) s += q(p.style); return s; }
-  function pad(n){ let s=''; for (let i=0;i<n;i++) s+='    '; return s; }
-  function gen(nodes, ind){
-    let out = [];
-    for (const n of nodes){ const p = n.props;
-      switch(n.type){
-        case 'section': out.push(pad(ind)+'gui_section("area: '+q(p.area)+';")'); out = out.concat(gen(n.children, ind)); break;
-        case 'row': out.push(pad(ind)+'gui_row("'+q(p.style)+'")'); out = out.concat(gen(n.children, ind)); break;
-        case 'sub_section': out.push(pad(ind)+'with gui_sub_section("'+q(p.style)+'"):'); out = out.concat(body(n, ind+1)); break;
-        case 'grid': out.push(pad(ind)+'with gui_grid('+q(p.columns)+'):'); out = out.concat(body(n, ind+1)); break;
-        case 'list': { let a = 'gui_list('+q(p.items); if (p.select==='true') a+=', select=True'; if (p.title) a+=', title="'+q(p.title)+'"'; a+=') as '+(q(p.as)||'item')+':';
-          out.push(pad(ind)+'with '+a); out = out.concat(body(n, ind+1)); break; }
-        case 'text': out.push(pad(ind)+'gui_text("'+textProps(p)+'")'); break;
-        case 'button': if (q(p.jump)){ out.push(pad(ind)+'gui_button("'+q(p.text)+'"):'); out.push(pad(ind+1)+'jump '+q(p.jump)); } else out.push(pad(ind)+'gui_button("'+q(p.text)+'")'); break;
-        case 'checkbox': out.push(pad(ind)+'gui_checkbox("'+q(p.props)+'", "'+q(p.style)+'")'); break;
-        case 'slider': out.push(pad(ind)+'gui_slider("'+q(p.props)+'", "'+q(p.style)+'")'); break;
-        case 'input': out.push(pad(ind)+'gui_input("", var="'+q(p.var)+'")'); break;
-        case 'face': out.push(pad(ind)+'gui_face('+q(p.var)+')'); break;
-        case 'icon': out.push(pad(ind)+'gui_icon("'+q(p.props)+'", "'+q(p.style)+'")'); break;
-        case 'image': out.push(pad(ind)+'gui_image("'+q(p.props)+'", "'+q(p.style)+'")'); break;
-        case 'blank': out.push(pad(ind)+'gui_blank('+q(p.count)+')'); break;
-        case 'table': { let a = 'gui_table('+q(p.items)+', '+q(p.columns); if (p.select==='true') a+=', select=True'; a+=')'; out.push(pad(ind)+a); break; }
-        case 'raw': out.push(pad(ind)+q(p.line)); break;   // a line the editor didn't model — re-emit verbatim
-      }
-    }
-    return out;
-  }
-  function body(n, ind){ const g = gen(n.children, ind); return g.length ? g : [pad(ind)+'gui_blank()   # (empty - add widgets)']; }
-  function code(){ return gen(model.children, 0).join('\\n'); }   // '' when empty — never emits a placeholder
+  // --- code generation (model -> MAST) via the shared module ---
+  function code(){ return GuiModel.generate(model); }             // '' when empty — never emits a placeholder
   function renderCode(){ const c = code(); document.getElementById('code').textContent = c || '# (nothing yet)'; }
 
   document.getElementById('copy').onclick = function(){ vscode.postMessage({ type:'copy', code: code() }); };
@@ -1913,67 +1876,12 @@ function guiEditorHtml(nonce: string, docMode = false): string {
   document.getElementById('load').onclick = function(){ vscode.postMessage({ type:'loadRequest' }); };
   document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', children: [] }; sel = null; render(); };
 
-  // --- round-trip: parse the editor's own generated block back into the model.
-  // We only parse what we generate (a bounded dialect), so it's tractable. Lines
-  // we don't recognise become 'raw' nodes and are re-emitted verbatim (lossless);
-  // a known element's full style string is kept, so extra style props survive too.
-  function indentOf(s){ let n=0; while (s.charAt(n)===' ') n++; return n; }
-  function parseTextProps(s){ const m = s.match(/^\\$text:([\\s\\S]*?);([\\s\\S]*)$/); return m ? {text:m[1], style:m[2]} : {text:s, style:''}; }
-  function parseListArgs(s){ const p = {items:'', as:'item', select:'false', title:''};
-    const ci = s.indexOf(','); if (ci>=0){ p.items = s.slice(0,ci).trim(); const rest = s.slice(ci+1);
-      if (/select\\s*=\\s*True/.test(rest)) p.select='true'; const tm = rest.match(/title\\s*=\\s*"([^"]*)"/); if (tm) p.title = tm[1];
-    } else { p.items = s.trim(); } return p; }
-  function parseLine(s){ let m;
-    if (m=s.match(/^gui_section\\("area:\\s*(.+?);?"\\)$/)) return {type:'section', props:{area:m[1].trim()}};
-    if (m=s.match(/^gui_row\\("(.*)"\\)$/)) return {type:'row', props:{style:m[1]}};
-    if (m=s.match(/^with gui_sub_section\\("(.*)"\\):$/)) return {type:'sub_section', with:true, props:{style:m[1]}};
-    if (m=s.match(/^with gui_grid\\((.+?)\\):$/)) return {type:'grid', with:true, props:{columns:m[1].trim()}};
-    if (m=s.match(/^with gui_list\\((.+)\\) as (\\w+):$/)) { const p=parseListArgs(m[1]); p.as=m[2]; return {type:'list', with:true, props:p}; }
-    if (m=s.match(/^gui_text\\("(.*)"\\)$/)) return {type:'text', props:parseTextProps(m[1])};
-    if (m=s.match(/^gui_button\\("(.*?)"\\)(:?)$/)) return {type:'button', props:{text:m[1], jump:''}, needsJump:m[2]===':'};
-    if (m=s.match(/^gui_checkbox\\("(.*)",\\s*"(.*)"\\)$/)) return {type:'checkbox', props:{props:m[1], style:m[2]}};
-    if (m=s.match(/^gui_slider\\("(.*)",\\s*"(.*)"\\)$/)) return {type:'slider', props:{props:m[1], style:m[2]}};
-    if (m=s.match(/^gui_icon\\("(.*)",\\s*"(.*)"\\)$/)) return {type:'icon', props:{props:m[1], style:m[2]}};
-    if (m=s.match(/^gui_image\\("(.*)",\\s*"(.*)"\\)$/)) return {type:'image', props:{props:m[1], style:m[2]}};
-    if (m=s.match(/^gui_input\\("",\\s*var="(.+?)"\\)$/)) return {type:'input', props:{var:m[1], style:''}};
-    if (m=s.match(/^gui_face\\((.+?)\\)$/)) return {type:'face', props:{var:m[1], style:''}};
-    if (m=s.match(/^gui_blank\\((.+?)\\)$/)) return {type:'blank', props:{count:m[1]}};
-    if (m=s.match(/^gui_table\\((.+?),\\s*(\\[[\\s\\S]*\\])(,\\s*select\\s*=\\s*True)?\\)$/)) return {type:'table', props:{items:m[1].trim(), columns:m[2], select:m[3]?'true':'false'}};
-    return {type:'raw', props:{line:s}};
-  }
-  function parseStatements(lines, i, base){
-    const out = [];
-    while (i < lines.length){
-      const raw = lines[i];
-      if (!raw.trim() || raw.trim()==='# (nothing yet)'){ i++; continue; }   // skip blanks + the stray empty placeholder
-      const ind = indentOf(raw);
-      if (ind < base) break;
-      if (ind > base){ i++; continue; }
-      const st = parseLine(raw.trim()); i++;
-      if (st.with){ const r = parseStatements(lines, i, base+4); st.children = r.out; i = r.i; }
-      else if (st.type==='button' && st.needsJump && i<lines.length && indentOf(lines[i])>base){
-        const jm = lines[i].trim().match(/^jump\\s+(\\S+)/); if (jm) st.props.jump = jm[1]; i++;
-      }
-      out.push(st);
-    }
-    return { out:out, i:i };
-  }
-  function mkParsed(st){ const n = { id:++idc, type:st.type, props:Object.assign({}, st.props) };
-    const c = CAT[st.type]; if ((c && c.cont) || st.with) n.children = []; return n; }
-  function buildFlow(stmts, list){ let curSec=null, curRow=null;
-    for (const st of stmts){ const n = mkParsed(st);
-      if (st.type==='section'){ list.push(n); curSec=n; curRow=null; }
-      else if (st.type==='row'){ (curSec?curSec.children:list).push(n); curRow=n; }
-      else { (curRow?curRow.children:(curSec?curSec.children:list)).push(n); }
-      if (st.children && n.children) buildFlow(st.children, n.children);
-    }
-  }
+  // --- round-trip: parse the editor's own generated block back into the model
+  //     (shared media/guiModel.js). Unrecognised lines become 'raw' and re-emit
+  //     verbatim; a known element's full style string is kept. ---
   function loadFromCode(codeText){
-    idc = 0;
-    const lines = String(codeText||'').replace(/\\r/g,'').split('\\n');
-    const r = parseStatements(lines, 0, 0);
-    const root = { id:0, type:'root', children: [] }; buildFlow(r.out, root.children);
-    model = root; sel = null;
+    const r = GuiModel.parse(codeText);
+    model = r.model; idc = r.nextId; sel = null;
     if (DOCMODE) { lastSent = code(); loaded = true; }   // now safe to sync; opening must not rewrite the file
     render();
   }
@@ -2001,9 +1909,10 @@ function guiEditorHtml(nonce: string, docMode = false): string {
 
 async function showGuiEditor(): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
-    'amdGuiEditor', 'GUI Editor', vscode.ViewColumn.Beside, { enableScripts: true });
+    'amdGuiEditor', 'GUI Editor', vscode.ViewColumn.Beside,
+    { enableScripts: true, localResourceRoots: mediaRoots() });
   const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
-  panel.webview.html = guiEditorHtml(nonce);
+  panel.webview.html = guiEditorHtml(nonce, panel.webview);
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'copy') {
       await vscode.env.clipboard.writeText(msg.code || '');
@@ -2047,9 +1956,9 @@ class GuiFileEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
-    panel.webview.options = { enableScripts: true };
+    panel.webview.options = { enableScripts: true, localResourceRoots: mediaRoots() };
     const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
-    panel.webview.html = guiEditorHtml(nonce, true);
+    panel.webview.html = guiEditorHtml(nonce, panel.webview, true);
 
     let writing = false;   // suppress the change we cause ourselves
     const update = () => { void panel.webview.postMessage({ type: 'update', code: document.getText() }); };

@@ -258,6 +258,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test:gui": "node test/guiModel.test.js",
     "package": "vsce package"
   },
   "dependencies": {
