@@ -1626,6 +1626,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
       <button id="tPreview" class="on">Preview</button>
       <button id="tCode" title="Code">Code</button>
       <span style="flex:1"></span>
+      <button id="mock" title="Render this design for real in a running sbs debug mock session">Preview in mock</button>
       <button id="copy">Copy</button>
       <button id="insert" class="primary" title="Replace a # &lt;gui-designer&gt; … # &lt;/gui-designer&gt; block in the active .mast, or insert at the cursor">Insert into file</button>
     </div>
@@ -1910,6 +1911,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
 
   document.getElementById('copy').onclick = function(){ vscode.postMessage({ type:'copy', code: code() }); };
   document.getElementById('insert').onclick = function(){ vscode.postMessage({ type:'insert', code: code() }); };
+  document.getElementById('mock').onclick = function(){ vscode.postMessage({ type:'mockPreview', code: code() }); };
   document.getElementById('load').onclick = function(){ vscode.postMessage({ type:'loadRequest' }); };
   document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', children: [] }; sel = null; recordHistory(); render(); };
 
@@ -1945,6 +1947,19 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
 </script></body></html>`;
 }
 
+// Render the editor's current design for real in a running `sbs debug` mock
+// session (the pixel-faithful preview) — POSTs the generated MAST as a
+// gui_preview command; the runner compiles + presents it live.
+async function guiEditorMockPreview(code: string): Promise<void> {
+  const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+  try {
+    await postDebugCommand(port, { action: 'gui_preview', code });
+    vscode.window.setStatusBarMessage('$(broadcast) Previewed design in mock', 3000);
+  } catch (e) {
+    vscode.window.showWarningMessage(`GUI Editor: no running mock on port ${port} (start one with \`sbs debug .\` or the mission runner). ${e}`);
+  }
+}
+
 async function showGuiEditor(): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
     'amdGuiEditor', 'GUI Editor', vscode.ViewColumn.Beside,
@@ -1957,6 +1972,8 @@ async function showGuiEditor(): Promise<void> {
       vscode.window.showInformationMessage('GUI Editor: MAST copied to clipboard.');
     } else if (msg?.type === 'insert') {
       await insertGeneratedGui(msg.code || '');
+    } else if (msg?.type === 'mockPreview') {
+      await guiEditorMockPreview(msg.code || '');
     } else if (msg?.type === 'loadRequest') {
       const block = readDesignerBlock();
       if (block == null) {
@@ -2008,6 +2025,7 @@ class GuiFileEditorProvider implements vscode.CustomTextEditorProvider {
     panel.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') { update(); }                       // webview loaded → send current text
       else if (msg?.type === 'copy') { await vscode.env.clipboard.writeText(msg.code || ''); }
+      else if (msg?.type === 'mockPreview') { await guiEditorMockPreview(msg.code || ''); }
       else if (msg?.type === 'openText') {                           // toggle to the full text editor
         await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
       }
