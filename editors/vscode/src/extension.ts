@@ -1947,17 +1947,65 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
 </script></body></html>`;
 }
 
-// Render the editor's current design for real in a running `sbs debug` mock
-// session (the pixel-faithful preview) — POSTs the generated MAST as a
-// gui_preview command; the runner compiles + presents it live.
-async function guiEditorMockPreview(code: string): Promise<void> {
-  const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
-  try {
-    await postDebugCommand(port, { action: 'gui_preview', code });
-    vscode.window.setStatusBarMessage('$(broadcast) Previewed design in mock', 3000);
-  } catch (e) {
-    vscode.window.showWarningMessage(`GUI Editor: no running mock on port ${port} (start one with \`sbs debug .\` or the mission runner). ${e}`);
+// The mission folder a file lives in (nearest ancestor with description.yaml),
+// else its workspace folder.
+function missionDirForUri(uri?: vscode.Uri): string | undefined {
+  if (!uri) { return undefined; }
+  let dir = path.dirname(uri.fsPath);
+  for (let i = 0; i < 12; i++) {
+    if (fs.existsSync(path.join(dir, 'description.yaml'))) { return dir; }
+    const parent = path.dirname(dir);
+    if (parent === dir) { break; }
+    dir = parent;
   }
+  return vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+}
+
+// Mocks the extension started for previewing, keyed by port (reused across
+// clicks; the runner self-cleans a stale singleton on the same port).
+const mockRunners = new Map<number, cp.ChildProcess>();
+
+// Ensure a mock is listening on `port`, starting `sbs debug <mission>` if not.
+async function ensureMockRunning(missionDir: string, port: number): Promise<boolean> {
+  try { await waitForPort('127.0.0.1', port, 600); return true; } catch { /* not up yet */ }
+  const existing = mockRunners.get(port);
+  if (!existing || existing.exitCode !== null) {
+    const base = resolveSbsBase();
+    const args = [...base.args, 'debug', missionDir, '--port', String(port), '--use-working-tree'];
+    output.show(true);
+    output.appendLine(`Starting mock for preview: ${base.command} ${args.join(' ')}`);
+    const child = cp.spawn(base.command, args, { cwd: base.cwd, windowsHide: true });
+    child.stdout?.on('data', (d: Buffer) => output.append(d.toString()));
+    child.stderr?.on('data', (d: Buffer) => output.append(d.toString()));
+    child.on('exit', () => mockRunners.delete(port));
+    mockRunners.set(port, child);
+  }
+  try { await waitForPort('127.0.0.1', port, 60000); return true; } catch { return false; }
+}
+
+// Render the editor's current design for real in a running `sbs debug` mock
+// (the pixel-faithful preview). If nothing's listening on the session port, start
+// a mock for the file's own mission first, then post the gui_preview command.
+async function guiEditorMockPreview(code: string, missionDir?: string): Promise<void> {
+  const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+  const post = () => postDebugCommand(port, { action: 'gui_preview', code });
+  try { await post(); vscode.window.setStatusBarMessage('$(broadcast) Previewed design in mock', 3000); return; }
+  catch { /* maybe nothing is listening — try to start it */ }
+
+  if (!missionDir) {
+    vscode.window.showWarningMessage(`GUI Editor: no running mock on port ${port}, and no mission folder found for this file to start one.`);
+    return;
+  }
+  const ok = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Starting mock for ${path.basename(missionDir)}…` },
+    () => ensureMockRunning(missionDir, port));
+  if (!ok) { vscode.window.showWarningMessage(`GUI Editor: could not start a mock on port ${port}.`); return; }
+  // The port is up; give the mission a moment to load, then post (with retries).
+  for (let i = 0; i < 12; i++) {
+    try { await post(); vscode.window.setStatusBarMessage('$(broadcast) Previewed design in mock', 3000); return; }
+    catch { await new Promise((r) => setTimeout(r, 500)); }
+  }
+  vscode.window.showWarningMessage('GUI Editor: mock started, but the preview command did not go through yet — try again in a moment.');
 }
 
 async function showGuiEditor(): Promise<void> {
@@ -1973,7 +2021,9 @@ async function showGuiEditor(): Promise<void> {
     } else if (msg?.type === 'insert') {
       await insertGeneratedGui(msg.code || '');
     } else if (msg?.type === 'mockPreview') {
-      await guiEditorMockPreview(msg.code || '');
+      const md = missionDirForUri(vscode.window.activeTextEditor?.document.uri
+        || vscode.workspace.workspaceFolders?.[0]?.uri);
+      await guiEditorMockPreview(msg.code || '', md);
     } else if (msg?.type === 'loadRequest') {
       const block = readDesignerBlock();
       if (block == null) {
@@ -2025,7 +2075,7 @@ class GuiFileEditorProvider implements vscode.CustomTextEditorProvider {
     panel.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') { update(); }                       // webview loaded → send current text
       else if (msg?.type === 'copy') { await vscode.env.clipboard.writeText(msg.code || ''); }
-      else if (msg?.type === 'mockPreview') { await guiEditorMockPreview(msg.code || ''); }
+      else if (msg?.type === 'mockPreview') { await guiEditorMockPreview(msg.code || '', missionDirForUri(document.uri)); }
       else if (msg?.type === 'openText') {                           // toggle to the full text editor
         await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
       }
