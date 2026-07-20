@@ -3349,6 +3349,7 @@ function missionInspectorHtml(nonce: string): string {
   th,td { text-align:left; padding:2px 8px; border-bottom:1px solid var(--vscode-panel-border,#8882); white-space:nowrap; }
   .muted { color: var(--vscode-descriptionForeground); }
   .empty { padding:10px; color: var(--vscode-descriptionForeground); }
+  .foe { color: var(--vscode-errorForeground,#f66); font-weight:600; }
   .sig { font-family: var(--vscode-editor-font-family); font-size:12px; padding:2px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
   .sig .name { color: var(--vscode-symbolIcon-eventForeground, #c586c0); font-weight:600; }
   button, .sel { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:1px 8px; cursor:pointer; font-size:11px; }
@@ -3370,8 +3371,8 @@ function missionInspectorHtml(nonce: string): string {
 <div class="split">
   <div class="pane">
     <div class="bar"><b>World</b><input id="worldFilter" class="flt" type="search" placeholder="filter…"><span class="sp"></span><span class="muted" id="worldCount"></span></div>
-    <table><thead><tr><th>Name</th><th>Side</th><th>Kind</th><th>Roles</th></tr></thead>
-    <tbody id="worldBody"><tr><td colspan="4" class="empty">Waiting for a running mission…</td></tr></tbody></table>
+    <table><thead><tr><th>Name</th><th>Side</th><th>Kind</th><th title="Diplomatically hostile to a player side">Enemy?</th><th>Roles</th></tr></thead>
+    <tbody id="worldBody"><tr><td colspan="5" class="empty">Waiting for a running mission…</td></tr></tbody></table>
   </div>
   <div class="pane">
     <div class="bar"><b>Signals</b><input id="sigFilter" class="flt" type="search" placeholder="filter…"><span class="sp"></span><button id="sigPause" title="Freeze auto-scroll">Pause</button><button id="clear">Clear</button><span class="muted" id="sigCount"></span></div>
@@ -3407,8 +3408,10 @@ function missionInspectorHtml(nonce: string): string {
     const rows = q ? worldData.filter(o => ((o.name||'')+' '+(o.side||'')+' '+(o.kind||'')+' '+(o.roles||[]).join(' ')).toLowerCase().includes(q)) : worldData;
     worldCount.textContent = worldData.length ? (q ? '('+rows.length+'/'+worldData.length+')' : '('+worldData.length+')') : '';
     worldBody.innerHTML = rows.length ? rows.map(o =>
-      '<tr><td>'+esc(o.name)+'</td><td>'+esc(o.side)+'</td><td>'+esc(o.kind)+'</td><td class="muted">'+esc((o.roles||[]).join(', '))+'</td></tr>').join('')
-      : '<tr><td colspan="4" class="empty">'+(worldData.length ? 'No matches.' : 'No space objects.')+'</td></tr>';
+      '<tr><td>'+esc(o.name)+'</td><td>'+esc(o.side)+'</td><td>'+esc(o.kind)+'</td>'
+      + '<td>'+(o.enemy ? '<span class="foe">enemy</span>' : '<span class="muted">—</span>')+'</td>'
+      + '<td class="muted">'+esc((o.roles||[]).join(', '))+'</td></tr>').join('')
+      : '<tr><td colspan="5" class="empty">'+(worldData.length ? 'No matches.' : 'No space objects.')+'</td></tr>';
   }
 
   // --- Signals pane: filter by name; Pause freezes auto-scroll (still collecting) ---
