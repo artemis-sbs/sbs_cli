@@ -2393,7 +2393,8 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
 
   renderList();
   const preselect = ${preselect};
-  if (preselect && byKey[preselect]) { select(preselect); }
+  if (preselect && byKey[preselect]) { select(preselect);
+    const r = document.querySelector('.row.sel'); if (r) r.scrollIntoView({ block:'nearest' }); }
   else { vscode.postMessage({ type:'inspReady' }); }
 </script></body></html>`;
 }
@@ -2458,7 +2459,10 @@ async function showStoryOutline(): Promise<void> {
     } else if (msg?.type === 'inspReady') {
       if (drawer.detail) { drawer.render(drawer.detail); }
     } else if (msg?.type === 'addEntity') {
-      await addEntityInSection(uri, msg.section);
+      // Insert without the standalone inspector; select the new node so its form
+      // loads in the Outline's own inline detail pane on the next refresh.
+      const key = await addEntityInSection(uri, msg.section, false);
+      if (key) { selectedKey = key; }
     }
   });
 }
@@ -2679,17 +2683,20 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
 // header if absent), then open the inspector on it. Shared by the "+" affordance
 // in the Story Outline, Story Graph, and AMD Resolver. The panels auto-refresh on
 // the resulting document change.
-async function addEntityInSection(uri: string, section: string): Promise<void> {
-  if (!client || !section) { return; }
+async function addEntityInSection(uri: string, section: string, openInspector = true): Promise<string | null> {
+  if (!client || !section) { return null; }
   let r: NewInSection | null;
   try {
     r = await client.sendRequest<NewInSection | null>('amd/newInSection', { textDocument: { uri }, section });
-  } catch (e) { output.appendLine(`Add entity failed: ${e}`); return; }
-  if (!r) { return; }
+  } catch (e) { output.appendLine(`Add entity failed: ${e}`); return null; }
+  if (!r) { return null; }
   const edit = new vscode.WorkspaceEdit();
   edit.insert(vscode.Uri.parse(uri), new vscode.Position(r.line, 0), r.text);
   await vscode.workspace.applyEdit(edit);
-  await showInspector(uri, r.key);   // open the new node's form to fill it in
+  // The Story Outline edits inline in its own detail pane, so it selects the new
+  // node itself instead; Graph/Resolver open the standalone inspector.
+  if (openInspector) { await showInspector(uri, r.key); }
+  return r.key;
 }
 
 async function showAmdResolver(): Promise<void> {
