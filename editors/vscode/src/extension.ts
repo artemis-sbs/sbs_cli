@@ -1617,6 +1617,7 @@ function guiEditorHtml(nonce: string, docMode = false): string {
       <button id="tPreview" class="on">Preview</button>
       <button id="tCode">Code</button>
       <span style="flex:1"></span>
+      <button id="astext" title="Open this file in the full text editor" style="display:none">Edit as text</button>
       <button id="copy">Copy</button>
       <button id="insert" class="primary" title="Replace a # &lt;gui-designer&gt; … # &lt;/gui-designer&gt; block in the active .mast, or insert at the cursor">Insert into file</button>
     </div>
@@ -1983,8 +1984,10 @@ function guiEditorHtml(nonce: string, docMode = false): string {
   });
 
   if (DOCMODE) {
-    // The document is the source of truth; hide the marked-region / new actions.
+    // The document is the source of truth; hide the marked-region / new actions,
+    // and offer the toggle back to the full text editor.
     ['load','insert','clear'].forEach(function(idv){ const el = document.getElementById(idv); if (el) el.style.display='none'; });
+    const at = document.getElementById('astext'); if (at) { at.style.display=''; at.onclick = function(){ vscode.postMessage({ type:'openText' }); }; }
     vscode.postMessage({ type:'ready' });          // ask the provider for the current document text
   }
   render();
@@ -2053,6 +2056,9 @@ class GuiFileEditorProvider implements vscode.CustomTextEditorProvider {
     panel.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') { update(); }                       // webview loaded → send current text
       else if (msg?.type === 'copy') { await vscode.env.clipboard.writeText(msg.code || ''); }
+      else if (msg?.type === 'openText') {                           // toggle to the full text editor
+        await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+      }
       else if (msg?.type === 'apply') {
         writing = true;
         try {
@@ -3083,6 +3089,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', showStoryOutline));
   context.subscriptions.push(vscode.commands.registerCommand('amd.guiEditor', showGuiEditor));
   context.subscriptions.push(GuiFileEditorProvider.register());   // *.gui.mast opens as the GUI Editor
+  // Toggle a *.gui.mast text editor back into the visual GUI Editor.
+  context.subscriptions.push(vscode.commands.registerCommand('amd.openGuiEditor', (uri?: vscode.Uri) => {
+    const target = uri || vscode.window.activeTextEditor?.document.uri;
+    if (target) { void vscode.commands.executeCommand('vscode.openWith', target, 'amd.guiFileEditor'); }
+  }));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));

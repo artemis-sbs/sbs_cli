@@ -59,6 +59,12 @@
         "icon": "$(layout)"
       },
       {
+        "command": "amd.openGuiEditor",
+        "title": "Open in GUI Editor",
+        "category": "Artemis AMD",
+        "icon": "$(layout)"
+      },
+      {
         "command": "amd.showPreview",
         "title": "Preview Node",
         "category": "Artemis AMD",
@@ -90,6 +96,7 @@
         { "command": "amd.guiEditor" },
         { "command": "amd.showPreview", "when": "editorLangId == amd" },
         { "command": "amd.previewInSession", "when": "editorLangId == amd" },
+        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.gui\\.mast$/" },
         { "command": "amd.newFile" }
       ],
       "editor/title": [
@@ -97,7 +104,8 @@
         { "command": "amd.showGraph", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.showStoryOutline", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation" },
-        { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation" }
+        { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation" },
+        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.gui\\.mast$/ && activeEditor == 'workbench.editors.files.textFileEditor'", "group": "navigation" }
       ]
     },
     "languages": [
