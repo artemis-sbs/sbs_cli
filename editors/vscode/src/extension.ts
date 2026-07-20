@@ -2602,7 +2602,9 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
         expanded[k] = !expanded[k]; renderTree(); };
     }
     for (const el of document.querySelectorAll('.ent')){
-      el.onclick = () => selectEntity(el.dataset.k);
+      el.onclick = () => { const k = el.dataset.k;
+        if (sel === k && expanded[k]) { expanded[k] = false; renderTree(); }  // click the open one again -> collapse
+        else selectEntity(k); };
       el.ondblclick = () => { const e = byKey[el.dataset.k]; goto(e.uri, e.line); };
     }
     for (const el of document.querySelectorAll('.ref')){
