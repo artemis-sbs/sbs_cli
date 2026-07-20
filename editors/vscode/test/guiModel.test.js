@@ -170,5 +170,33 @@ check('slider ref + on_message reattached', sl.props.ref === 'dl' && sl.props.on
 check('checkbox ref + on_message reattached', cbn.props.ref === 'cb' && cbn.props.on_message === 'toggle()');
 check('button on_click still by label', bn.props.on_click === 'jump other');
 
+// 10) a button matched by REF (b = gui_button) + a label-form button both round-trip.
+const bref = [
+  '=== my_gui',
+  '    gui_section("area: 0,0,100,100;")',
+  '    b = gui_button("B")',
+  '    gui_button("OK")',
+  '    on gui_message(b):',
+  '        print("")',
+  '    on gui_message(gui_button("OK")):',
+  '        print("")',
+  '    await gui()',
+].join('\n');
+check('button-ref + label handlers round-trip', GuiModel.generate(GuiModel.parse(bref).model) === bref);
+const brk = GuiModel.parse(bref).model.children[0].children;
+const bbtn = brk.find(c => c.type === 'button' && c.props.ref === 'b');
+check('button matched by ref -> on_click', bbtn && bbtn.props.on_click === 'print("")');
+
+// 11) a handler whose target isn't a modeled control is preserved verbatim, not dropped.
+const ext = [
+  '=== my_gui',
+  '    gui_section("area: 0,0,100,100;")',
+  '    gui_text("$text:hi;")',
+  '    on gui_message(external_ctrl):',
+  '        do_thing()',
+  '    await gui()',
+].join('\n');
+check('unmatched handler preserved', GuiModel.generate(GuiModel.parse(ext).model) === ext);
+
 if (failures) { console.log('\n' + failures + ' FAILED'); process.exit(1); }
 console.log('\nall passed');

@@ -81,7 +81,7 @@
         case 'button': {
           // The click handler is emitted separately as an `on gui_message(...)`
           // block (see generate) — gui_button itself takes no `:` block.
-          let a = 'gui_button("' + q(p.text) + '"';
+          let a = pre(n) + 'gui_button("' + q(p.text) + '"';   // `<ref> = ` when the button is matched by ref
           if (p.style) { a += ', "' + q(p.style) + '"'; }
           out.push(pad(ind) + a + ')');
           break;
@@ -115,13 +115,18 @@
     }
     return out;
   }
-  // Handlers: a button's on_click matches by label; an interactive control's
-  // on_message matches by its ref var. Both emit an `on gui_message(...)` block.
+  // Handlers emit an `on gui_message(...)` block. A button matches by its ref var
+  // when it has one (assignment form), else by its label; other controls always
+  // match by ref.
   function collectHandlers(nodes, out) {
     for (const n of nodes) {
       const p = n.props || {};
-      if (n.type === 'button' && q(p.on_click)) { out.push({ head: 'gui_button("' + q(p.text) + '")', body: p.on_click }); }
-      else if (INTERACTIVE[n.type] && q(p.on_message)) { out.push({ head: refOf(n), body: p.on_message }); }
+      if (n.type === 'button' && q(p.on_click)) {
+        const r = refOf(n);
+        out.push({ head: r ? r : ('gui_button("' + q(p.text) + '")'), body: p.on_click });
+      } else if (INTERACTIVE[n.type] && q(p.on_message)) {
+        out.push({ head: refOf(n), body: p.on_message });
+      }
       if (n.children) { collectHandlers(n.children, out); }
     }
     return out;
@@ -160,7 +165,7 @@
   // used with `on gui_message(<ref>)`), remember the ref, then parse the control.
   function parseLine(s) {
     let ref = '';
-    const am = s.match(/^([A-Za-z_]\w*)\s*=\s*(gui_(?:checkbox|slider|int_slider|input|drop_down|radio)\(.*)$/);
+    const am = s.match(/^([A-Za-z_]\w*)\s*=\s*(gui_(?:button|checkbox|slider|int_slider|input|drop_down|radio)\(.*)$/);
     if (am) { ref = am[1]; s = am[2]; }
     const r = parseLineInner(s);
     if (ref && r && r.props) { r.props.ref = ref; }
@@ -267,12 +272,18 @@
     });
     buildFlow(layout, rootNode.children);
     handlers.forEach(function (h) {
-      if (h.ref) {                                   // on gui_message(<ref>) — a control handler
+      let ok = false;
+      if (h.ref) {                                   // on gui_message(<ref>) — button (on_click) or control (on_message)
         const c = findByRef(rootNode, h.ref);
-        if (c) { c.props.on_message = h.body || ''; }
+        if (c) { if (c.type === 'button') { c.props.on_click = h.body || ''; } else { c.props.on_message = h.body || ''; } ok = true; }
       } else {                                        // on gui_message(gui_button("X")) — by label
         const b = findButton(rootNode, h.target);
-        if (b) { b.props.on_click = h.body || ''; }
+        if (b) { b.props.on_click = h.body || ''; ok = true; }
+      }
+      if (!ok) {                                      // target isn't a modeled control — keep the block verbatim rather than drop it
+        const head = h.ref ? ('on gui_message(' + h.ref + '):') : ('on gui_message(gui_button("' + h.target + '")):');
+        rootNode.children.push({ id: ++idc, type: 'raw', props: { line: head } });
+        (h.body || '').split('\n').forEach(function (bl) { rootNode.children.push({ id: ++idc, type: 'raw', props: { line: '    ' + bl } }); });
       }
     });
     return { model: rootNode, nextId: idc };
