@@ -1622,7 +1622,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   .kids { margin-left:14px; border-left:1px solid var(--vscode-panel-border,#8883); padding-left:4px; }
   .prow { margin:6px 0; }
   .prow label { display:block; font-size:11px; color:var(--vscode-descriptionForeground); margin-bottom:2px; }
-  .prow input, .prow textarea { width:100%; box-sizing:border-box; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:3px; padding:3px 6px; font-family:inherit; font-size:12px; }
+  .prow input, .prow textarea, .prow select { width:100%; box-sizing:border-box; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:3px; padding:3px 6px; font-family:inherit; font-size:12px; }
   .empty { color: var(--vscode-descriptionForeground); padding:8px; font-size:12px; }
   .muted { color: var(--vscode-descriptionForeground); }
   .actions { display:flex; gap:4px; margin:6px 0; flex-wrap:wrap; }
@@ -1724,6 +1724,14 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     ]],
     ['Console setup', ['console_preset','activate_console','cinematic']],
   ];
+  // Autocomplete lists for the inspector's name fields.
+  const ENGINE_WIDGETS = ['3dview','2dview','science_2d_view','weapon_2d_view','comms_2d_view',
+    'ship_data','text_waterfall','radar_zoom_ctrl','ship_internal_view','comms_control','comms_face',
+    'comms_sorted_list','comms_waterfall','red_alert','helm_movement','throttle','shield_control',
+    'weapon_control','main_screen_control','grid_control','grid_face','fighter_control','helm_free_3d',
+    'science_data','science_data_tabs','science_data_freq','science_sorted_list','eng_heat_controls',
+    'eng_power_controls','eng_presets'];
+  const CONSOLES = ['helm','weapons','science','engineering','comms','cinematic','mainscreen','cockpit'];
 
   function mk(type, over){ const c = CAT[type]; const n = { id:++idc, type, props: Object.assign({}, c.props||{}, over||{}) }; if (c.cont) n.children = []; return n; }
   function find(id, nodes, parent){ if (id===0) return {n:model, parent:null, list:null}; nodes = nodes || model.children; for (const n of nodes){ if (n.id===id) return {n, parent:parent||model, list:nodes}; if (n.children){ const r = find(id, n.children, n); if (r) return r; } } return null; }
@@ -2034,11 +2042,21 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
        + '<button data-act="del">Delete</button></div>';
     h += (c.fields||[]).map(function(f){
       const key=f[0], label=f[1], val=n.props[key]==null?'':n.props[key];
-      const big = (key==='columns');
-      return '<div class="prow"><label>'+esc(label)+'</label>'
-        + (big ? '<textarea rows="3" data-k="'+key+'">'+esc(val)+'</textarea>'
-               : '<input data-k="'+key+'" value="'+esc(val)+'">')+'</div>';
+      let ctrl;
+      if (n.type==='cinematic' && key==='mode'){
+        ctrl = '<select data-k="mode"><option value="auto"'+(val!=='full'?' selected':'')+'>auto</option>'
+             + '<option value="full"'+(val==='full'?' selected':'')+'>full</option></select>';
+      } else if (key==='on_click' || key==='on_message' || key==='columns' || key==='args'){
+        ctrl = '<textarea rows="3" data-k="'+key+'">'+esc(val)+'</textarea>';   // multiline handler / args
+      } else {
+        const list = (n.type==='layout_widget'&&key==='widget') ? ' list="dl-widgets"'
+                   : ((key==='console'||(n.type==='activate_console'&&key==='name')) ? ' list="dl-consoles"' : '');
+        ctrl = '<input data-k="'+key+'"'+list+' value="'+esc(val)+'">';
+      }
+      return '<div class="prow"><label>'+esc(label)+'</label>'+ctrl+'</div>';
     }).join('');
+    h += '<datalist id="dl-widgets">'+ENGINE_WIDGETS.map(function(w){ return '<option value="'+esc(w)+'">'; }).join('')+'</datalist>';
+    h += '<datalist id="dl-consoles">'+CONSOLES.map(function(w){ return '<option value="'+esc(w)+'">'; }).join('')+'</datalist>';
     box.innerHTML = h;
     box.querySelectorAll('[data-k]').forEach(function(inp){ inp.oninput = function(){ n.props[inp.dataset.k] = inp.value; renderTree(); renderPreview(); renderCode(); recordHistorySoon(); }; });
     box.querySelectorAll('[data-act]').forEach(function(b){ b.onclick = function(){ act(b.dataset.act); }; });
