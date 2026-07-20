@@ -22,9 +22,9 @@
     sub_section: { label: 'Sub-section',  cont: true,  with: true, props: { style: '' }, fields: [['style', 'Style']] },
     row:         { label: 'Row',          cont: true,  props: { style: '' }, fields: [['style', 'Style']] },
     grid:        { label: 'Grid',         cont: true,  with: true, props: { columns: '3' }, fields: [['columns', 'Columns']] },
-    list:        { label: 'List',         cont: true,  with: true, props: { items: 'items', as: 'item', select: 'true', title: '' }, fields: [['items', 'Items variable'], ['as', 'Row variable'], ['select', 'Select (true/false)'], ['title', 'Title (optional)']] },
+    list:        { label: 'List',         cont: true,  with: true, props: { items: 'items', as: 'item', select: 'true', title: '', row_height: '' }, fields: [['items', 'Items variable'], ['as', 'Row variable'], ['select', 'Select (true/false)'], ['title', 'Title (optional)'], ['row_height', 'Row height (e.g. 1.6em)']] },
     text:        { label: 'Text',         cont: false, props: { text: 'Hello', style: '' }, fields: [['text', 'Text'], ['style', 'Style (optional)']] },
-    button:      { label: 'Button',       cont: false, props: { text: 'OK', jump: '' }, fields: [['text', 'Label'], ['jump', 'Jump to label (optional)']] },
+    button:      { label: 'Button',       cont: false, props: { text: 'OK', style: '', jump: '' }, fields: [['text', 'Label'], ['style', 'Style (optional)'], ['jump', 'Jump to label (optional)']] },
     checkbox:    { label: 'Checkbox',     cont: false, props: { props: 'state:False;', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
     slider:      { label: 'Slider',       cont: false, props: { props: 'low:0;high:100;', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
     input:       { label: 'Input',        cont: false, props: { var: 'value', style: '' }, fields: [['var', 'Bind variable'], ['style', 'Style']] },
@@ -53,14 +53,18 @@
           let a = 'gui_list(' + q(p.items);
           if (p.select === 'true') { a += ', select=True'; }
           if (p.title) { a += ', title="' + q(p.title) + '"'; }
+          if (p.row_height) { a += ', row_height="' + q(p.row_height) + '"'; }
           a += ') as ' + (q(p.as) || 'item') + ':';
           out.push(pad(ind) + 'with ' + a); out = out.concat(body(n, ind + 1)); break;
         }
         case 'text': out.push(pad(ind) + 'gui_text("' + textProps(p) + '")'); break;
-        case 'button':
-          if (q(p.jump)) { out.push(pad(ind) + 'gui_button("' + q(p.text) + '"):'); out.push(pad(ind + 1) + 'jump ' + q(p.jump)); }
-          else { out.push(pad(ind) + 'gui_button("' + q(p.text) + '")'); }
+        case 'button': {
+          let a = 'gui_button("' + q(p.text) + '"';
+          if (p.style) { a += ', "' + q(p.style) + '"'; }
+          if (q(p.jump)) { out.push(pad(ind) + a + '):'); out.push(pad(ind + 1) + 'jump ' + q(p.jump)); }
+          else { out.push(pad(ind) + a + ')'); }
           break;
+        }
         case 'checkbox': out.push(pad(ind) + 'gui_checkbox("' + q(p.props) + '", "' + q(p.style) + '")'); break;
         case 'slider': out.push(pad(ind) + 'gui_slider("' + q(p.props) + '", "' + q(p.style) + '")'); break;
         case 'input': out.push(pad(ind) + 'gui_input("", var="' + q(p.var) + '")'); break;
@@ -84,13 +88,14 @@
   function indentOf(s) { let n = 0; while (s.charAt(n) === ' ') { n++; } return n; }
   function parseTextProps(s) { const m = s.match(/^\$text:([\s\S]*?);([\s\S]*)$/); return m ? { text: m[1], style: m[2] } : { text: s, style: '' }; }
   function parseListArgs(s) {
-    const p = { items: '', as: 'item', select: 'false', title: '' };
+    const p = { items: '', as: 'item', select: 'false', title: '', row_height: '' };
     const ci = s.indexOf(',');
     if (ci >= 0) {
       p.items = s.slice(0, ci).trim();
       const rest = s.slice(ci + 1);
       if (/select\s*=\s*True/.test(rest)) { p.select = 'true'; }
       const tm = rest.match(/title\s*=\s*"([^"]*)"/); if (tm) { p.title = tm[1]; }
+      const rm = rest.match(/row_height\s*=\s*"([^"]*)"/); if (rm) { p.row_height = rm[1]; }
     } else { p.items = s.trim(); }
     return p;
   }
@@ -102,7 +107,7 @@
     if ((m = s.match(/^with gui_grid\((.+?)\):$/))) { return { type: 'grid', with: true, props: { columns: m[1].trim() } }; }
     if ((m = s.match(/^with gui_list\((.+)\) as (\w+):$/))) { const p = parseListArgs(m[1]); p.as = m[2]; return { type: 'list', with: true, props: p }; }
     if ((m = s.match(/^gui_text\("(.*)"\)$/))) { return { type: 'text', props: parseTextProps(m[1]) }; }
-    if ((m = s.match(/^gui_button\("(.*?)"\)(:?)$/))) { return { type: 'button', props: { text: m[1], jump: '' }, needsJump: m[2] === ':' }; }
+    if ((m = s.match(/^gui_button\("(.*?)"(?:,\s*"(.*)")?\)(:?)$/))) { return { type: 'button', props: { text: m[1], style: m[2] || '', jump: '' }, needsJump: m[3] === ':' }; }
     if ((m = s.match(/^gui_checkbox\("(.*)",\s*"(.*)"\)$/))) { return { type: 'checkbox', props: { props: m[1], style: m[2] } }; }
     if ((m = s.match(/^gui_slider\("(.*)",\s*"(.*)"\)$/))) { return { type: 'slider', props: { props: m[1], style: m[2] } }; }
     if ((m = s.match(/^gui_icon\("(.*)",\s*"(.*)"\)$/))) { return { type: 'icon', props: { props: m[1], style: m[2] } }; }

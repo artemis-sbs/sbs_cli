@@ -62,5 +62,19 @@ check('row holds the text', m.children[0].children[0].children[0].type === 'text
 // 4) empty model generates empty (no placeholder written).
 check('empty model -> empty string', GuiModel.generate({ children: [] }) === '');
 
+// 5) button style + list row_height round-trip (all button forms).
+const forms = [
+  'gui_button("Plain")',
+  'gui_button("Styled", "color:red;")',
+  'gui_button("Jumpy"):\n    jump go',
+  'gui_button("StyledJump", "color:red;"):\n    jump go',
+  'with gui_list(ships, select=True, title="Ships", row_height="3em") as ship:\n    gui_text("$text:hi;")',
+].join('\n');
+check('button style / list row_height round-trip', GuiModel.generate(GuiModel.parse(forms).model) === forms);
+const b = GuiModel.parse('gui_button("X", "color:red;")').model.children[0];
+check('button style parsed', b.props.style === 'color:red;' && b.props.jump === '');
+const lst = GuiModel.parse('with gui_list(a, row_height="3em") as x:\n    gui_text("$text:h;")').model.children[0];
+check('list row_height parsed', lst.props.row_height === '3em');
+
 if (failures) { console.log('\n' + failures + ' FAILED'); process.exit(1); }
 console.log('\nall passed');
