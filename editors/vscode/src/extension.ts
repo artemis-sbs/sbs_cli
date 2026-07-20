@@ -1544,10 +1544,12 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
 // searchable/filterable outline on the left, and the selected node's direct
 // incoming/outgoing connections (each a clickable chip) on the right. See
 // MISSION_TOOLS_PLAN.md §3.5.1.
-function storyOutlineHtml(graph: MissionGraph, nonce: string): string {
+function storyOutlineHtml(graph: MissionGraph, nonce: string, webview: vscode.Webview, selectedKey?: string): string {
   const data = JSON.stringify(graph).replace(/</g, '\\u003c');
+  const inj = faceInjection(webview, nonce);
+  const preselect = selectedKey ? JSON.stringify(selectedKey) : 'null';
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inj.imgCsp} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
   .top { display:flex; gap:6px; align-items:center; padding:6px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
@@ -1577,6 +1579,9 @@ function storyOutlineHtml(graph: MissionGraph, nonce: string): string {
   .muted { color: var(--vscode-descriptionForeground); }
   .empty { padding:10px; color: var(--vscode-descriptionForeground); }
   button { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:2px 10px; cursor:pointer; font-size:12px; }
+  #detail-head { padding:8px 12px 0; }
+  #detail-conns { padding:0 12px 12px; }
+  .insp-sep { margin:8px 12px 0; border-top:1px solid var(--vscode-panel-border,#8883); }
 </style></head><body>
 <div class="top">
   <input id="q" type="search" placeholder="Search nodes…" autofocus>
@@ -1585,8 +1590,13 @@ function storyOutlineHtml(graph: MissionGraph, nonce: string): string {
 <div class="filters" id="filters"></div>
 <div class="split">
   <div class="list" id="list"></div>
-  <div class="detail" id="detail"><div class="empty">Select a node to see what connects to it.</div></div>
+  <div class="detail">
+    <div id="detail-head"><div class="empty">Select a node to edit it and see what connects to it.</div></div>
+    <div id="insp-mount"></div>
+    <div id="detail-conns"></div>
+  </div>
 </div>
+${inj.scripts}${inspectorFormScript(webview, nonce)}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const graph = ${data};
@@ -1632,19 +1642,22 @@ function storyOutlineHtml(graph: MissionGraph, nonce: string): string {
     sel = key;
     document.querySelectorAll('.row').forEach(r => r.classList.toggle('sel', r.dataset.k===key));
     const n = byKey[key];
-    const d = document.getElementById('detail');
-    if (!n) { d.innerHTML = '<div class="empty">Unknown node.</div>'; return; }
-    const out = edges.filter(e => e.from === key);
-    const inc = edges.filter(e => e.to === key);
-    d.innerHTML =
+    const head = document.getElementById('detail-head');
+    const conns = document.getElementById('detail-conns');
+    if (!n) { head.innerHTML = '<div class="empty">Unknown node.</div>'; conns.innerHTML=''; return; }
+    head.innerHTML =
       '<div class="dtitle">'+esc(n.display||n.key)+badges(n)+'</div>'
       + '<div class="dkey">'+esc(n.key)+' · '+esc(n.section||'')+'</div>'
-      + '<div class="dactions"><button id="open">Open source</button><button id="edit">Edit…</button></div>'
-      + group('Leads to', out, 'to') + group('Reached from', inc, 'from');
+      + '<div class="dactions"><button id="open">Open source</button></div>';
     document.getElementById('open').onclick = () => vscode.postMessage({ type:'goto', uri:n.uri, line:n.line });
-    document.getElementById('edit').onclick = () => vscode.postMessage({ type:'inspect', uri:n.uri, key:n.key });
-    d.querySelectorAll('.chip').forEach(c => c.onclick = () => select(c.dataset.k));
-    d.querySelectorAll('.src').forEach(s => s.onclick = (ev) => { ev.stopPropagation();
+    // The editable inspector loads inline (into #insp-mount) — no Edit button.
+    vscode.postMessage({ type:'inspect', uri:n.uri, key:n.key });
+    const out = edges.filter(e => e.from === key);
+    const inc = edges.filter(e => e.to === key);
+    conns.innerHTML = '<div class="insp-sep"></div>'
+      + group('Leads to', out, 'to') + group('Reached from', inc, 'from');
+    conns.querySelectorAll('.chip').forEach(c => c.onclick = () => select(c.dataset.k));
+    conns.querySelectorAll('.src').forEach(s => s.onclick = (ev) => { ev.stopPropagation();
       vscode.postMessage({ type:'goto', uri:s.dataset.uri, line:+s.dataset.line }); });
   }
   function group(title, list, endpoint) {
@@ -1657,7 +1670,24 @@ function storyOutlineHtml(graph: MissionGraph, nonce: string): string {
     }).join(' ');
     return '<div class="grp">'+title+' ('+list.length+')</div><div>'+chips+'</div>';
   }
+
+  // Integrated inspector: the extension answers 'inspect' with insp:render.
+  let inspHandle = null;
+  const inspMount = document.getElementById('insp-mount');
+  window.addEventListener('message', (e) => {
+    const m = e.data;
+    if (!m || typeof m.type !== 'string' || m.type.indexOf('insp:') !== 0) { return; }
+    if (m.type === 'insp:render') {
+      if (!inspHandle) { inspHandle = InspectorForm.mount(inspMount, vscode, { prefix: 'insp:', model: m.model, faceAvailable: ${inj.available} }); }
+      else { inspHandle.render(m.model); }
+    } else if (m.type === 'insp:patch' && inspHandle) { inspHandle.patch(m); }
+    else if (m.type === 'insp:setFace' && inspHandle) { inspHandle.setFace(m.value); }
+  });
+
   renderList();
+  const preselect = ${preselect};
+  if (preselect && byKey[preselect]) { select(preselect); }
+  else { vscode.postMessage({ type:'inspReady' }); }
 </script></body></html>`;
 }
 
@@ -1676,29 +1706,50 @@ async function showStoryOutline(): Promise<void> {
     return;
   }
   const panel = vscode.window.createWebviewPanel(
-    'amdStoryOutline', 'Story Outline', vscode.ViewColumn.Beside, { enableScripts: true });
+    'amdStoryOutline', 'Story Outline', vscode.ViewColumn.Beside,
+    { enableScripts: true, localResourceRoots: faceWebviewRoots() });
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
-  panel.webview.html = storyOutlineHtml(graph, nonce());
+  let selectedKey: string | undefined;
+  panel.webview.html = storyOutlineHtml(graph, nonce(), panel.webview, selectedKey);
+
+  // The integrated inspector: selecting a node loads its editable form inline
+  // (into #insp-mount) — same shared drawer the Story Graph uses.
+  const drawer: Inspector = {
+    webview: panel.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
+    prefix: 'insp:',
+    render: (d) => panel.webview.postMessage({ type: 'insp:render', model: formModel(d) }),
+    reveal: () => { /* the form is always visible in the detail pane */ },
+  };
+  drawerInspectors.add(drawer);
+  wireInspector(drawer);
 
   const refresh = async () => {
     try {
       const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
-      panel.webview.html = storyOutlineHtml(g, nonce());
+      panel.webview.html = storyOutlineHtml(g, nonce(), panel.webview, selectedKey);
     } catch (e) { output.appendLine(`Outline refresh failed: ${e}`); }
   };
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
-    if (e.document.languageId === 'amd') {
+    // Don't refresh while the drawer is applying its own edit (keeps the form).
+    if (e.document.languageId === 'amd' && !drawer.busy) {
       clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { void refresh(); }, 300);
     }
   });
-  panel.onDidDispose(() => docSub.dispose());
+  panel.onDidDispose(() => {
+    drawerInspectors.delete(drawer);
+    if (faceHost === drawer) { faceHost = undefined; }
+    docSub.dispose();
+  });
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') {
       openLocation(msg.uri, msg.line);
     } else if (msg?.type === 'inspect') {
-      showInspector(msg.uri, msg.key);
+      selectedKey = msg.key;
+      await loadNodeInto(drawer, msg.uri, msg.key);   // renders the form inline
+    } else if (msg?.type === 'inspReady') {
+      if (drawer.detail) { drawer.render(drawer.detail); }
     }
   });
 }
