@@ -18,7 +18,7 @@
   // fields the inspector edits.
   const CAT = {
     root:        { label: 'Screen',       cont: true,  fields: [] },
-    section:     { label: 'Section',      cont: true,  props: { area: '5,5,95,95' }, fields: [['area', 'Area  l,t,r,b']] },
+    section:     { label: 'Section',      cont: true,  props: { area: '5,5,95,95', style: '' }, fields: [['area', 'Area  l,t,r,b'], ['style', 'Style (background, border…)']] },
     sub_section: { label: 'Sub-section',  cont: true,  with: true, props: { style: '' }, fields: [['style', 'Style']] },
     row:         { label: 'Row',          cont: true,  props: { style: '' }, fields: [['style', 'Style']] },
     grid:        { label: 'Grid',         cont: true,  with: true, props: { columns: '3' }, fields: [['columns', 'Columns']] },
@@ -45,7 +45,7 @@
     for (const n of nodes) {
       const p = n.props;
       switch (n.type) {
-        case 'section': out.push(pad(ind) + 'gui_section("area: ' + q(p.area) + ';")'); out = out.concat(gen(n.children, ind)); break;
+        case 'section': out.push(pad(ind) + 'gui_section("area: ' + q(p.area) + ';' + q(p.style) + '")'); out = out.concat(gen(n.children, ind)); break;
         case 'row': out.push(pad(ind) + 'gui_row("' + q(p.style) + '")'); out = out.concat(gen(n.children, ind)); break;
         case 'sub_section': out.push(pad(ind) + 'with gui_sub_section("' + q(p.style) + '"):'); out = out.concat(body(n, ind + 1)); break;
         case 'grid': out.push(pad(ind) + 'with gui_grid(' + q(p.columns) + '):'); out = out.concat(body(n, ind + 1)); break;
@@ -101,7 +101,7 @@
   }
   function parseLine(s) {
     let m;
-    if ((m = s.match(/^gui_section\("area:\s*(.+?);?"\)$/))) { return { type: 'section', props: { area: m[1].trim() } }; }
+    if ((m = s.match(/^gui_section\("area:\s*([^;]*);?([\s\S]*)"\)$/))) { return { type: 'section', props: { area: m[1].trim(), style: m[2] } }; }
     if ((m = s.match(/^gui_row\("(.*)"\)$/))) { return { type: 'row', props: { style: m[1] } }; }
     if ((m = s.match(/^with gui_sub_section\("(.*)"\):$/))) { return { type: 'sub_section', with: true, props: { style: m[1] } }; }
     if ((m = s.match(/^with gui_grid\((.+?)\):$/))) { return { type: 'grid', with: true, props: { columns: m[1].trim() } }; }

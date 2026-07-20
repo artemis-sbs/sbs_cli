@@ -76,5 +76,11 @@ check('button style parsed', b.props.style === 'color:red;' && b.props.jump === 
 const lst = GuiModel.parse('with gui_list(a, row_height="3em") as x:\n    gui_text("$text:h;")').model.children[0];
 check('list row_height parsed', lst.props.row_height === '3em');
 
+// 6) section style round-trips; a plain section (no style) is unchanged.
+check('section style round-trip', GuiModel.generate(GuiModel.parse('gui_section("area: 5,5,95,95;background:#123;")').model) === 'gui_section("area: 5,5,95,95;background:#123;")');
+check('plain section unchanged', GuiModel.generate(GuiModel.parse('gui_section("area: 5,5,95,95;")').model) === 'gui_section("area: 5,5,95,95;")');
+const sec = GuiModel.parse('gui_section("area: 0,0,50,50;background:#1;")').model.children[0];
+check('section area/style split', sec.props.area === '0,0,50,50' && sec.props.style === 'background:#1;');
+
 if (failures) { console.log('\n' + failures + ' FAILED'); process.exit(1); }
 console.log('\nall passed');
