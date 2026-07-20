@@ -19,6 +19,7 @@ import {
   LanguageClientOptions,
   ServerOptions,
   Executable,
+  State,
 } from 'vscode-languageclient/node';
 
 let client: LanguageClient | undefined;
@@ -108,6 +109,23 @@ function resolveServer(): Executable {
 
   output.appendLine('Server: no Cosmos install found — falling back to `sbs` on PATH.');
   return { command: 'sbs', args, options: { shell: process.platform === 'win32' } };
+}
+
+// The LSP client starts asynchronously; a command fired before it reaches the
+// Running state throws "Client is not running". Wait (briefly) for it to come up,
+// restarting it if it had stopped, so tools opened during startup don't fail.
+async function ensureClientReady(timeoutMs = 8000): Promise<boolean> {
+  if (!client) { return false; }
+  if (client.isRunning()) { return true; }
+  if (client.state === State.Stopped) {
+    client.start().catch((e) => output.appendLine(`AMD language server restart failed: ${e}`));
+  }
+  return await new Promise<boolean>((resolve) => {
+    const done = (ok: boolean) => { clearTimeout(timer); sub.dispose(); resolve(ok); };
+    const timer = setTimeout(() => done(!!client && client.isRunning()), timeoutMs);
+    const sub = client!.onDidChangeState((e) => { if (e.newState === State.Running) { done(true); } });
+    if (client!.isRunning()) { done(true); }
+  });
 }
 
 function startClient(): void {
@@ -2457,6 +2475,10 @@ async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vsc
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
     return;
   }
+  if (!client.isRunning() && !(await ensureClientReady())) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is still starting — try again in a moment.');
+    return;
+  }
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
   let graph: MissionGraph;
@@ -2766,6 +2788,10 @@ async function showAmdResolver(uriArg?: string, column: vscode.ViewColumn = vsco
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
     return;
   }
+  if (!client.isRunning() && !(await ensureClientReady())) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is still starting — try again in a moment.');
+    return;
+  }
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
   let model: ResolveModel;
@@ -2803,6 +2829,10 @@ async function showAmdResolver(uriArg?: string, column: vscode.ViewColumn = vsco
 async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
+    return;
+  }
+  if (!client.isRunning() && !(await ensureClientReady())) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is still starting — try again in a moment.');
     return;
   }
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
@@ -2991,6 +3021,10 @@ async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
 async function showMap(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
+    return;
+  }
+  if (!client.isRunning() && !(await ensureClientReady())) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is still starting — try again in a moment.');
     return;
   }
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
