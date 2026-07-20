@@ -2442,15 +2442,28 @@ const AMD_TOOLBAR_CSS = `
   .amdtools button:not(.cur):hover { background:var(--vscode-button-secondaryHoverBackground,#555); }`;
 const AMD_TOOLBAR_JS = `for (const b of document.querySelectorAll('.amdtools button')) { if (!b.disabled) b.addEventListener('click', () => vscode.postMessage({ type:'openTool', tool:b.dataset.tool })); }`;
 
+// The last .amd a tool was opened for — a fallback so a panel with no document
+// of its own (the Mission Inspector) can still launch document tools.
+let lastAmdUri: string | undefined;
+function resolveAmdUri(preferred?: string): string | undefined {
+  if (preferred) { return preferred; }
+  const active = vscode.window.activeTextEditor;
+  if (active?.document.languageId === 'amd') { return active.document.uri.toString(); }
+  const vis = vscode.window.visibleTextEditors.find((e) => e.document.languageId === 'amd');
+  return vis ? vis.document.uri.toString() : lastAmdUri;
+}
+
 // Open a sibling tool for the same document, in the SAME editor group as the
 // launching panel (so tools stack as tabs, never split the layout further).
 function openAmdTool(tool: string, uri?: string, column?: vscode.ViewColumn): void {
   const col = column ?? vscode.ViewColumn.Beside;
-  if (tool === 'outline') { void showStoryOutline(uri, col); }
-  else if (tool === 'graph') { void showGraph(uri, col); }
-  else if (tool === 'resolver') { void showAmdResolver(uri, col); }
-  else if (tool === 'map') { void showMap(uri, col); }
-  else if (tool === 'inspector') { showMissionInspector(col); }
+  if (tool === 'inspector') { showMissionInspector(col); return; }
+  const u = resolveAmdUri(uri);
+  if (!u) { vscode.window.showWarningMessage('Artemis AMD: open an .amd file first to launch this tool.'); return; }
+  if (tool === 'outline') { void showStoryOutline(u, col); }
+  else if (tool === 'graph') { void showGraph(u, col); }
+  else if (tool === 'resolver') { void showAmdResolver(u, col); }
+  else if (tool === 'map') { void showMap(u, col); }
 }
 
 // One live panel per tool, keyed by tool name — so opening a tool reveals its
@@ -2481,6 +2494,7 @@ async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vsc
   }
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
+  lastAmdUri = uri;
   let graph: MissionGraph;
   try {
     graph = await client.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
@@ -2794,6 +2808,7 @@ async function showAmdResolver(uriArg?: string, column: vscode.ViewColumn = vsco
   }
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
+  lastAmdUri = uri;
   let model: ResolveModel;
   try {
     model = await client.sendRequest<ResolveModel>('amd/resolve', { textDocument: { uri } });
@@ -2837,6 +2852,7 @@ async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   }
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
+  lastAmdUri = uri;
   let graph: MissionGraph;
   try {
     graph = await client.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
@@ -3031,6 +3047,7 @@ async function showMap(uriArg?: string, column: vscode.ViewColumn = vscode.ViewC
   if (!uri) {
     return;
   }
+  lastAmdUri = uri;
   let map: MissionMap;
   try {
     map = await client.sendRequest<MissionMap>('amd/map', { textDocument: { uri } });
@@ -3653,6 +3670,14 @@ export function activate(context: vscode.ExtensionContext): void {
   extensionUri = context.extensionUri;
 
   // Mission Inspector: open it on a mast session, and feed it mast/inspect events.
+  // Remember the active .amd so document tools launched from a document-less
+  // panel (the Mission Inspector) know which mission to open.
+  if (vscode.window.activeTextEditor?.document.languageId === 'amd') {
+    lastAmdUri = vscode.window.activeTextEditor.document.uri.toString();
+  }
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor((ed) => {
+    if (ed?.document.languageId === 'amd') { lastAmdUri = ed.document.uri.toString(); }
+  }));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMissionInspector', () => showMissionInspector()));
   context.subscriptions.push(vscode.debug.onDidStartDebugSession((s) => {
     if (s.type === 'mast') { showMissionInspector(); }
