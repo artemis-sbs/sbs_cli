@@ -1143,6 +1143,8 @@ interface ResolveRef {
 }
 interface ResolveIssue { uri: string; line: number; col: number; severity: string; code: string; message: string; }
 interface ResolveModel { entities: ResolveEntity[]; refs: ResolveRef[]; issues: ResolveIssue[]; }
+// A ready-to-insert skeleton for a new record under a `## section` (amd/newInSection).
+interface NewInSection { line: number; text: string; key: string; archetype: string | null; exists: boolean; }
 
 type FocusDir = 'down' | 'up' | 'both';
 interface Focus { key: string; dir: FocusDir; hops: number; }
@@ -1338,7 +1340,9 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     const hue = sectionHue(sec);
     laneSvg += `<g class="lane" data-section="${esc(sec)}">`
       + `<rect x="0" y="${top}" width="${W}" height="${ht}" rx="6" fill="hsl(${hue},45%,50%)" fill-opacity="0.06" stroke="hsl(${hue},45%,55%)" stroke-opacity="0.3"/>`
-      + `<text x="12" y="${top + 15}" class="lanelabel" fill="hsl(${hue},60%,72%)">${esc(sec || 'ungrouped')}</text></g>`;
+      + `<text x="12" y="${top + 15}" class="lanelabel" fill="hsl(${hue},60%,72%)">${esc(sec || 'ungrouped')}</text>`
+      + (sec ? `<text x="${W - 46}" y="${top + 15}" class="laneadd" data-section="${esc(sec)}" fill="hsl(${hue},60%,72%)"><title>Add a new entity to this section</title>+ add</text>` : '')
+      + `</g>`;
   }
 
   const clip = (s: string) => (s.length > 26 ? s.slice(0, 25) + '…' : s);
@@ -1434,6 +1438,8 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   .ncaret:hover circle { stroke-width: 2.5; }
   .ncsign { fill: #fff; font-size: 12px; text-anchor: middle; pointer-events: none; }
   .lanelabel { font-size: 12px; font-weight: 600; }
+  .laneadd { font-size: 11px; cursor: pointer; opacity: 0.7; }
+  .laneadd:hover { opacity: 1; text-decoration: underline; }
   .blink { cursor: pointer; }
   .blink:hover rect { fill-opacity: 0.35; }
   .blabel { fill: var(--vscode-foreground); font-size: 10px; pointer-events: none; }
@@ -1500,6 +1506,10 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   // Toggling a section re-renders server-side (lanes recompact around it).
   for (const c of document.querySelectorAll('.filt input')) {
     c.addEventListener('change', () => vscode.postMessage({ type: 'toggleSection', section: c.dataset.section, hidden: !c.checked }));
+  }
+  // "+ add" on a lane label creates a new entity in that section.
+  for (const t of scroll.querySelectorAll('.laneadd')) {
+    t.addEventListener('click', (e) => { e.stopPropagation(); vscode.postMessage({ type: 'addEntity', section: t.dataset.section }); });
   }
 
   // Drag from one node to another to add a choice edge (- [display](target)).
@@ -2213,7 +2223,9 @@ function storyOutlineHtml(graph: MissionGraph, nonce: string, webview: vscode.We
   .split { display:flex; flex:1; min-height:0; }
   .list { width:42%; min-width:220px; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); }
   .detail { flex:1; overflow:auto; padding:8px 12px; }
-  .sec { padding:4px 10px 2px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); }
+  .sec { padding:4px 10px 2px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); display:flex; align-items:center; gap:6px; }
+  .addbtn { margin-left:auto; cursor:pointer; border:1px solid var(--vscode-panel-border,#8884); border-radius:3px; padding:0 6px; line-height:16px; color:var(--vscode-descriptionForeground); }
+  .addbtn:hover { color:var(--vscode-foreground); border-color:var(--vscode-focusBorder,#4ec9b0); background:var(--vscode-list-hoverBackground,#8881); }
   .row { padding:2px 10px 2px 20px; font-size:13px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-left:2px solid transparent; }
   .row:hover { background: var(--vscode-list-hoverBackground,#8881); }
   .row.sel { background: var(--vscode-list-activeSelectionBackground,#0a63c9); color: var(--vscode-list-activeSelectionForeground,#fff); border-left-color: var(--vscode-focusBorder,#4ec9b0); }
@@ -2287,7 +2299,8 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
       const group = nodes.filter(n => (n.section||'other') === s &&
         (!q || (n.display||'').toLowerCase().includes(q) || (n.key||'').toLowerCase().includes(q)));
       if (!group.length) continue;
-      parts.push('<div class="sec">'+esc(s)+' ('+group.length+')</div>');
+      const add = (s && s !== 'other') ? '<span class="addbtn" data-section="'+esc(s)+'" title="Add a new entity to this section">+ add</span>' : '';
+      parts.push('<div class="sec">'+esc(s)+' ('+group.length+')'+add+'</div>');
       for (const n of group) {
         shown++;
         parts.push('<div class="row'+(n.key===sel?' sel':'')+'" data-k="'+esc(n.key)+'">'
@@ -2297,6 +2310,8 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
     list.innerHTML = parts.join('') || '<div class="empty">No matching nodes.</div>';
     document.getElementById('count').textContent = shown + ' / ' + nodes.length;
     list.querySelectorAll('.row').forEach(r => r.onclick = () => select(r.dataset.k));
+    list.querySelectorAll('.addbtn').forEach(b => b.onclick = (ev) => { ev.stopPropagation();
+      vscode.postMessage({ type:'addEntity', section: b.dataset.section }); });
   }
   function badges(n){ const p=n.problems; if(!p) return '';
     return (p.error?' <span class="badge err">'+p.error+'</span>':'')+(p.warning?' <span class="badge warn">'+p.warning+'</span>':''); }
@@ -2442,6 +2457,8 @@ async function showStoryOutline(): Promise<void> {
       await loadNodeInto(drawer, msg.uri, msg.key);   // renders the form inline
     } else if (msg?.type === 'inspReady') {
       if (drawer.detail) { drawer.render(drawer.detail); }
+    } else if (msg?.type === 'addEntity') {
+      await addEntityInSection(uri, msg.section);
     }
   });
 }
@@ -2465,7 +2482,9 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   .pane.model { border-right:1px solid var(--vscode-panel-border,#8883); }
   .bar { padding:4px 10px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); border-bottom:1px solid var(--vscode-panel-border,#8882); display:flex; gap:8px; align-items:center; z-index:1; }
   .bar b { color: var(--vscode-foreground); }
-  .grp { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--vscode-descriptionForeground); padding:8px 10px 2px; }
+  .grp { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--vscode-descriptionForeground); padding:8px 10px 2px; display:flex; align-items:center; gap:6px; }
+  .addbtn { margin-left:auto; cursor:pointer; border:1px solid var(--vscode-panel-border,#8884); border-radius:3px; padding:0 6px; line-height:16px; color:var(--vscode-descriptionForeground); }
+  .addbtn:hover { color:var(--vscode-foreground); border-color:var(--vscode-focusBorder,#4ec9b0); background:var(--vscode-list-hoverBackground,#8881); }
   .ent { display:flex; align-items:center; gap:6px; padding:2px 10px 2px 6px; cursor:pointer; white-space:nowrap; }
   .ent:hover { background: var(--vscode-list-hoverBackground,#8881); }
   .ent.sel { background: var(--vscode-list-activeSelectionBackground,#0a63c9); color:#fff; }
@@ -2554,13 +2573,16 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
     };
     const ents = MODEL.entities.filter(match);
     document.getElementById('mCount').textContent = ents.length ? '('+ents.length+')' : '';
-    // group by archetype, ordered
+    // group by archetype, ordered; nodes with no archetype (e.g. dialogue prose)
+    // fall back to their section so they read as "dialogue", not "other".
     const groups = {};
-    for (const e of ents) (groups[e.archetype||'other'] = groups[e.archetype||'other'] || []).push(e);
+    for (const e of ents) { const gk = e.archetype || e.section || 'other'; (groups[gk] = groups[gk] || []).push(e); }
     const names = Object.keys(groups).sort((a,b) => (archRank(a)-archRank(b)) || a.localeCompare(b));
     const out = [];
     for (const g of names){
-      out.push('<div class="grp">'+esc(g||'other')+' ('+groups[g].length+')</div>');
+      const section = (groups[g][0] && groups[g][0].section) || '';
+      const add = section ? '<span class="addbtn" data-section="'+esc(section)+'" title="Add a new entity to this section">+ add</span>' : '';
+      out.push('<div class="grp">'+esc(g||'other')+' ('+groups[g].length+')'+add+'</div>');
       for (const e of groups[g]) out.push(entRow(e));
     }
     document.getElementById('tree').innerHTML = out.join('') || '<div class="empty">No entities match.</div>';
@@ -2576,7 +2598,7 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
     if (e.orphan) badges += ' <span class="badge orphan" title="unreachable — nothing reveals it and it has no When:/signal trigger">orphan</span>';
     let row = '<div class="ent'+(sel===e.key?' sel':'')+'" data-k="'+esc(e.key)+'">'
       + '<span class="car" data-car="'+esc(e.key)+'">'+caret+'</span>'
-      + '<span class="dot" style="background:'+archColor(e.archetype)+'"></span>'
+      + '<span class="dot" style="background:'+archColor(e.archetype || e.section)+'"></span>'
       + '<span class="ename">'+esc(e.display)+'</span> <span class="ekey">'+esc(e.key)+'</span>'
       + badges + '</div>';
     if (hasRefs && expanded[e.key]){
@@ -2597,6 +2619,9 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   function wireTree(){
     // Single-click browses in the panel (select / expand); double-click opens the
     // source. Nothing moves the editor on a plain click.
+    for (const b of document.querySelectorAll('.addbtn')){
+      b.onclick = (ev) => { ev.stopPropagation(); vscode.postMessage({ type:'addEntity', section: b.dataset.section }); };
+    }
     for (const c of document.querySelectorAll('.car')){
       c.onclick = (ev) => { ev.stopPropagation(); const k = c.dataset.car; if (!(outRefs[k]||[]).length) return;
         expanded[k] = !expanded[k]; renderTree(); };
@@ -2650,6 +2675,23 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
 </script></body></html>`;
 }
 
+// Insert a new record skeleton at the end of `section` (creating the section
+// header if absent), then open the inspector on it. Shared by the "+" affordance
+// in the Story Outline, Story Graph, and AMD Resolver. The panels auto-refresh on
+// the resulting document change.
+async function addEntityInSection(uri: string, section: string): Promise<void> {
+  if (!client || !section) { return; }
+  let r: NewInSection | null;
+  try {
+    r = await client.sendRequest<NewInSection | null>('amd/newInSection', { textDocument: { uri }, section });
+  } catch (e) { output.appendLine(`Add entity failed: ${e}`); return; }
+  if (!r) { return; }
+  const edit = new vscode.WorkspaceEdit();
+  edit.insert(vscode.Uri.parse(uri), new vscode.Position(r.line, 0), r.text);
+  await vscode.workspace.applyEdit(edit);
+  await showInspector(uri, r.key);   // open the new node's form to fill it in
+}
+
 async function showAmdResolver(): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
@@ -2680,8 +2722,9 @@ async function showAmdResolver(): Promise<void> {
     if (e.document.languageId === 'amd') { clearTimeout(timer); timer = setTimeout(() => { void refresh(); }, 300); }
   });
   panel.onDidDispose(() => docSub.dispose());
-  panel.webview.onDidReceiveMessage((msg) => {
+  panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg?.type === 'goto') { openLocation(msg.uri, msg.line, { preserveFocus: true }); }
+    else if (msg?.type === 'addEntity') { await addEntityInSection(uri, msg.section); }
   });
 }
 
@@ -2748,6 +2791,8 @@ async function showGraph(): Promise<void> {
     } else if (msg?.type === 'toggleSection') {
       if (msg.hidden) { hiddenSections.add(msg.section); } else { hiddenSections.delete(msg.section); }
       scheduleRefresh();
+    } else if (msg?.type === 'addEntity') {
+      await addEntityInSection(uri, msg.section);
     } else if (msg?.type === 'inspect') {
       await loadNodeInto(drawer, msg.uri, msg.key);
     } else if (msg?.type === 'inspReady') {
