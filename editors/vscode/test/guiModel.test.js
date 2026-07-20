@@ -198,5 +198,21 @@ const ext = [
 ].join('\n');
 check('unmatched handler preserved', GuiModel.generate(GuiModel.parse(ext).model) === ext);
 
+// 12) a web page (//web/<path>) round-trips and sets the web flag; a gui still uses ===.
+const web = [
+  '//web/scores',
+  '    gui_section("area: 5,5,95,95;")',
+  '    gui_text("$text:Standings;")',
+  '    gui_button("Refresh")',
+  '    on gui_message(gui_button("Refresh")):',
+  '        web_refresh("scores")',
+  '    await gui()',
+].join('\n');
+check('web page round-trip', GuiModel.generate(GuiModel.parse(web).model) === web);
+const wm = GuiModel.parse(web).model;
+check('web flag + path parsed', wm.props.web === true && wm.props.label === 'scores');
+const guiRt = '=== my_gui\n    gui_section("area: 0,0,100,100;")\n    await gui()';
+check('gui still uses ===', GuiModel.parse(guiRt).model.props.web === false && GuiModel.generate(GuiModel.parse(guiRt).model) === guiRt);
+
 if (failures) { console.log('\n' + failures + ' FAILED'); process.exit(1); }
 console.log('\nall passed');

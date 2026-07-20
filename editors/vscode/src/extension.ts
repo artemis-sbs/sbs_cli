@@ -1582,7 +1582,7 @@ function mediaRoots(): vscode.Uri[] {
 // direction. Not a pixel canvas (that's a later phase); this composes the layout
 // as a tree (like the Story Outline) and emits code you can see live. Codegen +
 // parser live in the shared, unit-tested media/guiModel.js.
-function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false): string {
+function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false, webMode = false): string {
   const modelUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri!, 'media', 'guiModel.js'));
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
@@ -1658,8 +1658,8 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   .pv-grip { position:absolute; left:-1px; top:-1px; width:14px; height:14px; background:#4ec9b0aa; cursor:move; z-index:3; }
 </style></head><body>
 <div class="top">
-  <b>GUI Editor</b>
-  <span class="muted">compose a layout → generate MAST</span>
+  <b>${webMode ? 'Web Page Editor' : 'GUI Editor'}</b>
+  <span class="muted">${webMode ? 'compose a //web/ page → MAST' : 'compose a layout → generate MAST'}</span>
   <span style="flex:1"></span>
   <button id="undo" title="Undo (Ctrl/Cmd-Z)">↶</button>
   <button id="redo" title="Redo (Ctrl/Cmd-Shift-Z)">↷</button>
@@ -1697,7 +1697,8 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const DOCMODE = ${docMode};                    // true = backing a .gui.mast file (two-way sync)
-  let idc = 0, model = { id:0, type:'root', props:{ label:'my_gui' }, children: [] }, sel = null;
+  const WEBMODE = ${webMode};                    // true = a .web.mast //web/<path> page
+  let idc = 0, model = { id:0, type:'root', props: WEBMODE ? { label:'page', web:true } : { label:'my_gui' }, children: [] }, sel = null;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
   // Element catalog + code-gen + parser come from the shared media/guiModel.js
@@ -2036,9 +2037,14 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     if (!n) { box.innerHTML = '<div class="empty">Select an element to edit its properties.</div>'; return; }
     const c = CAT[n.type] || { label:n.type, fields:[] };
     if (n.type==='root'){
-      box.innerHTML = '<div class="prow"><b>Screen</b></div>'
-        + '<div class="prow"><label>Label name</label><input data-k="label" value="'+esc((n.props&&n.props.label)||'my_gui')+'"></div>'
-        + '<div class="muted" style="padding:4px 0">The gui is written under <b>=== '+esc((n.props&&n.props.label)||'my_gui')+'</b> and ends with await gui(). Sections live under it.</div>';
+      const web = !!(n.props && n.props.web);
+      const lbl = (n.props&&n.props.label) || (web?'page':'my_gui');
+      box.innerHTML = '<div class="prow"><b>'+(web?'Web page':'Screen')+'</b></div>'
+        + '<div class="prow"><label>'+(web?'Web path':'Label name')+'</label><input data-k="label" value="'+esc(lbl)+'"></div>'
+        + '<div class="muted" style="padding:4px 0">'
+        + (web ? 'Served at <b>//web/'+esc(lbl)+'</b> (open <code>/web/'+esc(lbl)+'</code> in a browser via <code>sbs web</code>). Ends with await gui().'
+               : 'The gui is written under <b>=== '+esc(lbl)+'</b> and ends with await gui(). Sections live under it.')
+        + '</div>';
       const inp = box.querySelector('[data-k]');
       inp.oninput = function(){ n.props.label = inp.value; renderCode(); recordHistorySoon(); };
       return;
@@ -2090,7 +2096,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   document.getElementById('insert').onclick = function(){ vscode.postMessage({ type:'insert', code: code() }); };
   document.getElementById('mock').onclick = function(){ vscode.postMessage({ type:'mockPreview', code: code() }); };
   document.getElementById('load').onclick = function(){ vscode.postMessage({ type:'loadRequest' }); };
-  document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', props:{ label:'my_gui' }, children: [] }; sel = null; recordHistory(); render(); };
+  document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', props: WEBMODE ? { label:'page', web:true } : { label:'my_gui' }, children: [] }; sel = null; recordHistory(); render(); };
 
   // --- round-trip: parse the editor's own generated block back into the model
   //     (shared media/guiModel.js). Unrecognised lines become 'raw' and re-emit
@@ -2098,6 +2104,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   function loadFromCode(codeText){
     const r = GuiModel.parse(codeText);
     model = r.model; idc = r.nextId; sel = null; resetHistory();
+    if (WEBMODE){ model.props.web = true; if (model.props.label==='my_gui') model.props.label='page'; }  // a .web.mast is always a //web/ page
     if (DOCMODE) { lastSent = code(); loaded = true; }   // now safe to sync; opening must not rewrite the file
     render();
   }
@@ -2280,7 +2287,8 @@ class GuiFileEditorProvider implements vscode.CustomTextEditorProvider {
   resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
     panel.webview.options = { enableScripts: true, localResourceRoots: mediaRoots() };
     const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
-    panel.webview.html = guiEditorHtml(nonce, panel.webview, true);
+    const web = document.uri.path.endsWith('.web.mast');   // a //web/ page vs a gui
+    panel.webview.html = guiEditorHtml(nonce, panel.webview, true, web);
 
     let writing = false;   // suppress the change we cause ourselves
     const update = () => { void panel.webview.postMessage({ type: 'update', code: document.getText() }); };

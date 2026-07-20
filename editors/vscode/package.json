@@ -16,9 +16,10 @@
     "customEditors": [
       {
         "viewType": "amd.guiFileEditor",
-        "displayName": "GUI Editor",
+        "displayName": "GUI / Web Page Editor",
         "selector": [
-          { "filenamePattern": "*.gui.mast" }
+          { "filenamePattern": "*.gui.mast" },
+          { "filenamePattern": "*.web.mast" }
         ],
         "priority": "default"
       }
@@ -93,7 +94,7 @@
         { "command": "amd.guiEditor" },
         { "command": "amd.showPreview", "when": "editorLangId == amd" },
         { "command": "amd.previewInSession", "when": "editorLangId == amd" },
-        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.gui\\.mast$/" },
+        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.(gui|web)\\.mast$/" },
         { "command": "amd.newFile" }
       ],
       "editor/title": [
@@ -104,7 +105,7 @@
         { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation@5" },
         { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation@6" },
         { "command": "amd.showMissionInspector", "when": "editorLangId == amd", "group": "navigation@7" },
-        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.gui\\.mast$/ && activeEditor == 'workbench.editors.files.textFileEditor'", "group": "navigation@8" }
+        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.(gui|web)\\.mast$/ && activeEditor == 'workbench.editors.files.textFileEditor'", "group": "navigation@8" }
       ]
     },
     "languages": [

@@ -144,8 +144,10 @@
       q(h.body).split('\n').forEach(function (ln) { lines.push('    ' + ln); });
     });
     lines.push('await gui()');
-    const label = (model.props && model.props.label) || 'my_gui';
-    return '=== ' + label + '\n' + lines.map(function (l) { return l ? '    ' + l : l; }).join('\n');
+    const web = !!(model.props && model.props.web);
+    const label = (model.props && model.props.label) || (web ? 'page' : 'my_gui');
+    const head = web ? ('//web/' + label) : ('=== ' + label);   // a web page is a //web/<path> route
+    return head + '\n' + lines.map(function (l) { return l ? '    ' + l : l; }).join('\n');
   }
 
   // --- round-trip parse: MAST lines -> model ---
@@ -259,12 +261,14 @@
       }
     }
     const lines = String(text || '').replace(/\r/g, '').split('\n');
-    // A leading `=== <label>` names the gui; its body is indented one level.
-    let start = 0, base = 0, label = 'my_gui';
-    const lm = (lines[0] || '').match(/^===+\s*(\w+)/);
-    if (lm) { label = lm[1]; start = 1; base = 4; }
+    // A leading `=== <label>` names a gui; `//web/<path>` names a web page. Its
+    // body is indented one level.
+    let start = 0, base = 0, label = 'my_gui', web = false;
+    const wm = (lines[0] || '').match(/^\/\/web\/(\S+)/);
+    if (wm) { label = wm[1]; web = true; start = 1; base = 4; }
+    else { const lm = (lines[0] || '').match(/^===+\s*(\w+)/); if (lm) { label = lm[1]; start = 1; base = 4; } }
     const r = parseStatements(lines, start, base);
-    const rootNode = { id: 0, type: 'root', props: { label: label }, children: [] };
+    const rootNode = { id: 0, type: 'root', props: { label: label, web: web }, children: [] };
     // Handlers (on gui_message) sit after the layout — pull them out, build the
     // layout, then attach each handler's body to its button as on_click.
     const handlers = [];
