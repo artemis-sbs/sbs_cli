@@ -1986,7 +1986,7 @@ async function ensureMockRunning(missionDir: string, port: number): Promise<bool
     const child = cp.spawn(base.command, args, { cwd: base.cwd, windowsHide: true });
     child.stdout?.on('data', (d: Buffer) => output.append(d.toString()));
     child.stderr?.on('data', (d: Buffer) => output.append(d.toString()));
-    child.on('exit', () => mockRunners.delete(port));
+    child.on('exit', () => { mockRunners.delete(port); previewOpened.delete(port); });
     mockRunners.set(port, child);
     previewOpened.delete(port);   // fresh mock → its preview tab needs (re)opening
   }
@@ -3175,5 +3175,8 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): Thenable<void> | undefined {
+  // Kill any preview mocks we started so they don't outlive the editor.
+  for (const child of mockRunners.values()) { killTree(child.pid); }
+  mockRunners.clear();
   return client?.stop();
 }
