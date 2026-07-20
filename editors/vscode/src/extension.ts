@@ -1615,9 +1615,8 @@ function guiEditorHtml(nonce: string, docMode = false): string {
   <div class="mid">
     <div class="tabs">
       <button id="tPreview" class="on">Preview</button>
-      <button id="tCode">Code</button>
+      <button id="tCode" title="Code">Code</button>
       <span style="flex:1"></span>
-      <button id="astext" title="Open this file in the full text editor" style="display:none">Edit as text</button>
       <button id="copy">Copy</button>
       <button id="insert" class="primary" title="Replace a # &lt;gui-designer&gt; … # &lt;/gui-designer&gt; block in the active .mast, or insert at the cursor">Insert into file</button>
     </div>
@@ -1906,8 +1905,8 @@ function guiEditorHtml(nonce: string, docMode = false): string {
     return out;
   }
   function body(n, ind){ const g = gen(n.children, ind); return g.length ? g : [pad(ind)+'gui_blank()   # (empty - add widgets)']; }
-  function code(){ const g = gen(model.children, 0); return g.length ? g.join('\\n') : '# (nothing yet)'; }
-  function renderCode(){ document.getElementById('code').textContent = code(); }
+  function code(){ return gen(model.children, 0).join('\\n'); }   // '' when empty — never emits a placeholder
+  function renderCode(){ const c = code(); document.getElementById('code').textContent = c || '# (nothing yet)'; }
 
   document.getElementById('copy').onclick = function(){ vscode.postMessage({ type:'copy', code: code() }); };
   document.getElementById('insert').onclick = function(){ vscode.postMessage({ type:'insert', code: code() }); };
@@ -1946,7 +1945,7 @@ function guiEditorHtml(nonce: string, docMode = false): string {
     const out = [];
     while (i < lines.length){
       const raw = lines[i];
-      if (!raw.trim()){ i++; continue; }             // skip blanks; '#' lines become raw (kept)
+      if (!raw.trim() || raw.trim()==='# (nothing yet)'){ i++; continue; }   // skip blanks + the stray empty placeholder
       const ind = indentOf(raw);
       if (ind < base) break;
       if (ind > base){ i++; continue; }
@@ -1988,10 +1987,12 @@ function guiEditorHtml(nonce: string, docMode = false): string {
   });
 
   if (DOCMODE) {
-    // The document is the source of truth; hide the marked-region / new actions,
-    // and offer the toggle back to the full text editor.
+    // The document is the source of truth; hide the marked-region / new actions.
     ['load','insert','clear'].forEach(function(idv){ const el = document.getElementById(idv); if (el) el.style.display='none'; });
-    const at = document.getElementById('astext'); if (at) { at.style.display=''; at.onclick = function(){ vscode.postMessage({ type:'openText' }); }; }
+    // In file mode the raw text IS the code, so the Code tab opens the full text
+    // editor instead of an in-webview pane.
+    const tc = document.getElementById('tCode'); tc.title = 'Open the full text editor';
+    tc.onclick = function(){ vscode.postMessage({ type:'openText' }); };
     vscode.postMessage({ type:'ready' });          // ask the provider for the current document text
   }
   render();
