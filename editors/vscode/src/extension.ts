@@ -1540,6 +1540,243 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
 
 // --- Story Outline: a scalable list/tree + focus-detail view over the SAME
 // `amd/graph` model as the diagram. Where the diagram becomes a hairball past a
+// --- GUI Editor: a structural composer that generates MAST -------------------
+// Per MISSION_TOOLS_PLAN.md §4 (phase G1): a palette + design tree + properties
+// panel that generate `gui_*` MAST into a marked region — the safe one-way author
+// direction. Not a pixel canvas (that's a later phase); this composes the layout
+// as a tree (like the Story Outline) and emits code you can see live.
+function guiEditorHtml(nonce: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
+  .top { display:flex; gap:6px; align-items:center; padding:5px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); flex-wrap:wrap; }
+  .top b { font-size:12px; }
+  .cols { display:flex; flex:1; min-height:0; }
+  .pal { width:150px; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); padding:4px; }
+  .pal .grp { font-size:10px; text-transform:uppercase; color:var(--vscode-descriptionForeground); margin:8px 4px 2px; }
+  .pal button { display:block; width:100%; text-align:left; margin:2px 0; }
+  .mid { flex:1; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); padding:6px; }
+  .props { width:250px; overflow:auto; padding:8px; }
+  .bottom { height:34%; min-height:120px; border-top:1px solid var(--vscode-panel-border,#8882); display:flex; flex-direction:column; }
+  .bottom .bar { display:flex; gap:6px; align-items:center; padding:4px 10px; font-size:11px; color:var(--vscode-descriptionForeground); }
+  pre#code { flex:1; margin:0; overflow:auto; padding:6px 10px; font-family: var(--vscode-editor-font-family,monospace); font-size:12px; white-space:pre; }
+  button { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:3px 8px; cursor:pointer; font-size:12px; }
+  button.primary { background: var(--vscode-button-background,#0a63c9); color: var(--vscode-button-foreground,#fff); }
+  .node { padding:2px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; }
+  .node:hover { background: var(--vscode-list-hoverBackground,#8881); }
+  .node.sel { background: var(--vscode-list-activeSelectionBackground,#0a63c9); color:#fff; }
+  .node .ty { color: var(--vscode-symbolIcon-classForeground,#4ec9b0); }
+  .node.sel .ty { color:#cff; }
+  .node .lbl { color: var(--vscode-descriptionForeground); font-size:11px; }
+  .node.sel .lbl { color:#dfe; }
+  .kids { margin-left:14px; border-left:1px solid var(--vscode-panel-border,#8883); padding-left:4px; }
+  .prow { margin:6px 0; }
+  .prow label { display:block; font-size:11px; color:var(--vscode-descriptionForeground); margin-bottom:2px; }
+  .prow input, .prow textarea { width:100%; box-sizing:border-box; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:3px; padding:3px 6px; font-family:inherit; font-size:12px; }
+  .empty { color: var(--vscode-descriptionForeground); padding:8px; font-size:12px; }
+  .muted { color: var(--vscode-descriptionForeground); }
+  .actions { display:flex; gap:4px; margin:6px 0; flex-wrap:wrap; }
+  .actions button { font-size:11px; padding:2px 6px; }
+</style></head><body>
+<div class="top">
+  <b>GUI Editor</b>
+  <span class="muted">compose a layout → generate MAST</span>
+  <span style="flex:1"></span>
+  <button id="clear">New</button>
+</div>
+<div class="cols">
+  <div class="pal" id="pal"></div>
+  <div class="mid"><div id="tree"></div></div>
+  <div class="props" id="props"><div class="empty">Select an element to edit its properties.</div></div>
+</div>
+<div class="bottom">
+  <div class="bar"><b style="color:var(--vscode-foreground)">Generated MAST</b><span style="flex:1"></span>
+    <button id="copy">Copy</button>
+    <button id="insert" class="primary" title="Replace a # &lt;gui-designer&gt; … # &lt;/gui-designer&gt; block in the active .mast, or insert at the cursor">Insert into file</button>
+  </div>
+  <pre id="code"></pre>
+</div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  let idc = 0, model = { children: [] }, sel = null;
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // Element catalog: container flag, default props, and which fields to edit.
+  const CAT = {
+    section:     { label:'Section',      cont:true,  with:false, props:{area:'5,5,95,95'}, fields:[['area','Area  l,t,r,b']] },
+    sub_section: { label:'Sub-section',  cont:true,  with:true,  props:{style:''}, fields:[['style','Style']] },
+    row:         { label:'Row',          cont:true,  with:false, props:{style:''}, fields:[['style','Style']] },
+    grid:        { label:'Grid',         cont:true,  with:true,  props:{columns:'3'}, fields:[['columns','Columns']] },
+    list:        { label:'List',         cont:true,  with:true,  props:{items:'items', as:'item', select:'true', title:''}, fields:[['items','Items variable'],['as','Row variable'],['select','Select (true/false)'],['title','Title (optional)']] },
+    text:        { label:'Text',         cont:false, props:{text:'Hello', style:''}, fields:[['text','Text'],['style','Style (optional)']] },
+    button:      { label:'Button',       cont:false, props:{text:'OK', jump:''}, fields:[['text','Label'],['jump','Jump to label (optional)']] },
+    checkbox:    { label:'Checkbox',     cont:false, props:{props:'state:False;', style:''}, fields:[['props','Props'],['style','Style']] },
+    slider:      { label:'Slider',       cont:false, props:{props:'low:0;high:100;', style:''}, fields:[['props','Props'],['style','Style']] },
+    input:       { label:'Input',        cont:false, props:{var:'value', style:''}, fields:[['var','Bind variable'],['style','Style']] },
+    face:        { label:'Face',         cont:false, props:{var:'face', style:''}, fields:[['var','Face variable'],['style','Style']] },
+    icon:        { label:'Icon',         cont:false, props:{props:'icon_index:1;', style:''}, fields:[['props','Props'],['style','Style']] },
+    image:       { label:'Image',        cont:false, props:{props:'', style:''}, fields:[['props','Props'],['style','Style']] },
+    blank:       { label:'Blank',        cont:false, props:{count:'1'}, fields:[['count','Count']] },
+    table:       { label:'Table',        cont:false, props:{items:'rows', columns:'[{\\'key\\':\\'name\\',\\'label\\':\\'Name\\'}]', select:'true'}, fields:[['items','Items variable'],['columns','Columns (list of dicts)'],['select','Select (true/false)']] },
+  };
+  const PALETTE = [
+    ['Containers', ['section','sub_section','row','grid','list']],
+    ['Widgets', ['text','button','checkbox','slider','input','face','icon','image','blank','table']],
+  ];
+
+  function mk(type){ const c = CAT[type]; const n = { id:++idc, type, props: Object.assign({}, c.props) }; if (c.cont) n.children = []; return n; }
+  function find(id, nodes, parent){ nodes = nodes || model.children; for (const n of nodes){ if (n.id===id) return {n, parent:parent||model, list:nodes}; if (n.children){ const r = find(id, n.children, n); if (r) return r; } } return null; }
+  function selNode(){ return sel==null ? null : (find(sel)||{}).n; }
+
+  // --- palette ---
+  const pal = document.getElementById('pal');
+  pal.innerHTML = PALETTE.map(function(g){
+    return '<div class="grp">'+g[0]+'</div>' + g[1].map(function(t){ return '<button data-add="'+t+'">'+CAT[t].label+'</button>'; }).join('');
+  }).join('');
+  pal.querySelectorAll('button[data-add]').forEach(function(b){ b.onclick = function(){ addNode(b.dataset.add); }; });
+
+  function addNode(type){
+    const n = mk(type);
+    const s = selNode();
+    if (s && s.children) { s.children.push(n); }          // into selected container
+    else if (s) { const r = find(sel); r.list.push(n); }   // sibling of selected leaf
+    else { model.children.push(n); }                        // top level
+    sel = n.id; render();
+  }
+
+  // --- tree ---
+  function render(){ renderTree(); renderProps(); renderCode(); }
+  function renderTree(){
+    const t = document.getElementById('tree');
+    if (!model.children.length) { t.innerHTML = '<div class="empty">Add elements from the palette. A layout is Sections → Rows → widgets.</div>'; return; }
+    t.innerHTML = model.children.map(nodeHtml).join('');
+    t.querySelectorAll('.node').forEach(function(el){ el.onclick = function(ev){ ev.stopPropagation(); sel = +el.dataset.id; render(); }; });
+  }
+  function nodeHtml(n){
+    const c = CAT[n.type];
+    const lbl = summary(n);
+    let h = '<div class="node'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'"><span class="ty">'+c.label+'</span> <span class="lbl">'+esc(lbl)+'</span></div>';
+    if (n.children) h += '<div class="kids">'+ (n.children.length ? n.children.map(nodeHtml).join('') : '<div class="empty">empty</div>') +'</div>';
+    return h;
+  }
+  function summary(n){ const p=n.props;
+    switch(n.type){
+      case 'section': return p.area; case 'row': return p.style||''; case 'sub_section': return p.style||'';
+      case 'grid': return p.columns+' cols'; case 'list': return p.items+' as '+(p.as||'item');
+      case 'text': return p.text; case 'button': return p.text; case 'input': return p.var; case 'face': return p.var;
+      case 'blank': return p.count; case 'table': return p.items; default: return p.props||'';
+    }
+  }
+
+  // --- properties ---
+  function renderProps(){
+    const box = document.getElementById('props'); const n = selNode();
+    if (!n) { box.innerHTML = '<div class="empty">Select an element to edit its properties.</div>'; return; }
+    const c = CAT[n.type];
+    let h = '<div class="prow"><b>'+c.label+'</b></div>';
+    h += '<div class="actions">'
+       + '<button data-act="up">↑</button><button data-act="down">↓</button>'
+       + '<button data-act="del">Delete</button></div>';
+    h += c.fields.map(function(f){
+      const key=f[0], label=f[1], val=n.props[key]==null?'':n.props[key];
+      const big = (key==='columns');
+      return '<div class="prow"><label>'+esc(label)+'</label>'
+        + (big ? '<textarea rows="3" data-k="'+key+'">'+esc(val)+'</textarea>'
+               : '<input data-k="'+key+'" value="'+esc(val)+'">')+'</div>';
+    }).join('');
+    box.innerHTML = h;
+    box.querySelectorAll('[data-k]').forEach(function(inp){ inp.oninput = function(){ n.props[inp.dataset.k] = inp.value; renderTree(); renderCode(); }; });
+    box.querySelectorAll('[data-act]').forEach(function(b){ b.onclick = function(){ act(b.dataset.act); }; });
+  }
+  function act(a){
+    const r = find(sel); if (!r) return;
+    const i = r.list.indexOf(r.n);
+    if (a==='del'){ r.list.splice(i,1); sel=null; }
+    else if (a==='up' && i>0){ r.list.splice(i,1); r.list.splice(i-1,0,r.n); }
+    else if (a==='down' && i<r.list.length-1){ r.list.splice(i,1); r.list.splice(i+1,0,r.n); }
+    render();
+  }
+
+  // --- code generation (model -> MAST) ---
+  function q(s){ return String(s==null?'':s); }
+  function textProps(p){ let s = '$text:'+q(p.text)+';'; if (p.style) s += q(p.style); return s; }
+  function pad(n){ let s=''; for (let i=0;i<n;i++) s+='    '; return s; }
+  function gen(nodes, ind){
+    let out = [];
+    for (const n of nodes){ const p = n.props;
+      switch(n.type){
+        case 'section': out.push(pad(ind)+'gui_section("area: '+q(p.area)+';")'); out = out.concat(gen(n.children, ind)); break;
+        case 'row': out.push(pad(ind)+'gui_row("'+q(p.style)+'")'); out = out.concat(gen(n.children, ind)); break;
+        case 'sub_section': out.push(pad(ind)+'with gui_sub_section("'+q(p.style)+'"):'); out = out.concat(body(n, ind+1)); break;
+        case 'grid': out.push(pad(ind)+'with gui_grid('+q(p.columns)+'):'); out = out.concat(body(n, ind+1)); break;
+        case 'list': { let a = 'gui_list('+q(p.items); if (p.select==='true') a+=', select=True'; if (p.title) a+=', title="'+q(p.title)+'"'; a+=') as '+(q(p.as)||'item')+':';
+          out.push(pad(ind)+'with '+a); out = out.concat(body(n, ind+1)); break; }
+        case 'text': out.push(pad(ind)+'gui_text("'+textProps(p)+'")'); break;
+        case 'button': if (q(p.jump)){ out.push(pad(ind)+'gui_button("'+q(p.text)+'"):'); out.push(pad(ind+1)+'jump '+q(p.jump)); } else out.push(pad(ind)+'gui_button("'+q(p.text)+'")'); break;
+        case 'checkbox': out.push(pad(ind)+'gui_checkbox("'+q(p.props)+'", "'+q(p.style)+'")'); break;
+        case 'slider': out.push(pad(ind)+'gui_slider("'+q(p.props)+'", "'+q(p.style)+'")'); break;
+        case 'input': out.push(pad(ind)+'gui_input("", var="'+q(p.var)+'")'); break;
+        case 'face': out.push(pad(ind)+'gui_face('+q(p.var)+')'); break;
+        case 'icon': out.push(pad(ind)+'gui_icon("'+q(p.props)+'", "'+q(p.style)+'")'); break;
+        case 'image': out.push(pad(ind)+'gui_image("'+q(p.props)+'", "'+q(p.style)+'")'); break;
+        case 'blank': out.push(pad(ind)+'gui_blank('+q(p.count)+')'); break;
+        case 'table': { let a = 'gui_table('+q(p.items)+', '+q(p.columns); if (p.select==='true') a+=', select=True'; a+=')'; out.push(pad(ind)+a); break; }
+      }
+    }
+    return out;
+  }
+  function body(n, ind){ const g = gen(n.children, ind); return g.length ? g : [pad(ind)+'gui_blank()   # (empty - add widgets)']; }
+  function code(){ const g = gen(model.children, 0); return g.length ? g.join('\\n') : '# (nothing yet)'; }
+  function renderCode(){ document.getElementById('code').textContent = code(); }
+
+  document.getElementById('copy').onclick = function(){ vscode.postMessage({ type:'copy', code: code() }); };
+  document.getElementById('insert').onclick = function(){ vscode.postMessage({ type:'insert', code: code() }); };
+  document.getElementById('clear').onclick = function(){ model = { children: [] }; sel = null; render(); };
+
+  render();
+</script></body></html>`;
+}
+
+async function showGuiEditor(): Promise<void> {
+  const panel = vscode.window.createWebviewPanel(
+    'amdGuiEditor', 'GUI Editor', vscode.ViewColumn.Beside, { enableScripts: true });
+  const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+  panel.webview.html = guiEditorHtml(nonce);
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg?.type === 'copy') {
+      await vscode.env.clipboard.writeText(msg.code || '');
+      vscode.window.showInformationMessage('GUI Editor: MAST copied to clipboard.');
+    } else if (msg?.type === 'insert') {
+      await insertGeneratedGui(msg.code || '');
+    }
+  });
+}
+
+// Replace a `# <gui-designer> … # </gui-designer>` block in the active .mast
+// (regenerating only what the editor owns), or insert at the cursor if there's
+// no such block — the safe marked-region strategy from the plan.
+async function insertGeneratedGui(code: string): Promise<void> {
+  const ed = vscode.window.visibleTextEditors.find((e) => e.document.languageId === 'mast')
+    || vscode.window.activeTextEditor;
+  if (!ed) { vscode.window.showWarningMessage('GUI Editor: open a .mast file to insert into.'); return; }
+  const doc = ed.document;
+  const text = doc.getText();
+  const begin = '# <gui-designer>';
+  const end = '# </gui-designer>';
+  const bi = text.indexOf(begin);
+  const ei = text.indexOf(end);
+  const block = begin + '\n' + code + '\n' + end;
+  await ed.edit((b) => {
+    if (bi >= 0 && ei > bi) {
+      b.replace(new vscode.Range(doc.positionAt(bi), doc.positionAt(ei + end.length)), block);
+    } else {
+      b.insert(ed.selection.active, block + '\n');
+    }
+  });
+  vscode.window.showInformationMessage(bi >= 0 ? 'GUI Editor: updated the designer block.' : 'GUI Editor: inserted at the cursor.');
+}
+
 // few dozen nodes, this never renders the whole graph — you navigate it: a
 // searchable/filterable outline on the left, and the selected node's direct
 // incoming/outgoing connections (each a clickable chip) on the right. See
@@ -2530,6 +2767,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', showStoryOutline));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.guiEditor', showGuiEditor));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
