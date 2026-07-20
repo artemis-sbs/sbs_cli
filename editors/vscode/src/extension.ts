@@ -1556,11 +1556,18 @@ function guiEditorHtml(nonce: string): string {
   .pal { width:150px; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); padding:4px; }
   .pal .grp { font-size:10px; text-transform:uppercase; color:var(--vscode-descriptionForeground); margin:8px 4px 2px; }
   .pal button { display:block; width:100%; text-align:left; margin:2px 0; }
-  .mid { flex:1; overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); padding:6px; }
-  .props { width:250px; overflow:auto; padding:8px; }
-  .bottom { height:34%; min-height:120px; border-top:1px solid var(--vscode-panel-border,#8882); display:flex; flex-direction:column; }
-  .bottom .bar { display:flex; gap:6px; align-items:center; padding:4px 10px; font-size:11px; color:var(--vscode-descriptionForeground); }
-  pre#code { flex:1; margin:0; overflow:auto; padding:6px 10px; font-family: var(--vscode-editor-font-family,monospace); font-size:12px; white-space:pre; }
+  .mid { flex:1; min-width:0; display:flex; flex-direction:column; border-right:1px solid var(--vscode-panel-border,#8883); }
+  .tabs { display:flex; gap:2px; align-items:center; padding:4px 6px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
+  .tabs button.on { background: var(--vscode-button-background,#0a63c9); color:#fff; }
+  .pane { flex:1; overflow:auto; padding:6px; }
+  .pane.hidden { display:none; }
+  pre#code { margin:0; font-family: var(--vscode-editor-font-family,monospace); font-size:12px; white-space:pre; }
+  .right { width:300px; display:flex; flex-direction:column; }
+  .tree-wrap { flex:1; display:flex; flex-direction:column; min-height:0; }
+  #tree { flex:1; overflow:auto; padding:6px; }
+  .props-wrap { height:46%; display:flex; flex-direction:column; min-height:0; border-top:1px solid var(--vscode-panel-border,#8883); }
+  #props { flex:1; overflow:auto; padding:8px; }
+  .rhdr { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--vscode-descriptionForeground); padding:5px 8px; border-bottom:1px solid var(--vscode-panel-border,#8882); background: var(--vscode-editorGroupHeader-tabsBackground, transparent); }
   button { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:3px 8px; cursor:pointer; font-size:12px; }
   button.primary { background: var(--vscode-button-background,#0a63c9); color: var(--vscode-button-foreground,#fff); }
   .node { padding:2px 4px; border-radius:3px; cursor:pointer; white-space:nowrap; }
@@ -1581,7 +1588,6 @@ function guiEditorHtml(nonce: string): string {
   .muted { color: var(--vscode-descriptionForeground); }
   .actions { display:flex; gap:4px; margin:6px 0; flex-wrap:wrap; }
   .actions button { font-size:11px; padding:2px 6px; }
-  .toggle button.on { background: var(--vscode-button-background,#0a63c9); color:#fff; }
   /* preview */
   .pv-screen { position:relative; width:100%; aspect-ratio:16/9; background:#0b0f16; border:1px solid var(--vscode-panel-border,#8883); overflow:hidden; }
   .pv-sec { position:absolute; box-sizing:border-box; border:1px dashed #4ec9b077; padding:3px; overflow:hidden; }
@@ -1599,22 +1605,27 @@ function guiEditorHtml(nonce: string): string {
 </style></head><body>
 <div class="top">
   <b>GUI Editor</b>
-  <span class="toggle"><button id="vPreview" class="on">Preview</button><button id="vTree">Tree</button></span>
   <span class="muted">compose a layout → generate MAST</span>
   <span style="flex:1"></span>
   <button id="clear">New</button>
 </div>
 <div class="cols">
   <div class="pal" id="pal"></div>
-  <div class="mid"><div id="tree"></div></div>
-  <div class="props" id="props"><div class="empty">Select an element to edit its properties.</div></div>
-</div>
-<div class="bottom">
-  <div class="bar"><b style="color:var(--vscode-foreground)">Generated MAST</b><span style="flex:1"></span>
-    <button id="copy">Copy</button>
-    <button id="insert" class="primary" title="Replace a # &lt;gui-designer&gt; … # &lt;/gui-designer&gt; block in the active .mast, or insert at the cursor">Insert into file</button>
+  <div class="mid">
+    <div class="tabs">
+      <button id="tPreview" class="on">Preview</button>
+      <button id="tCode">Code</button>
+      <span style="flex:1"></span>
+      <button id="copy">Copy</button>
+      <button id="insert" class="primary" title="Replace a # &lt;gui-designer&gt; … # &lt;/gui-designer&gt; block in the active .mast, or insert at the cursor">Insert into file</button>
+    </div>
+    <div id="preview" class="pane"></div>
+    <div id="codepane" class="pane hidden"><pre id="code"></pre></div>
   </div>
-  <pre id="code"></pre>
+  <div class="right">
+    <div class="tree-wrap"><div class="rhdr">Layout tree</div><div id="tree"></div></div>
+    <div class="props-wrap"><div class="rhdr">Inspector</div><div id="props"><div class="empty">Select an element to edit its properties.</div></div></div>
+  </div>
 </div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
@@ -1664,12 +1675,17 @@ function guiEditorHtml(nonce: string): string {
     sel = n.id; render();
   }
 
-  // --- tree / preview ---
-  let view = 'preview';
-  function render(){ if (view==='preview') renderPreview(); else renderTree(); renderProps(); renderCode(); }
-  function pickView(v){ view=v; document.getElementById('vPreview').classList.toggle('on', v==='preview'); document.getElementById('vTree').classList.toggle('on', v==='tree'); render(); }
-  document.getElementById('vPreview').onclick = function(){ pickView('preview'); };
-  document.getElementById('vTree').onclick = function(){ pickView('tree'); };
+  // --- render: preview + code (middle tabs), tree + inspector (right) ---
+  function render(){ renderPreview(); renderTree(); renderProps(); renderCode(); }
+  // Middle tabs switch Preview vs Code; the tree lives on the right, always shown.
+  function pickTab(t){
+    document.getElementById('preview').classList.toggle('hidden', t!=='preview');
+    document.getElementById('codepane').classList.toggle('hidden', t!=='code');
+    document.getElementById('tPreview').classList.toggle('on', t==='preview');
+    document.getElementById('tCode').classList.toggle('on', t==='code');
+  }
+  document.getElementById('tPreview').onclick = function(){ pickTab('preview'); };
+  document.getElementById('tCode').onclick = function(){ pickTab('code'); };
 
   function bindPicks(root){ root.querySelectorAll('[data-id]').forEach(function(el){ el.onclick = function(ev){ ev.stopPropagation(); sel = +el.dataset.id; render(); }; }); }
 
@@ -1713,7 +1729,7 @@ function guiEditorHtml(nonce: string): string {
   // laid out roughly the way MAST flows them. Not pixel-faithful (a later phase),
   // but shows where things sit. Click any box to select it.
   function renderPreview(){
-    const t = document.getElementById('tree');
+    const t = document.getElementById('preview');
     if (!model.children.length) { t.innerHTML = '<div class="empty">Add a Section, then drop widgets in. The preview shows roughly where things land.</div>'; return; }
     const secs = model.children.filter(function(n){ return n.type==='section'; });
     const loose = model.children.filter(function(n){ return n.type!=='section'; });
