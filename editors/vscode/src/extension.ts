@@ -1614,6 +1614,8 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   <b>GUI Editor</b>
   <span class="muted">compose a layout → generate MAST</span>
   <span style="flex:1"></span>
+  <button id="undo" title="Undo (Ctrl/Cmd-Z)">↶</button>
+  <button id="redo" title="Redo (Ctrl/Cmd-Shift-Z)">↷</button>
   <button id="load" title="Load a # &lt;gui-designer&gt; block from the active .mast back into the editor">Load from file</button>
   <button id="clear">New</button>
 </div>
@@ -1670,7 +1672,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
       else if (s) { const r = find(sel); (r.list||model.children).push(n); }  // sibling of a leaf
       else { model.children.push(n); }
     }
-    sel = n.id; render();
+    sel = n.id; recordHistory(); render();
   }
 
   // --- render: preview + code (middle tabs), tree + inspector (right) ---
@@ -1685,6 +1687,30 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     if (c === lastSent) return;
     syncTimer = setTimeout(function(){ lastSent = c; vscode.postMessage({ type:'apply', code: c }); }, 250);
   }
+
+  // --- undo / redo (model snapshots) ---
+  let history = [], hIndex = -1, histTimer = null;
+  function resetHistory(){ history = [JSON.stringify(model)]; hIndex = 0; }
+  function recordHistory(){                        // call after a mutation
+    const snap = JSON.stringify(model);
+    if (history[hIndex] === snap) return;          // no-op (e.g. a click that didn't move)
+    history = history.slice(0, hIndex + 1);
+    history.push(snap);
+    if (history.length > 200) history.shift();
+    hIndex = history.length - 1;
+  }
+  function recordHistorySoon(){ clearTimeout(histTimer); histTimer = setTimeout(recordHistory, 350); }  // coalesce prop typing
+  function restore(i){ hIndex = i; model = JSON.parse(history[i]); sel = null; render(); }
+  function undo(){ clearTimeout(histTimer); if (hIndex > 0) restore(hIndex - 1); }
+  function redo(){ clearTimeout(histTimer); if (hIndex < history.length - 1) restore(hIndex + 1); }
+  document.getElementById('undo').onclick = undo;
+  document.getElementById('redo').onclick = redo;
+  document.addEventListener('keydown', function(e){
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = (e.key || '').toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+  });
   // Middle tabs switch Preview vs Code; the tree lives on the right, always shown.
   function pickTab(t){
     document.getElementById('preview').classList.toggle('hidden', t!=='preview');
@@ -1731,14 +1757,14 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
       dr.list.splice(dr.list.indexOf(node), 1);
       if (tr0 && tr0.n.type==='section'){ model.children.splice(model.children.indexOf(tr0.n)+1, 0, node); }
       else { model.children.push(node); }
-      sel = dragId; render(); return;
+      sel = dragId; recordHistory(); render(); return;
     }
     dr.list.splice(dr.list.indexOf(node), 1);
     const tr = find(targetId);
     if (!tr) { model.children.push(node); }
     else if (tr.n.children) { tr.n.children.push(node); }              // into container (incl root)
     else { tr.list.splice(tr.list.indexOf(tr.n)+1, 0, node); }         // after leaf
-    sel = dragId; render();
+    sel = dragId; recordHistory(); render();
   }
 
   // Approximate spatial preview: sections positioned by their area, contents
@@ -1789,7 +1815,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     n.props.area = [round1(l),round1(tp),round1(r),round1(b)].join(',');
     renderPreview(); renderCode(); renderProps();
   }
-  function endSecDrag(){ window.removeEventListener('mousemove', onSecDrag); window.removeEventListener('mouseup', endSecDrag); secDrag = null; }
+  function endSecDrag(){ window.removeEventListener('mousemove', onSecDrag); window.removeEventListener('mouseup', endSecDrag); secDrag = null; recordHistory(); }
   function pvFlow(nodes){
     let out=''; let band=[];
     function flush(){ if (band.length){ out += '<div class="pv-band">'+band.join('')+'</div>'; band=[]; } }
@@ -1855,7 +1881,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
                : '<input data-k="'+key+'" value="'+esc(val)+'">')+'</div>';
     }).join('');
     box.innerHTML = h;
-    box.querySelectorAll('[data-k]').forEach(function(inp){ inp.oninput = function(){ n.props[inp.dataset.k] = inp.value; renderTree(); renderPreview(); renderCode(); }; });
+    box.querySelectorAll('[data-k]').forEach(function(inp){ inp.oninput = function(){ n.props[inp.dataset.k] = inp.value; renderTree(); renderPreview(); renderCode(); recordHistorySoon(); }; });
     box.querySelectorAll('[data-act]').forEach(function(b){ b.onclick = function(){ act(b.dataset.act); }; });
   }
   function act(a){
@@ -1874,14 +1900,14 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   document.getElementById('copy').onclick = function(){ vscode.postMessage({ type:'copy', code: code() }); };
   document.getElementById('insert').onclick = function(){ vscode.postMessage({ type:'insert', code: code() }); };
   document.getElementById('load').onclick = function(){ vscode.postMessage({ type:'loadRequest' }); };
-  document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', children: [] }; sel = null; render(); };
+  document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', children: [] }; sel = null; recordHistory(); render(); };
 
   // --- round-trip: parse the editor's own generated block back into the model
   //     (shared media/guiModel.js). Unrecognised lines become 'raw' and re-emit
   //     verbatim; a known element's full style string is kept. ---
   function loadFromCode(codeText){
     const r = GuiModel.parse(codeText);
-    model = r.model; idc = r.nextId; sel = null;
+    model = r.model; idc = r.nextId; sel = null; resetHistory();
     if (DOCMODE) { lastSent = code(); loaded = true; }   // now safe to sync; opening must not rewrite the file
     render();
   }
@@ -1903,6 +1929,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     tc.onclick = function(){ vscode.postMessage({ type:'openText' }); };
     vscode.postMessage({ type:'ready' });          // ask the provider for the current document text
   }
+  resetHistory();                                  // seed undo baseline (loadFromCode re-seeds when a doc loads)
   render();
 </script></body></html>`;
 }
