@@ -2481,7 +2481,7 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   .top input[type=search] { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:4px; padding:2px 8px; font-size:12px; width:180px; }
   .top label { font-size:11px; color: var(--vscode-descriptionForeground); cursor:pointer; }
   .muted { color: var(--vscode-descriptionForeground); }
-  .split { display:grid; grid-template-columns: 1.4fr 1fr; flex:1; min-height:0; user-select:none; }
+  .split { display:grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); flex:1; min-height:0; user-select:none; }
   .pane { overflow:auto; min-height:0; }
   .pane.model { border-right:1px solid var(--vscode-panel-border,#8883); }
   .bar { padding:4px 10px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); border-bottom:1px solid var(--vscode-panel-border,#8882); display:flex; gap:8px; align-items:center; z-index:1; }
@@ -3341,7 +3341,7 @@ function missionInspectorHtml(nonce: string): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
-  .split { display:grid; flex:1; min-height:0; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
+  .split { display:grid; flex:1; min-height:0; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:1fr 1fr; }
   .pane { overflow:auto; border-right:1px solid var(--vscode-panel-border,#8883); border-bottom:1px solid var(--vscode-panel-border,#8883); min-height:0; }
   .bar { padding:4px 10px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); border-bottom:1px solid var(--vscode-panel-border,#8882); display:flex; gap:8px; align-items:center; }
   .bar b { color:var(--vscode-foreground); }
