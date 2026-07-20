@@ -2,7 +2,7 @@
   "name": "amd-language",
   "displayName": "Artemis AMD",
   "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, diagnostics/navigation/formatting via the sbs AMD language server, plus a MAST source debugger.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "artemis-sbs",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/artemis-sbs/sbs_cli" },
@@ -53,6 +53,12 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "amd.showResolver",
+        "title": "AMD Resolver (resolved model + red flags)",
+        "category": "Artemis AMD",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "amd.guiEditor",
         "title": "GUI Editor (compose a layout → MAST)",
         "category": "Artemis AMD",
@@ -93,6 +99,7 @@
         { "command": "amd.showMap", "when": "editorLangId == amd" },
         { "command": "amd.showGraph", "when": "editorLangId == amd" },
         { "command": "amd.showStoryOutline", "when": "editorLangId == amd" },
+        { "command": "amd.showResolver", "when": "editorLangId == amd" },
         { "command": "amd.guiEditor" },
         { "command": "amd.showPreview", "when": "editorLangId == amd" },
         { "command": "amd.previewInSession", "when": "editorLangId == amd" },
@@ -103,6 +110,7 @@
         { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.showGraph", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.showStoryOutline", "when": "editorLangId == amd", "group": "navigation" },
+        { "command": "amd.showResolver", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation" },
         { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.gui\\.mast$/ && activeEditor == 'workbench.editors.files.textFileEditor'", "group": "navigation" }

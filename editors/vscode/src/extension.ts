@@ -1129,6 +1129,19 @@ interface GraphNode { key: string; display: string; section: string; uri: string
 interface GraphEdge { from: string; to: string; kind: string; uri: string; line: number; targetRange: LspRange; }
 interface MissionGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
 
+// --- AMD Live Resolver model (from the `amd/resolve` LSP request) ------------
+interface ResolveEntity {
+  key: string; display: string; section: string; archetype: string; level: number;
+  uri: string; line: number; summary: string; fields: { label: string; value: string }[];
+  problems: Problems | null; inbound: number; outbound: number; orphan: boolean;
+}
+interface ResolveRef {
+  kind: string; value: string; owner: string; uri: string; line: number;
+  resolved: boolean; code: string | null;
+}
+interface ResolveIssue { uri: string; line: number; col: number; severity: string; code: string; message: string; }
+interface ResolveModel { entities: ResolveEntity[]; refs: ResolveRef[]; issues: ResolveIssue[]; }
+
 type FocusDir = 'down' | 'up' | 'both';
 interface Focus { key: string; dir: FocusDir; hops: number; }
 
@@ -2431,6 +2444,227 @@ async function showStoryOutline(): Promise<void> {
   });
 }
 
+// --- AMD Live Resolver (static half, §3.5): two panes over the `amd/resolve`
+// model — left, the resolved entity tree as the engine built it (grouped by
+// archetype, badged); right, the red-flags (dangling refs, orphan headings,
+// structural + cross-file lint). Every row jumps to source. No live tap needed.
+function amdResolverHtml(model: ResolveModel, nonce: string): string {
+  const data = JSON.stringify(model);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
+  .top { display:flex; gap:8px; align-items:center; padding:5px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); flex-wrap:wrap; }
+  .top input[type=search] { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:4px; padding:2px 8px; font-size:12px; width:180px; }
+  .top label { font-size:11px; color: var(--vscode-descriptionForeground); cursor:pointer; }
+  .muted { color: var(--vscode-descriptionForeground); }
+  .split { display:grid; grid-template-columns: 1.4fr 1fr; flex:1; min-height:0; }
+  .pane { overflow:auto; min-height:0; }
+  .pane.model { border-right:1px solid var(--vscode-panel-border,#8883); }
+  .bar { padding:4px 10px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); border-bottom:1px solid var(--vscode-panel-border,#8882); display:flex; gap:8px; align-items:center; z-index:1; }
+  .bar b { color: var(--vscode-foreground); }
+  .grp { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--vscode-descriptionForeground); padding:8px 10px 2px; }
+  .ent { display:flex; align-items:center; gap:6px; padding:2px 10px 2px 6px; cursor:pointer; white-space:nowrap; }
+  .ent:hover { background: var(--vscode-list-hoverBackground,#8881); }
+  .ent.sel { background: var(--vscode-list-activeSelectionBackground,#0a63c9); color:#fff; }
+  .car { width:12px; display:inline-block; text-align:center; color:var(--vscode-descriptionForeground); cursor:pointer; }
+  .dot { width:8px; height:8px; border-radius:2px; flex:0 0 auto; }
+  .ename { font-weight:500; }
+  .ekey { color: var(--vscode-descriptionForeground); font-size:11px; font-family: var(--vscode-editor-font-family); }
+  .ent.sel .ekey { color:#cde; }
+  .badge { font-size:10px; border-radius:6px; padding:0 5px; }
+  .badge.err { background: var(--vscode-inputValidation-errorBackground,#5a1d1d); color:#f88; }
+  .badge.warn { background: var(--vscode-inputValidation-warningBackground,#5a4a1d); color:#fc8; }
+  .badge.orphan { background: #5a3a1d; color:#fc8; }
+  .refs { padding:0 0 2px 30px; }
+  .ref { font-family: var(--vscode-editor-font-family); font-size:12px; padding:1px 10px; cursor:pointer; white-space:nowrap; }
+  .ref:hover { background: var(--vscode-list-hoverBackground,#8881); }
+  .ref .rk { color: var(--vscode-symbolIcon-eventForeground,#c586c0); }
+  .ref .ok { color: var(--vscode-testing-iconPassed,#89d185); }
+  .ref .bad { color: var(--vscode-errorForeground,#f66); }
+  .issue { display:flex; gap:6px; align-items:baseline; padding:3px 10px; cursor:pointer; border-bottom:1px solid var(--vscode-panel-border,#8882); font-size:12px; }
+  .issue:hover { background: var(--vscode-list-hoverBackground,#8881); }
+  .issue .sev { width:8px; height:8px; border-radius:50%; flex:0 0 auto; position:relative; top:3px; }
+  .issue .sev.error { background: var(--vscode-errorForeground,#f66); }
+  .issue .sev.warning { background: var(--vscode-editorWarning-foreground,#fc8); }
+  .issue .msg { flex:1; min-width:0; }
+  .issue .code { color: var(--vscode-descriptionForeground); font-size:11px; font-family: var(--vscode-editor-font-family); }
+  .issue .loc { color: var(--vscode-textLink-foreground,#4daafc); font-size:11px; }
+  .empty { padding:12px; color: var(--vscode-descriptionForeground); }
+</style></head><body>
+<div class="top">
+  <input id="q" type="search" placeholder="Filter entities…" autofocus>
+  <label><input type="checkbox" id="probOnly"> problems only</label>
+  <span class="muted" id="counts"></span>
+</div>
+<div class="split">
+  <div class="pane model">
+    <div class="bar"><b>Resolved model</b><span class="muted" id="mCount"></span></div>
+    <div id="tree"></div>
+  </div>
+  <div class="pane">
+    <div class="bar"><b>Red flags</b><span class="muted" id="iCount"></span></div>
+    <div id="issues"></div>
+  </div>
+</div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const MODEL = ${data};
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function goto(uri, line){ vscode.postMessage({ type:'goto', uri:uri, line:line }); }
+
+  const byKey = {};
+  for (const e of MODEL.entities) byKey[e.key] = e;
+  const outRefs = {};                                   // owner key -> [ref]
+  for (const r of MODEL.refs) (outRefs[r.owner] = outRefs[r.owner] || []).push(r);
+
+  const ARCH = {
+    quest:'#c586c0', scene:'#4ec9b0', dialogue:'#4daafc', lifeform:'#89d185',
+    scan:'#dcdcaa', side:'#e8a35c', item:'#9ca0ff', region:'#5ec8c8', face:'#d18cd1'
+  };
+  const ORDER = ['quest','scene','dialogue','lifeform','scan','side','item','region','face'];
+  function archColor(a){ return ARCH[a] || '#8899aa'; }
+  function archRank(a){ const i = ORDER.indexOf(a); return i < 0 ? ORDER.length : i; }
+
+  const expanded = {};                                  // key -> bool
+  let sel = null;
+
+  function danglingCount(){ return MODEL.refs.filter(r => !r.resolved).length; }
+  function orphanEnts(){ return MODEL.entities.filter(e => e.orphan); }
+
+  function renderTree(){
+    const q = document.getElementById('q').value.trim().toLowerCase();
+    const probOnly = document.getElementById('probOnly').checked;
+    const match = e => {
+      if (probOnly && !e.orphan && !(e.problems && (e.problems.error || e.problems.warning))
+          && !(outRefs[e.key]||[]).some(r => !r.resolved)) return false;
+      if (!q) return true;
+      return (e.display||'').toLowerCase().includes(q) || (e.key||'').toLowerCase().includes(q)
+          || (e.archetype||'').toLowerCase().includes(q);
+    };
+    const ents = MODEL.entities.filter(match);
+    document.getElementById('mCount').textContent = ents.length ? '('+ents.length+')' : '';
+    // group by archetype, ordered
+    const groups = {};
+    for (const e of ents) (groups[e.archetype||'other'] = groups[e.archetype||'other'] || []).push(e);
+    const names = Object.keys(groups).sort((a,b) => (archRank(a)-archRank(b)) || a.localeCompare(b));
+    const out = [];
+    for (const g of names){
+      out.push('<div class="grp">'+esc(g||'other')+' ('+groups[g].length+')</div>');
+      for (const e of groups[g]) out.push(entRow(e));
+    }
+    document.getElementById('tree').innerHTML = out.join('') || '<div class="empty">No entities match.</div>';
+    wireTree();
+  }
+  function entRow(e){
+    const refs = outRefs[e.key] || [];
+    const hasRefs = refs.length > 0;
+    const caret = hasRefs ? (expanded[e.key] ? '▾' : '▸') : '';
+    let badges = '';
+    if (e.problems && e.problems.error) badges += ' <span class="badge err">'+e.problems.error+'</span>';
+    if (e.problems && e.problems.warning) badges += ' <span class="badge warn">'+e.problems.warning+'</span>';
+    if (e.orphan) badges += ' <span class="badge orphan" title="no inbound reference">orphan</span>';
+    let row = '<div class="ent'+(sel===e.key?' sel':'')+'" data-k="'+esc(e.key)+'">'
+      + '<span class="car" data-car="'+esc(e.key)+'">'+caret+'</span>'
+      + '<span class="dot" style="background:'+archColor(e.archetype)+'"></span>'
+      + '<span class="ename">'+esc(e.display)+'</span> <span class="ekey">'+esc(e.key)+'</span>'
+      + badges + '</div>';
+    if (hasRefs && expanded[e.key]){
+      row += '<div class="refs">' + refs.map(r => {
+        const leaf = String(r.value).split('/').pop();
+        const ok = r.resolved;
+        return '<div class="ref" data-ref-owner="'+esc(e.key)+'" data-leaf="'+esc(leaf)+'"'
+          + ' data-uri="'+esc(r.uri)+'" data-line="'+r.line+'" data-ok="'+(ok?'1':'0')+'">'
+          + '<span class="rk">'+esc(r.kind)+'</span> '
+          + (ok ? '<span class="ok">✓</span> ' : '<span class="bad">✗</span> ')
+          + esc(r.value)
+          + (ok ? '' : ' <span class="bad">'+esc(r.code||'unresolved')+'</span>')
+          + '</div>';
+      }).join('') + '</div>';
+    }
+    return row;
+  }
+  function wireTree(){
+    for (const c of document.querySelectorAll('.car')){
+      c.onclick = (ev) => { ev.stopPropagation(); const k = c.dataset.car; if (!(outRefs[k]||[]).length) return;
+        expanded[k] = !expanded[k]; renderTree(); };
+    }
+    for (const el of document.querySelectorAll('.ent')){
+      el.onclick = () => { const e = byKey[el.dataset.k]; sel = e.key; goto(e.uri, e.line); renderTree(); };
+    }
+    for (const el of document.querySelectorAll('.ref')){
+      el.onclick = (ev) => { ev.stopPropagation();
+        if (el.dataset.ok === '1' && byKey[el.dataset.leaf]) { const t = byKey[el.dataset.leaf]; goto(t.uri, t.line); }
+        else { goto(el.dataset.uri, +el.dataset.line); }
+      };
+    }
+  }
+
+  function renderIssues(){
+    // server lint issues + synthesized orphan flags, errors first.
+    const rows = MODEL.issues.slice();
+    for (const e of orphanEnts())
+      rows.push({ uri:e.uri, line:e.line, col:0, severity:'warning', code:'orphan',
+                  message:'"'+(e.display||e.key)+'" has no inbound reference' });
+    const rank = s => s === 'error' ? 0 : 1;
+    rows.sort((a,b) => (rank(a.severity)-rank(b.severity)) || (a.uri||'').localeCompare(b.uri||'') || a.line-b.line);
+    const errs = rows.filter(r => r.severity === 'error').length;
+    document.getElementById('iCount').textContent = rows.length ? '('+errs+' err, '+(rows.length-errs)+' warn)' : '';
+    const shortUri = u => { const s = String(u||''); const i = s.replace(/\\\\/g,'/').lastIndexOf('/'); return i<0? s : s.slice(i+1); };
+    document.getElementById('issues').innerHTML = rows.length ? rows.map(r =>
+      '<div class="issue" data-uri="'+esc(r.uri)+'" data-line="'+r.line+'">'
+      + '<span class="sev '+esc(r.severity)+'"></span>'
+      + '<span class="msg">'+esc(r.message)+'</span>'
+      + '<span class="code">'+esc(r.code)+'</span>'
+      + '<span class="loc">'+esc(shortUri(r.uri))+':'+(r.line+1)+'</span></div>'
+    ).join('') : '<div class="empty">No problems — every reference resolves and every heading is reachable. ✓</div>';
+    for (const el of document.querySelectorAll('.issue')) el.onclick = () => goto(el.dataset.uri, +el.dataset.line);
+  }
+
+  document.getElementById('counts').textContent =
+    MODEL.entities.length + ' entities · ' + danglingCount() + ' dangling · ' + orphanEnts().length + ' orphan';
+  document.getElementById('q').oninput = renderTree;
+  document.getElementById('probOnly').onchange = renderTree;
+  renderTree();
+  renderIssues();
+</script></body></html>`;
+}
+
+async function showAmdResolver(): Promise<void> {
+  if (!client) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
+    return;
+  }
+  const uri = vscode.window.activeTextEditor?.document.uri.toString();
+  if (!uri) { return; }
+  let model: ResolveModel;
+  try {
+    model = await client.sendRequest<ResolveModel>('amd/resolve', { textDocument: { uri } });
+  } catch (e) {
+    vscode.window.showErrorMessage(`Artemis AMD: could not resolve the model (${e}).`);
+    return;
+  }
+  const panel = vscode.window.createWebviewPanel(
+    'amdResolver', 'AMD Resolver', vscode.ViewColumn.Beside, { enableScripts: true });
+  const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
+  panel.webview.html = amdResolverHtml(model, nonce());
+
+  const refresh = async () => {
+    try {
+      const m = await client!.sendRequest<ResolveModel>('amd/resolve', { textDocument: { uri } });
+      panel.webview.html = amdResolverHtml(m, nonce());
+    } catch (e) { output.appendLine(`Resolver refresh failed: ${e}`); }
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (e.document.languageId === 'amd') { clearTimeout(timer); timer = setTimeout(() => { void refresh(); }, 300); }
+  });
+  panel.onDidDispose(() => docSub.dispose());
+  panel.webview.onDidReceiveMessage((msg) => {
+    if (msg?.type === 'goto') { openLocation(msg.uri, msg.line); }
+  });
+}
+
 async function showGraph(): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
@@ -3235,6 +3469,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', showMap));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', showGraph));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', showStoryOutline));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showResolver', showAmdResolver));
   context.subscriptions.push(vscode.commands.registerCommand('amd.guiEditor', showGuiEditor));
   context.subscriptions.push(GuiFileEditorProvider.register());   // *.gui.mast opens as the GUI Editor
   // Toggle a *.gui.mast text editor back into the visual GUI Editor.
