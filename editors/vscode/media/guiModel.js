@@ -47,6 +47,8 @@
     console_preset:  { label: 'Console preset',  cont: false, props: { console: 'helm' }, fields: [['console', 'Console (helm/weapons/…)']] },
     activate_console:{ label: 'Activate console',cont: false, props: { name: 'cinematic' }, fields: [['name', 'Console name']] },
     cinematic:       { label: 'Cinematic camera',cont: false, props: { mode: 'auto', args: '' }, fields: [['mode', 'Mode (auto/full)'], ['args', 'Full args: camera, offset, target, offset']] },
+    // A line the editor didn't recognise (kept verbatim); still editable/deletable.
+    raw:             { label: 'Raw line',        cont: false, props: { line: '' }, fields: [['line', 'MAST line (verbatim)']] },
   };
 
   // --- code generation: model -> MAST lines ---

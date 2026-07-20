@@ -1669,6 +1669,8 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     <option value="cinematic">Cinematic (full 3D)</option>
     <option value="cockpit">Cockpit (bg + views)</option>
     <option value="science">Science (3 columns)</option>
+    <option value="weapons">Weapons (2D + controls)</option>
+    <option value="comms">Comms (2D + panel)</option>
   </select>
   <button id="clear">New</button>
 </div>
@@ -1751,9 +1753,10 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   }).join('');
   pal.querySelectorAll('button[data-idx]').forEach(function(b){ b.onclick = function(){ addNode(REG[+b.dataset.idx]); }; });
 
-  // Screen-level nodes (sections + console setup) live at the root; everything else
-  // drops into the selected container (or as a sibling of a selected leaf).
-  const ROOT_TYPES = { section:1, console_preset:1, activate_console:1, cinematic:1 };
+  // Sections and whole-console presets live at the Screen root; everything else
+  // (incl. activate/cinematic, which flow within a section like the parser nests
+  // them) drops into the selected container or as a sibling of a selected leaf.
+  const ROOT_TYPES = { section:1, console_preset:1 };
   function addNode(item){
     const n = mk(item.type, item.props);
     if (ROOT_TYPES[item.type]){ model.children.push(n); }
@@ -1777,6 +1780,10 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
         box('0,11,100,100','3dview'), box('20,72,37.5,99','2dview'), box('88,50,100,100','ship_data'), box('41,90,60,99','text_waterfall')]; },
     science: function(){ return [col('0,0,30,100', []), col('30,0,72,100', ['science_2d_view']),
         col('72,0,100,100', ['science_data_tabs','science_data_freq','science_data','science_sorted_list'])]; },
+    weapons: function(){ return [col('0,0,60,100', ['weapon_2d_view']),
+        col('60,0,100,100', ['ship_data','weapon_control','text_waterfall'])]; },
+    comms: function(){ return [col('0,0,60,100', ['comms_2d_view']),
+        col('60,0,100,100', ['comms_face','comms_control','comms_sorted_list','text_waterfall'])]; },
   };
   const tmplSel = document.getElementById('tmpl');
   tmplSel.onchange = function(){ const k = tmplSel.value; tmplSel.value = '';
@@ -2039,6 +2046,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     let h = '<div class="prow"><b>'+c.label+'</b></div>';
     h += '<div class="actions">'
        + '<button data-act="up">↑</button><button data-act="down">↓</button>'
+       + '<button data-act="dup" title="Duplicate">Duplicate</button>'
        + '<button data-act="del">Delete</button></div>';
     h += (c.fields||[]).map(function(f){
       const key=f[0], label=f[1], val=n.props[key]==null?'':n.props[key];
@@ -2063,13 +2071,15 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     box.querySelectorAll('[data-k]').forEach(function(inp){ inp.oninput = function(){ n.props[inp.dataset.k] = inp.value; renderTree(); renderPreview(); renderCode(); recordHistorySoon(); }; });
     box.querySelectorAll('[data-act]').forEach(function(b){ b.onclick = function(){ act(b.dataset.act); }; });
   }
+  function cloneWithIds(node){ const c = { id:++idc, type:node.type, props: Object.assign({}, node.props) }; if (node.children) { c.children = node.children.map(cloneWithIds); } return c; }
   function act(a){
     const r = find(sel); if (!r || !r.list) return;                   // root has no list
     const i = r.list.indexOf(r.n);
     if (a==='del'){ r.list.splice(i,1); sel=null; }
     else if (a==='up' && i>0){ r.list.splice(i,1); r.list.splice(i-1,0,r.n); }
     else if (a==='down' && i<r.list.length-1){ r.list.splice(i,1); r.list.splice(i+1,0,r.n); }
-    render();
+    else if (a==='dup'){ const clone = cloneWithIds(r.n); r.list.splice(i+1,0,clone); sel = clone.id; }
+    recordHistory(); render();                       // delete/move/duplicate are undoable
   }
 
   // --- code generation (model -> MAST) via the shared module ---
