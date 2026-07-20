@@ -24,7 +24,7 @@
     grid:        { label: 'Grid',         cont: true,  with: true, props: { columns: '3' }, fields: [['columns', 'Columns']] },
     list:        { label: 'List',         cont: true,  with: true, props: { items: 'items', as: 'item', select: 'true', title: '', row_height: '' }, fields: [['items', 'Items variable'], ['as', 'Row variable'], ['select', 'Select (true/false)'], ['title', 'Title (optional)'], ['row_height', 'Row height (e.g. 1.6em)']] },
     text:        { label: 'Text',         cont: false, props: { text: 'Hello', style: '' }, fields: [['text', 'Text'], ['style', 'Style (optional)']] },
-    button:      { label: 'Button',       cont: false, props: { text: 'OK', style: '', jump: '' }, fields: [['text', 'Label'], ['style', 'Style (optional)'], ['jump', 'Jump to label (optional)']] },
+    button:      { label: 'Button',       cont: false, props: { text: 'OK', style: '', on_click: '' }, fields: [['text', 'Label'], ['style', 'Style (optional)'], ['on_click', 'On click (e.g. jump hail)']] },
     checkbox:    { label: 'Checkbox',     cont: false, props: { props: 'state:False;', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
     slider:      { label: 'Slider',       cont: false, props: { props: 'low:0;high:100;', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
     input:       { label: 'Input',        cont: false, props: { var: 'value', style: '' }, fields: [['var', 'Bind variable'], ['style', 'Style']] },
@@ -59,10 +59,11 @@
         }
         case 'text': out.push(pad(ind) + 'gui_text("' + textProps(p) + '")'); break;
         case 'button': {
+          // The click handler is emitted separately as an `on gui_message(...)`
+          // block (see generate) — gui_button itself takes no `:` block.
           let a = 'gui_button("' + q(p.text) + '"';
           if (p.style) { a += ', "' + q(p.style) + '"'; }
-          if (q(p.jump)) { out.push(pad(ind) + a + '):'); out.push(pad(ind + 1) + 'jump ' + q(p.jump)); }
-          else { out.push(pad(ind) + a + ')'); }
+          out.push(pad(ind) + a + ')');
           break;
         }
         case 'checkbox': out.push(pad(ind) + 'gui_checkbox("' + q(p.props) + '", "' + q(p.style) + '")'); break;
@@ -84,7 +85,27 @@
     }
     return out;
   }
-  function generate(model) { return gen(model.children, 0).join('\n'); }
+  function collectButtons(nodes, out) {
+    for (const n of nodes) {
+      if (n.type === 'button') { out.push(n); }
+      if (n.children) { collectButtons(n.children, out); }
+    }
+    return out;
+  }
+  // A complete, presentable gui body: layout, then a `on gui_message(...)` block
+  // per button with a click handler, then `await gui()`.
+  function generate(model) {
+    const lines = gen(model.children, 0);
+    if (!lines.length) { return ''; }
+    collectButtons(model.children, []).forEach(function (b) {
+      const oc = q(b.props.on_click);
+      if (!oc) { return; }
+      lines.push('on gui_message(gui_button("' + q(b.props.text) + '")):');
+      oc.split('\n').forEach(function (ln) { lines.push('    ' + ln); });
+    });
+    lines.push('await gui()');
+    return lines.join('\n');
+  }
 
   // --- round-trip parse: MAST lines -> model ---
   function indentOf(s) { let n = 0; while (s.charAt(n) === ' ') { n++; } return n; }
@@ -117,8 +138,9 @@
       if (hm) { p.headers = hm[1].split(',').map(function (x) { return x.trim().replace(/^["']|["']$/g, ''); }).filter(function (x) { return x !== ''; }).join(', '); }
       return { type: 'table', with: true, props: p };
     }
+    if ((m = s.match(/^on gui_message\(gui_button\("(.*?)"\)\):$/))) { return { type: '__onmsg__', target: m[1], handler: true }; }
     if ((m = s.match(/^gui_text\("(.*)"\)$/))) { return { type: 'text', props: parseTextProps(m[1]) }; }
-    if ((m = s.match(/^gui_button\("(.*?)"(?:,\s*"(.*)")?\)(:?)$/))) { return { type: 'button', props: { text: m[1], style: m[2] || '', jump: '' }, needsJump: m[3] === ':' }; }
+    if ((m = s.match(/^gui_button\("(.*?)"(?:,\s*"(.*)")?\)$/))) { return { type: 'button', props: { text: m[1], style: m[2] || '', on_click: '' } }; }
     if ((m = s.match(/^gui_checkbox\("(.*)",\s*"(.*)"\)$/))) { return { type: 'checkbox', props: { props: m[1], style: m[2] } }; }
     if ((m = s.match(/^gui_slider\("(.*)",\s*"(.*)"\)$/))) { return { type: 'slider', props: { props: m[1], style: m[2] } }; }
     if ((m = s.match(/^gui_icon\("(.*)",\s*"(.*)"\)$/))) { return { type: 'icon', props: { props: m[1], style: m[2] } }; }
@@ -134,14 +156,20 @@
     const out = [];
     while (i < lines.length) {
       const raw = lines[i];
-      if (!raw.trim() || raw.trim() === '# (nothing yet)') { i++; continue; }   // skip blanks + stray placeholder
+      const t = raw.trim();
+      if (!t || t === '# (nothing yet)' || t === 'await gui()') { i++; continue; }   // blanks / placeholder / trailing present
       const ind = indentOf(raw);
       if (ind < base) { break; }
       if (ind > base) { i++; continue; }
-      const st = parseLine(raw.trim()); i++;
+      const st = parseLine(t); i++;
       if (st.with) { const r = parseStatements(lines, i, base + 4); st.children = r.out; i = r.i; }
-      else if (st.type === 'button' && st.needsJump && i < lines.length && indentOf(lines[i]) > base) {
-        const jm = lines[i].trim().match(/^jump\s+(\S+)/); if (jm) { st.props.jump = jm[1]; } i++;
+      else if (st.handler) {                       // on gui_message(...) — capture its body verbatim
+        const body = [];
+        while (i < lines.length && (lines[i].trim() === '' || indentOf(lines[i]) > base)) {
+          if (lines[i].trim() !== '') { body.push(lines[i].slice(base + 4)); }
+          i++;
+        }
+        st.body = body.join('\n');
       }
       out.push(st);
     }
@@ -168,8 +196,25 @@
     const lines = String(text || '').replace(/\r/g, '').split('\n');
     const r = parseStatements(lines, 0, 0);
     const rootNode = { id: 0, type: 'root', children: [] };
-    buildFlow(r.out, rootNode.children);
+    // Handlers (on gui_message) sit after the layout — pull them out, build the
+    // layout, then attach each handler's body to its button as on_click.
+    const handlers = [];
+    const layout = r.out.filter(function (st) {
+      if (st.type === '__onmsg__') { handlers.push(st); return false; }
+      return true;
+    });
+    buildFlow(layout, rootNode.children);
+    handlers.forEach(function (h) {
+      const b = findButton(rootNode, h.target);
+      if (b) { b.props.on_click = h.body || ''; }
+    });
     return { model: rootNode, nextId: idc };
+  }
+
+  function findButton(node, text) {
+    if (node.type === 'button' && node.props.text === text) { return node; }
+    for (const c of (node.children || [])) { const f = findButton(c, text); if (f) { return f; } }
+    return null;
   }
 
   return { CAT: CAT, gen: gen, generate: generate, parse: parse };
