@@ -1786,7 +1786,9 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   function pvSection(n){
     const a = (n.props.area||'0,0,100,100').split(',').map(function(x){ return parseFloat(x)||0; });
     const l=a[0]||0, tp=a[1]||0, r=(a[2]==null?100:a[2]), b=(a[3]==null?100:a[3]);
-    const st = 'left:'+l+'%;top:'+tp+'%;width:'+Math.max(0,r-l)+'%;height:'+Math.max(0,b-tp)+'%;';
+    let st = 'left:'+l+'%;top:'+tp+'%;width:'+Math.max(0,r-l)+'%;height:'+Math.max(0,b-tp)+'%;';
+    const bg = (n.props.style||'').match(/background(?:_color)?\\s*:\\s*([^;]+)/);   // show a section's background
+    if (bg) st += 'background:'+bg[1].trim()+';';
     const handles = n.id>=0 ? '<div class="pv-grip" data-move="'+n.id+'" title="Move section"></div><div class="pv-hand" data-resize="'+n.id+'" title="Resize section"></div>' : '';
     return '<div class="pv-sec'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" style="'+st+'">'+handles+pvFlow(n.children||[])+'</div>';
   }
