@@ -2507,12 +2507,14 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   .ref .rk { color: var(--vscode-symbolIcon-eventForeground,#c586c0); }
   .ref .ok { color: var(--vscode-testing-iconPassed,#89d185); }
   .ref .bad { color: var(--vscode-errorForeground,#f66); }
-  .issue { display:flex; gap:6px; align-items:baseline; padding:3px 10px; cursor:pointer; border-bottom:1px solid var(--vscode-panel-border,#8882); font-size:12px; }
+  .issue { display:flex; gap:6px; align-items:flex-start; padding:4px 10px; cursor:pointer; border-bottom:1px solid var(--vscode-panel-border,#8882); font-size:12px; }
   .issue:hover { background: var(--vscode-list-hoverBackground,#8881); }
-  .issue .sev { width:8px; height:8px; border-radius:50%; flex:0 0 auto; position:relative; top:3px; }
+  .issue .sev { width:8px; height:8px; border-radius:50%; flex:0 0 auto; margin-top:4px; }
   .issue .sev.error { background: var(--vscode-errorForeground,#f66); }
   .issue .sev.warning { background: var(--vscode-editorWarning-foreground,#fc8); }
-  .issue .msg { flex:1; min-width:0; }
+  .issue .ibody { flex:1; min-width:0; }
+  .issue .msg { line-height:1.35; overflow-wrap:anywhere; }
+  .issue .meta { margin-top:2px; display:flex; gap:8px; flex-wrap:wrap; }
   .issue .code { color: var(--vscode-descriptionForeground); font-size:11px; font-family: var(--vscode-editor-font-family); }
   .issue .loc { color: var(--vscode-textLink-foreground,#4daafc); font-size:11px; }
   .empty { padding:12px; color: var(--vscode-descriptionForeground); }
@@ -2659,9 +2661,9 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
     document.getElementById('issues').innerHTML = rows.length ? rows.map((r,i) =>
       '<div class="issue" data-idx="'+i+'">'
       + '<span class="sev '+esc(r.severity)+'"></span>'
-      + '<span class="msg">'+esc(r.message)+'</span>'
-      + '<span class="code">'+esc(r.code)+'</span>'
-      + '<span class="loc">'+esc(shortUri(r.uri))+':'+(r.line+1)+'</span></div>'
+      + '<div class="ibody"><div class="msg">'+esc(r.message)+'</div>'
+      + '<div class="meta"><span class="code">'+esc(r.code)+'</span>'
+      + '<span class="loc">'+esc(shortUri(r.uri))+':'+(r.line+1)+'</span></div></div></div>'
     ).join('') : '<div class="empty">No problems — every reference resolves and every heading is reachable. ✓</div>';
     for (const el of document.querySelectorAll('.issue')){
       const it = rows[+el.dataset.idx];
