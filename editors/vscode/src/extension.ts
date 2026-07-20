@@ -1964,13 +1964,13 @@ function missionDirForUri(uri?: vscode.Uri): string | undefined {
 // Mocks the extension started for previewing, keyed by port (reused across
 // clicks; the runner self-cleans a stale singleton on the same port).
 const mockRunners = new Map<number, cp.ChildProcess>();
+// Ports where we've already opened the /web/gui_preview browser tab this session.
+const previewOpened = new Set<number>();
 
 // Ensure a mock is listening on `port`, starting `sbs debug <mission>` if not.
-// When we start one, open its browser (the runner doesn't auto-open it).
 async function ensureMockRunning(missionDir: string, port: number): Promise<boolean> {
   try { await waitForPort('127.0.0.1', port, 600); return true; } catch { /* not up yet */ }
   const existing = mockRunners.get(port);
-  let started = false;
   if (!existing || existing.exitCode !== null) {
     const base = resolveSbsBase();
     const args = [...base.args, 'debug', missionDir, '--port', String(port), '--use-working-tree'];
@@ -1981,39 +1981,43 @@ async function ensureMockRunning(missionDir: string, port: number): Promise<bool
     child.stderr?.on('data', (d: Buffer) => output.append(d.toString()));
     child.on('exit', () => mockRunners.delete(port));
     mockRunners.set(port, child);
-    started = true;
+    previewOpened.delete(port);   // fresh mock → its preview tab needs (re)opening
   }
-  try { await waitForPort('127.0.0.1', port, 60000); } catch { return false; }
-  if (started) {
-    // The runner prints "open http://localhost:<port>/" but doesn't open it.
-    void vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}/`));
-  }
-  return true;
+  try { await waitForPort('127.0.0.1', port, 60000); return true; } catch { return false; }
 }
 
-// Render the editor's current design for real in a running `sbs debug` mock
-// (the pixel-faithful preview). If nothing's listening on the session port, start
-// a mock for the file's own mission first, then post the gui_preview command.
+// Render the editor's current design for real in a running `sbs debug` mock (the
+// pixel-faithful preview): store the design, then open (once) the dedicated
+// /web/gui_preview browser page that renders it as its own gui. Starts a mock for
+// the file's own mission if none is listening.
 async function guiEditorMockPreview(code: string, missionDir?: string): Promise<void> {
   const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
   const post = () => postDebugCommand(port, { action: 'gui_preview', code });
-  try { await post(); vscode.window.setStatusBarMessage('$(broadcast) Previewed design in mock', 3000); return; }
-  catch { /* maybe nothing is listening — try to start it */ }
 
-  if (!missionDir) {
-    vscode.window.showWarningMessage(`GUI Editor: no running mock on port ${port}, and no mission folder found for this file to start one.`);
-    return;
+  let stored = false;
+  try { await post(); stored = true; } catch { /* nothing listening — start a mock */ }
+
+  if (!stored) {
+    if (!missionDir) {
+      vscode.window.showWarningMessage(`GUI Editor: no running mock on port ${port}, and no mission folder found for this file to start one.`);
+      return;
+    }
+    const ok = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Starting mock for ${path.basename(missionDir)}…` },
+      () => ensureMockRunning(missionDir, port));
+    if (!ok) { vscode.window.showWarningMessage(`GUI Editor: could not start a mock on port ${port}.`); return; }
+    for (let i = 0; i < 12 && !stored; i++) {
+      try { await post(); stored = true; } catch { await new Promise((r) => setTimeout(r, 500)); }
+    }
+    if (!stored) { vscode.window.showWarningMessage('GUI Editor: mock started, but storing the preview failed — try again in a moment.'); return; }
   }
-  const ok = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Starting mock for ${path.basename(missionDir)}…` },
-    () => ensureMockRunning(missionDir, port));
-  if (!ok) { vscode.window.showWarningMessage(`GUI Editor: could not start a mock on port ${port}.`); return; }
-  // The port is up; give the mission a moment to load, then post (with retries).
-  for (let i = 0; i < 12; i++) {
-    try { await post(); vscode.window.setStatusBarMessage('$(broadcast) Previewed design in mock', 3000); return; }
-    catch { await new Promise((r) => setTimeout(r, 500)); }
+
+  // Open the preview page once per mock; re-previews re-render in the open tab.
+  if (!previewOpened.has(port)) {
+    void vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}/web/gui_preview`));
+    previewOpened.add(port);
   }
-  vscode.window.showWarningMessage('GUI Editor: mock started, but the preview command did not go through yet — try again in a moment.');
+  vscode.window.setStatusBarMessage('$(broadcast) Previewed design in mock', 3000);
 }
 
 async function showGuiEditor(): Promise<void> {
