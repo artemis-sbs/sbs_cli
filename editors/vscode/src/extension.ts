@@ -1578,9 +1578,23 @@ function guiEditorHtml(nonce: string): string {
   .muted { color: var(--vscode-descriptionForeground); }
   .actions { display:flex; gap:4px; margin:6px 0; flex-wrap:wrap; }
   .actions button { font-size:11px; padding:2px 6px; }
+  .toggle button.on { background: var(--vscode-button-background,#0a63c9); color:#fff; }
+  /* preview */
+  .pv-screen { position:relative; width:100%; aspect-ratio:16/9; background:#0b0f16; border:1px solid var(--vscode-panel-border,#8883); overflow:hidden; }
+  .pv-sec { position:absolute; box-sizing:border-box; border:1px dashed #4ec9b077; padding:3px; overflow:hidden; }
+  .pv-sec.sel, .pv-w.sel, .pv-box.sel { outline:2px solid var(--vscode-focusBorder,#4ec9b0); outline-offset:-1px; }
+  .pv-band { display:flex; gap:3px; margin:2px 0; }
+  .pv-w { border:1px solid #ffffff22; border-radius:2px; padding:2px 4px; font-size:10px; background:#18202e; color:#cde; flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; cursor:pointer; }
+  .pv-w.btn { background:#294066; text-align:center; }
+  .pv-w.face { background:#3a2a4a; text-align:center; }
+  .pv-grid { display:grid; gap:3px; margin:2px 0; }
+  .pv-box { border:1px solid #4ec9b055; border-radius:3px; margin:2px 0; padding:3px; cursor:pointer; }
+  .pv-cap { font-size:9px; color:#7fb0c0; text-transform:uppercase; letter-spacing:.04em; }
+  .pv-row-sample { display:flex; gap:3px; border-top:1px solid #ffffff14; padding-top:2px; margin-top:2px; }
 </style></head><body>
 <div class="top">
   <b>GUI Editor</b>
+  <span class="toggle"><button id="vPreview" class="on">Preview</button><button id="vTree">Tree</button></span>
   <span class="muted">compose a layout → generate MAST</span>
   <span style="flex:1"></span>
   <button id="clear">New</button>
@@ -1645,13 +1659,69 @@ function guiEditorHtml(nonce: string): string {
     sel = n.id; render();
   }
 
-  // --- tree ---
-  function render(){ renderTree(); renderProps(); renderCode(); }
+  // --- tree / preview ---
+  let view = 'preview';
+  function render(){ if (view==='preview') renderPreview(); else renderTree(); renderProps(); renderCode(); }
+  function pickView(v){ view=v; document.getElementById('vPreview').classList.toggle('on', v==='preview'); document.getElementById('vTree').classList.toggle('on', v==='tree'); render(); }
+  document.getElementById('vPreview').onclick = function(){ pickView('preview'); };
+  document.getElementById('vTree').onclick = function(){ pickView('tree'); };
+
+  function bindPicks(root){ root.querySelectorAll('[data-id]').forEach(function(el){ el.onclick = function(ev){ ev.stopPropagation(); sel = +el.dataset.id; render(); }; }); }
+
   function renderTree(){
     const t = document.getElementById('tree');
     if (!model.children.length) { t.innerHTML = '<div class="empty">Add elements from the palette. A layout is Sections → Rows → widgets.</div>'; return; }
     t.innerHTML = model.children.map(nodeHtml).join('');
     t.querySelectorAll('.node').forEach(function(el){ el.onclick = function(ev){ ev.stopPropagation(); sel = +el.dataset.id; render(); }; });
+  }
+
+  // Approximate spatial preview: sections positioned by their area, contents
+  // laid out roughly the way MAST flows them. Not pixel-faithful (a later phase),
+  // but shows where things sit. Click any box to select it.
+  function renderPreview(){
+    const t = document.getElementById('tree');
+    if (!model.children.length) { t.innerHTML = '<div class="empty">Add a Section, then drop widgets in. The preview shows roughly where things land.</div>'; return; }
+    const secs = model.children.filter(function(n){ return n.type==='section'; });
+    const loose = model.children.filter(function(n){ return n.type!=='section'; });
+    let inner = secs.map(pvSection).join('');
+    if (loose.length) inner += pvSection({ id:-1, type:'section', props:{area:'0,0,100,100'}, children:loose });
+    t.innerHTML = '<div class="pv-screen">'+inner+'</div>';
+    bindPicks(t);
+  }
+  function pvSection(n){
+    const a = (n.props.area||'0,0,100,100').split(',').map(function(x){ return parseFloat(x)||0; });
+    const l=a[0]||0, tp=a[1]||0, r=(a[2]==null?100:a[2]), b=(a[3]==null?100:a[3]);
+    const st = 'left:'+l+'%;top:'+tp+'%;width:'+Math.max(0,r-l)+'%;height:'+Math.max(0,b-tp)+'%;';
+    return '<div class="pv-sec'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" style="'+st+'">'+pvFlow(n.children||[])+'</div>';
+  }
+  function pvFlow(nodes){
+    let out=''; let band=[];
+    function flush(){ if (band.length){ out += '<div class="pv-band">'+band.join('')+'</div>'; band=[]; } }
+    for (const n of nodes){
+      if (n.type==='row'){ flush(); out += '<div class="pv-band" data-id="'+n.id+'">'+(n.children||[]).map(pvWidget).join('')+'</div>'; }
+      else if (n.type==='grid'){ flush(); const cols=Math.max(1,parseInt(n.props.columns)||1);
+        out += '<div class="pv-grid'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" style="grid-template-columns:repeat('+cols+',1fr);">'+(n.children||[]).map(pvWidget).join('')+'</div>'; }
+      else if (n.type==='list'){ flush(); out += pvList(n); }
+      else if (n.type==='table'){ flush(); out += pvBox(n, 'table '+esc(n.props.items||''), ''); }
+      else if (n.type==='sub_section'){ flush(); out += '<div class="pv-box'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'"><div class="pv-cap">sub-section</div>'+pvFlow(n.children||[])+'</div>'; }
+      else { band.push(pvWidget(n)); }
+    }
+    flush();
+    return out;
+  }
+  function pvList(n){
+    const rowKids = (n.children||[]).map(pvWidget).join('');
+    let s = '<div class="pv-box'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'"><div class="pv-cap">list · '+esc(n.props.items||'')+'</div>';
+    for (let i=0;i<3;i++){ s += '<div class="pv-row-sample">'+(rowKids||'<span class="pv-w">row…</span>')+'</div>'; }
+    return s+'</div>';
+  }
+  function pvBox(n, cap){ return '<div class="pv-box'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'"><div class="pv-cap">'+cap+'</div></div>'; }
+  function pvWidget(n){
+    const cls = n.type==='button' ? ' btn' : (n.type==='face' ? ' face' : '');
+    let label = summary(n) || n.type;
+    if (n.type==='face') label = 'face';
+    if (n.type==='blank') label = '·';
+    return '<span class="pv-w'+cls+(n.id===sel?' sel':'')+'" data-id="'+n.id+'">'+esc(label)+'</span>';
   }
   function nodeHtml(n){
     const c = CAT[n.type];
