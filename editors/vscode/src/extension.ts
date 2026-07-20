@@ -1966,9 +1966,11 @@ function missionDirForUri(uri?: vscode.Uri): string | undefined {
 const mockRunners = new Map<number, cp.ChildProcess>();
 
 // Ensure a mock is listening on `port`, starting `sbs debug <mission>` if not.
+// When we start one, open its browser (the runner doesn't auto-open it).
 async function ensureMockRunning(missionDir: string, port: number): Promise<boolean> {
   try { await waitForPort('127.0.0.1', port, 600); return true; } catch { /* not up yet */ }
   const existing = mockRunners.get(port);
+  let started = false;
   if (!existing || existing.exitCode !== null) {
     const base = resolveSbsBase();
     const args = [...base.args, 'debug', missionDir, '--port', String(port), '--use-working-tree'];
@@ -1979,8 +1981,14 @@ async function ensureMockRunning(missionDir: string, port: number): Promise<bool
     child.stderr?.on('data', (d: Buffer) => output.append(d.toString()));
     child.on('exit', () => mockRunners.delete(port));
     mockRunners.set(port, child);
+    started = true;
   }
-  try { await waitForPort('127.0.0.1', port, 60000); return true; } catch { return false; }
+  try { await waitForPort('127.0.0.1', port, 60000); } catch { return false; }
+  if (started) {
+    // The runner prints "open http://localhost:<port>/" but doesn't open it.
+    void vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}/`));
+  }
+  return true;
 }
 
 // Render the editor's current design for real in a running `sbs debug` mock
