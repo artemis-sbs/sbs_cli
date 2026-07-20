@@ -1630,11 +1630,12 @@ function guiEditorHtml(nonce: string): string {
 </div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
-  let idc = 0, model = { children: [] }, sel = null;
+  let idc = 0, model = { id:0, type:'root', children: [] }, sel = null;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
   // Element catalog: container flag, default props, and which fields to edit.
   const CAT = {
+    root:        { label:'Screen',       cont:true,  fields:[] },
     section:     { label:'Section',      cont:true,  with:false, props:{area:'5,5,95,95'}, fields:[['area','Area  l,t,r,b']] },
     sub_section: { label:'Sub-section',  cont:true,  with:true,  props:{style:''}, fields:[['style','Style']] },
     row:         { label:'Row',          cont:true,  with:false, props:{style:''}, fields:[['style','Style']] },
@@ -1656,8 +1657,8 @@ function guiEditorHtml(nonce: string): string {
     ['Widgets', ['text','button','checkbox','slider','input','face','icon','image','blank','table']],
   ];
 
-  function mk(type){ const c = CAT[type]; const n = { id:++idc, type, props: Object.assign({}, c.props) }; if (c.cont) n.children = []; return n; }
-  function find(id, nodes, parent){ nodes = nodes || model.children; for (const n of nodes){ if (n.id===id) return {n, parent:parent||model, list:nodes}; if (n.children){ const r = find(id, n.children, n); if (r) return r; } } return null; }
+  function mk(type){ const c = CAT[type]; const n = { id:++idc, type, props: Object.assign({}, c.props||{}) }; if (c.cont) n.children = []; return n; }
+  function find(id, nodes, parent){ if (id===0) return {n:model, parent:null, list:null}; nodes = nodes || model.children; for (const n of nodes){ if (n.id===id) return {n, parent:parent||model, list:nodes}; if (n.children){ const r = find(id, n.children, n); if (r) return r; } } return null; }
   function selNode(){ return sel==null ? null : (find(sel)||{}).n; }
 
   // --- palette ---
@@ -1669,10 +1670,13 @@ function guiEditorHtml(nonce: string): string {
 
   function addNode(type){
     const n = mk(type);
-    const s = selNode();
-    if (s && s.children) { s.children.push(n); }          // into selected container
-    else if (s) { const r = find(sel); r.list.push(n); }   // sibling of selected leaf
-    else { model.children.push(n); }                        // top level
+    if (type==='section'){ model.children.push(n); }        // sections live only at root
+    else {
+      const s = selNode();
+      if (s && s.children) { s.children.push(n); }          // into selected container (incl root)
+      else if (s) { const r = find(sel); (r.list||model.children).push(n); }  // sibling of a leaf
+      else { model.children.push(n); }
+    }
     sel = n.id; render();
   }
 
@@ -1692,13 +1696,13 @@ function guiEditorHtml(nonce: string): string {
 
   function renderTree(){
     const t = document.getElementById('tree');
-    if (!model.children.length) { t.innerHTML = '<div class="empty">Add elements from the palette. A layout is Sections → Rows → widgets. Drag nodes to move them.</div>'; return; }
-    t.innerHTML = model.children.map(nodeHtml).join('');
+    t.innerHTML = nodeHtml(model);                                     // always show the root
     t.querySelectorAll('.node').forEach(function(el){
       const id = +el.dataset.id;
       el.onclick = function(ev){ ev.stopPropagation(); sel = id; render(); };
-      // Drag to move: onto a container = into it; onto a leaf = after it.
-      el.draggable = true;
+      // Drag to move: onto a container = into it; onto a leaf = after it. Root
+      // isn't draggable, but is a drop target (into = top level).
+      el.draggable = (id !== 0);
       el.ondragstart = function(ev){ ev.dataTransfer.setData('text/plain', String(id)); ev.dataTransfer.effectAllowed='move'; ev.stopPropagation(); };
       el.ondragover = function(ev){ ev.preventDefault(); ev.stopPropagation();
         el.classList.remove('drop-into','drop-after');
@@ -1715,13 +1719,21 @@ function guiEditorHtml(nonce: string): string {
     return walk(r.n.children);
   }
   function moveNode(dragId, targetId){
-    if (dragId===targetId || isDescendant(dragId, targetId)) return;   // no self / into-own-child
-    const dr = find(dragId); if (!dr) return;
+    if (dragId===targetId || dragId===0 || isDescendant(dragId, targetId)) return;   // no self / root / into-own-child
+    const dr = find(dragId); if (!dr || !dr.list) return;
     const node = dr.n;
+    // A section may only live at root level — redirect any drop to the top.
+    if (node.type==='section'){
+      const tr0 = find(targetId);
+      dr.list.splice(dr.list.indexOf(node), 1);
+      if (tr0 && tr0.n.type==='section'){ model.children.splice(model.children.indexOf(tr0.n)+1, 0, node); }
+      else { model.children.push(node); }
+      sel = dragId; render(); return;
+    }
     dr.list.splice(dr.list.indexOf(node), 1);
     const tr = find(targetId);
     if (!tr) { model.children.push(node); }
-    else if (tr.n.children) { tr.n.children.push(node); }              // into container
+    else if (tr.n.children) { tr.n.children.push(node); }              // into container (incl root)
     else { tr.list.splice(tr.list.indexOf(tr.n)+1, 0, node); }         // after leaf
     sel = dragId; render();
   }
@@ -1811,12 +1823,14 @@ function guiEditorHtml(nonce: string): string {
     if (n.children) h += '<div class="kids">'+ (n.children.length ? n.children.map(nodeHtml).join('') : '<div class="empty">empty</div>') +'</div>';
     return h;
   }
-  function summary(n){ const p=n.props;
+  function summary(n){ const p=n.props||{};
     switch(n.type){
+      case 'root': return model.children.length + ' section(s)';
       case 'section': return p.area; case 'row': return p.style||''; case 'sub_section': return p.style||'';
       case 'grid': return p.columns+' cols'; case 'list': return p.items+' as '+(p.as||'item');
       case 'text': return p.text; case 'button': return p.text; case 'input': return p.var; case 'face': return p.var;
-      case 'blank': return p.count; case 'table': return p.items; default: return p.props||'';
+      case 'blank': return p.count; case 'table': return p.items; case 'raw': return p.line;
+      default: return p.props||'';
     }
   }
 
@@ -1824,12 +1838,13 @@ function guiEditorHtml(nonce: string): string {
   function renderProps(){
     const box = document.getElementById('props'); const n = selNode();
     if (!n) { box.innerHTML = '<div class="empty">Select an element to edit its properties.</div>'; return; }
-    const c = CAT[n.type];
+    const c = CAT[n.type] || { label:n.type, fields:[] };
+    if (n.type==='root'){ box.innerHTML = '<div class="prow"><b>Screen</b></div><div class="muted">The layout root. Sections live directly under it; drop a Section here.</div>'; return; }
     let h = '<div class="prow"><b>'+c.label+'</b></div>';
     h += '<div class="actions">'
        + '<button data-act="up">↑</button><button data-act="down">↓</button>'
        + '<button data-act="del">Delete</button></div>';
-    h += c.fields.map(function(f){
+    h += (c.fields||[]).map(function(f){
       const key=f[0], label=f[1], val=n.props[key]==null?'':n.props[key];
       const big = (key==='columns');
       return '<div class="prow"><label>'+esc(label)+'</label>'
@@ -1837,11 +1852,11 @@ function guiEditorHtml(nonce: string): string {
                : '<input data-k="'+key+'" value="'+esc(val)+'">')+'</div>';
     }).join('');
     box.innerHTML = h;
-    box.querySelectorAll('[data-k]').forEach(function(inp){ inp.oninput = function(){ n.props[inp.dataset.k] = inp.value; renderTree(); renderCode(); }; });
+    box.querySelectorAll('[data-k]').forEach(function(inp){ inp.oninput = function(){ n.props[inp.dataset.k] = inp.value; renderTree(); renderPreview(); renderCode(); }; });
     box.querySelectorAll('[data-act]').forEach(function(b){ b.onclick = function(){ act(b.dataset.act); }; });
   }
   function act(a){
-    const r = find(sel); if (!r) return;
+    const r = find(sel); if (!r || !r.list) return;                   // root has no list
     const i = r.list.indexOf(r.n);
     if (a==='del'){ r.list.splice(i,1); sel=null; }
     else if (a==='up' && i>0){ r.list.splice(i,1); r.list.splice(i-1,0,r.n); }
@@ -1885,7 +1900,7 @@ function guiEditorHtml(nonce: string): string {
   document.getElementById('copy').onclick = function(){ vscode.postMessage({ type:'copy', code: code() }); };
   document.getElementById('insert').onclick = function(){ vscode.postMessage({ type:'insert', code: code() }); };
   document.getElementById('load').onclick = function(){ vscode.postMessage({ type:'loadRequest' }); };
-  document.getElementById('clear').onclick = function(){ model = { children: [] }; sel = null; render(); };
+  document.getElementById('clear').onclick = function(){ model = { id:0, type:'root', children: [] }; sel = null; render(); };
 
   // --- round-trip: parse the editor's own generated block back into the model.
   // We only parse what we generate (a bounded dialect), so it's tractable. Lines
@@ -1919,7 +1934,7 @@ function guiEditorHtml(nonce: string): string {
     const out = [];
     while (i < lines.length){
       const raw = lines[i];
-      if (!raw.trim() || raw.trim().charAt(0)==='#'){ i++; continue; }
+      if (!raw.trim()){ i++; continue; }             // skip blanks; '#' lines become raw (kept)
       const ind = indentOf(raw);
       if (ind < base) break;
       if (ind > base){ i++; continue; }
@@ -1946,7 +1961,7 @@ function guiEditorHtml(nonce: string): string {
     idc = 0;
     const lines = String(codeText||'').replace(/\\r/g,'').split('\\n');
     const r = parseStatements(lines, 0, 0);
-    const root = { children: [] }; buildFlow(r.out, root.children);
+    const root = { id:0, type:'root', children: [] }; buildFlow(r.out, root.children);
     model = root; sel = null; render();
   }
   window.addEventListener('message', function(e){ const m = e.data; if (m && m.type==='loadBlock') loadFromCode(m.code); });
