@@ -2537,6 +2537,7 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   .badge.warn { background: var(--vscode-inputValidation-warningBackground,#5a4a1d); color:#fc8; }
   .badge.orphan { background: #5a3a1d; color:#fc8; }
   .refs { padding:0 0 2px 30px; }
+  .refs .reflabel { color: var(--vscode-descriptionForeground); font-size:10px; text-transform:uppercase; letter-spacing:.04em; padding:3px 0 1px; }
   .ref { font-family: var(--vscode-editor-font-family); font-size:12px; padding:1px 10px; cursor:pointer; white-space:nowrap; }
   .ref:hover { background: var(--vscode-list-hoverBackground,#8881); }
   .ref .rk { color: var(--vscode-symbolIcon-eventForeground,#c586c0); }
@@ -2581,14 +2582,19 @@ ${amdToolbar('resolver')}
 
   const byKey = {};
   for (const e of MODEL.entities) byKey[e.key] = e;
-  const outRefs = {};                                   // owner key -> [ref]
-  for (const r of MODEL.refs) (outRefs[r.owner] = outRefs[r.owner] || []).push(r);
+  const outRefs = {};                                   // owner key -> [ref] (what it leads to)
+  const inRefs = {};                                    // target key -> [ref] (what reaches it)
+  for (const r of MODEL.refs) {
+    (outRefs[r.owner] = outRefs[r.owner] || []).push(r);
+    const leaf = String(r.value).split('/').pop();
+    if (byKey[leaf]) { (inRefs[leaf] = inRefs[leaf] || []).push(r); }   // resolved edge into an entity
+  }
   const entsByUri = {};                                 // uri -> [entity] sorted by line (map an issue -> its entity)
   for (const e of MODEL.entities) (entsByUri[e.uri] = entsByUri[e.uri] || []).push(e);
   for (const u in entsByUri) entsByUri[u].sort((a,b) => a.line - b.line);
   function entityForIssue(it){ let f = null; for (const e of (entsByUri[it.uri]||[])){ if (e.line <= it.line) f = e; else break; } return f; }
   function scrollSelIntoView(){ const el = document.querySelector('.ent.sel'); if (el) el.scrollIntoView({ block:'nearest' }); }
-  function selectEntity(key){ const e = byKey[key]; if (!e) return; sel = key; if ((outRefs[key]||[]).length) expanded[key] = true; renderTree(); scrollSelIntoView(); }
+  function selectEntity(key){ const e = byKey[key]; if (!e) return; sel = key; if ((outRefs[key]||[]).length || (inRefs[key]||[]).length) expanded[key] = true; renderTree(); scrollSelIntoView(); }
 
   const ARCH = {
     quest:'#c586c0', scene:'#4ec9b0', dialogue:'#4daafc', lifeform:'#89d185',
@@ -2631,9 +2637,26 @@ ${amdToolbar('resolver')}
     document.getElementById('tree').innerHTML = out.join('') || '<div class="empty">No entities match.</div>';
     wireTree();
   }
+  function refRow(sel, uri, line, inner){
+    return '<div class="ref" data-sel="'+esc(sel||'')+'" data-uri="'+esc(uri)+'" data-line="'+line+'">'+inner+'</div>';
+  }
+  function outRefHtml(r){
+    const leaf = String(r.value).split('/').pop();
+    const ok = r.resolved; const tgt = ok ? byKey[leaf] : null;
+    const inner = '<span class="rk">'+esc(r.kind)+'</span> '
+      + (ok ? '<span class="ok">✓</span> ' : '<span class="bad">✗</span> ') + esc(r.value)
+      + (ok ? '' : ' <span class="bad">'+esc(r.code||'unresolved')+'</span>');
+    return refRow(ok ? leaf : '', tgt ? tgt.uri : r.uri, tgt ? tgt.line : r.line, inner);
+  }
+  function inRefHtml(r){
+    const on = byKey[r.owner];
+    const inner = '<span class="rk">'+esc(r.kind)+'</span> <span class="ok">←</span> '
+      + esc(on ? (on.display||r.owner) : r.owner);
+    return refRow(r.owner, r.uri, r.line, inner);   // jump goes to where the reference is written
+  }
   function entRow(e){
-    const refs = outRefs[e.key] || [];
-    const hasRefs = refs.length > 0;
+    const outR = outRefs[e.key] || [], inR = inRefs[e.key] || [];
+    const hasRefs = outR.length || inR.length;
     const caret = hasRefs ? (expanded[e.key] ? '▾' : '▸') : '';
     let badges = '';
     if (e.problems && e.problems.error) badges += ' <span class="badge err">'+e.problems.error+'</span>';
@@ -2645,17 +2668,10 @@ ${amdToolbar('resolver')}
       + '<span class="ename">'+esc(e.display)+'</span> <span class="ekey">'+esc(e.key)+'</span>'
       + badges + '</div>';
     if (hasRefs && expanded[e.key]){
-      row += '<div class="refs">' + refs.map(r => {
-        const leaf = String(r.value).split('/').pop();
-        const ok = r.resolved;
-        return '<div class="ref" data-ref-owner="'+esc(e.key)+'" data-leaf="'+esc(leaf)+'"'
-          + ' data-uri="'+esc(r.uri)+'" data-line="'+r.line+'" data-ok="'+(ok?'1':'0')+'">'
-          + '<span class="rk">'+esc(r.kind)+'</span> '
-          + (ok ? '<span class="ok">✓</span> ' : '<span class="bad">✗</span> ')
-          + esc(r.value)
-          + (ok ? '' : ' <span class="bad">'+esc(r.code||'unresolved')+'</span>')
-          + '</div>';
-      }).join('') + '</div>';
+      let sub = '<div class="refs">';
+      if (outR.length) { sub += '<div class="reflabel">→ leads to</div>' + outR.map(outRefHtml).join(''); }
+      if (inR.length)  { sub += '<div class="reflabel">← reached by</div>' + inR.map(inRefHtml).join(''); }
+      row += sub + '</div>';
     }
     return row;
   }
@@ -2666,7 +2682,8 @@ ${amdToolbar('resolver')}
       b.onclick = (ev) => { ev.stopPropagation(); vscode.postMessage({ type:'addEntity', section: b.dataset.section }); };
     }
     for (const c of document.querySelectorAll('.car')){
-      c.onclick = (ev) => { ev.stopPropagation(); const k = c.dataset.car; if (!(outRefs[k]||[]).length) return;
+      c.onclick = (ev) => { ev.stopPropagation(); const k = c.dataset.car;
+        if (!(outRefs[k]||[]).length && !(inRefs[k]||[]).length) return;
         expanded[k] = !expanded[k]; renderTree(); };
     }
     for (const el of document.querySelectorAll('.ent')){
@@ -2677,10 +2694,8 @@ ${amdToolbar('resolver')}
     }
     for (const el of document.querySelectorAll('.ref')){
       el.onclick = (ev) => { ev.stopPropagation();
-        if (el.dataset.ok === '1' && byKey[el.dataset.leaf]) selectEntity(el.dataset.leaf); };
-      el.ondblclick = (ev) => { ev.stopPropagation();
-        if (el.dataset.ok === '1' && byKey[el.dataset.leaf]) { const t = byKey[el.dataset.leaf]; goto(t.uri, t.line); }
-        else { goto(el.dataset.uri, +el.dataset.line); } };
+        if (el.dataset.sel && byKey[el.dataset.sel]) selectEntity(el.dataset.sel); };   // browse to the related entity
+      el.ondblclick = (ev) => { ev.stopPropagation(); goto(el.dataset.uri, +el.dataset.line); };  // open source
     }
   }
 
