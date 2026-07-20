@@ -2573,7 +2573,7 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
     let badges = '';
     if (e.problems && e.problems.error) badges += ' <span class="badge err">'+e.problems.error+'</span>';
     if (e.problems && e.problems.warning) badges += ' <span class="badge warn">'+e.problems.warning+'</span>';
-    if (e.orphan) badges += ' <span class="badge orphan" title="no inbound reference">orphan</span>';
+    if (e.orphan) badges += ' <span class="badge orphan" title="unreachable — nothing reveals it and it has no When:/signal trigger">orphan</span>';
     let row = '<div class="ent'+(sel===e.key?' sel':'')+'" data-k="'+esc(e.key)+'">'
       + '<span class="car" data-car="'+esc(e.key)+'">'+caret+'</span>'
       + '<span class="dot" style="background:'+archColor(e.archetype)+'"></span>'
@@ -2621,7 +2621,7 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
     const rows = MODEL.issues.slice();
     for (const e of orphanEnts())
       rows.push({ uri:e.uri, line:e.line, col:0, severity:'warning', code:'orphan',
-                  message:'"'+(e.display||e.key)+'" has no inbound reference' });
+                  message:'"'+(e.display||e.key)+'" is unreachable — nothing reveals it and it has no When:/signal trigger' });
     const rank = s => s === 'error' ? 0 : 1;
     rows.sort((a,b) => (rank(a.severity)-rank(b.severity)) || (a.uri||'').localeCompare(b.uri||'') || a.line-b.line);
     const errs = rows.filter(r => r.severity === 'error').length;
