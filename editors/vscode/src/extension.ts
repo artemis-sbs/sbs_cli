@@ -2046,8 +2046,8 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
       if (n.type==='cinematic' && key==='mode'){
         ctrl = '<select data-k="mode"><option value="auto"'+(val!=='full'?' selected':'')+'>auto</option>'
              + '<option value="full"'+(val==='full'?' selected':'')+'>full</option></select>';
-      } else if (key==='on_click' || key==='on_message' || key==='columns' || key==='args'){
-        ctrl = '<textarea rows="3" data-k="'+key+'">'+esc(val)+'</textarea>';   // multiline handler / args
+      } else if (key==='on_click' || key==='on_message' || key==='columns' || key==='args' || (key==='text' && n.type==='text_area')){
+        ctrl = '<textarea rows="3" data-k="'+key+'">'+esc(val)+'</textarea>';   // multiline handler / args / markdown
       } else {
         const list = (n.type==='layout_widget'&&key==='widget') ? ' list="dl-widgets"'
                    : ((key==='console'||(n.type==='activate_console'&&key==='name')) ? ' list="dl-consoles"' : '');
@@ -2057,6 +2057,8 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     }).join('');
     h += '<datalist id="dl-widgets">'+ENGINE_WIDGETS.map(function(w){ return '<option value="'+esc(w)+'">'; }).join('')+'</datalist>';
     h += '<datalist id="dl-consoles">'+CONSOLES.map(function(w){ return '<option value="'+esc(w)+'">'; }).join('')+'</datalist>';
+    if (n.type==='layout_widget'){ h += '<div class="muted" style="padding:6px 0">The engine owns this view\'s content — place &amp; size it via its section\'s <b>Area</b>.</div>'; }
+    if (n.type==='console_preset'){ h += '<div class="muted" style="padding:6px 0">A whole prebuilt console — it auto-lays out its own widgets. Use instead of a manual layout.</div>'; }
     box.innerHTML = h;
     box.querySelectorAll('[data-k]').forEach(function(inp){ inp.oninput = function(){ n.props[inp.dataset.k] = inp.value; renderTree(); renderPreview(); renderCode(); recordHistorySoon(); }; });
     box.querySelectorAll('[data-act]').forEach(function(b){ b.onclick = function(){ act(b.dataset.act); }; });
