@@ -1648,8 +1648,8 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
   // (also unit-tested in Node). See top of file.
   const CAT = GuiModel.CAT;
   const PALETTE = [
-    ['Containers', ['section','sub_section','row','grid','list']],
-    ['Widgets', ['text','button','checkbox','slider','input','face','icon','image','blank','table']],
+    ['Containers', ['section','sub_section','row','grid','list','table']],
+    ['Widgets', ['text','button','checkbox','slider','input','face','icon','image','blank']],
   ];
 
   function mk(type){ const c = CAT[type]; const n = { id:++idc, type, props: Object.assign({}, c.props||{}) }; if (c.cont) n.children = []; return n; }
@@ -1826,7 +1826,7 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
       else if (n.type==='grid'){ flush(); const cols=Math.max(1,parseInt(n.props.columns)||1);
         out += '<div class="pv-grid'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'" style="grid-template-columns:repeat('+cols+',1fr);">'+(n.children||[]).map(pvWidget).join('')+'</div>'; }
       else if (n.type==='list'){ flush(); out += pvList(n); }
-      else if (n.type==='table'){ flush(); out += pvBox(n, 'table '+esc(n.props.items||''), ''); }
+      else if (n.type==='table'){ flush(); out += pvTable(n); }
       else if (n.type==='sub_section'){ flush(); out += '<div class="pv-box'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'"><div class="pv-cap">sub-section</div>'+pvFlow(n.children||[])+'</div>'; }
       else { band.push(pvWidget(n)); }
     }
@@ -1840,6 +1840,15 @@ function guiEditorHtml(nonce: string, webview: vscode.Webview, docMode = false):
     return s+'</div>';
   }
   function pvBox(n, cap){ return '<div class="pv-box'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'"><div class="pv-cap">'+cap+'</div></div>'; }
+  function pvTable(n){
+    const cells = (n.children||[]).map(pvWidget).join('');
+    const heads = (n.props.headers||'').split(',').map(function(h){ return h.trim(); }).filter(Boolean)
+      .map(function(h){ return '<span class="pv-w" style="color:#8ab;text-align:center;">'+esc(h)+'</span>'; }).join('');
+    let s = '<div class="pv-box'+(n.id===sel?' sel':'')+'" data-id="'+n.id+'"><div class="pv-cap">table · '+esc(n.props.items||'')+'</div>';
+    if (heads) s += '<div class="pv-row-sample">'+heads+'</div>';
+    for (let i=0;i<2;i++){ s += '<div class="pv-row-sample">'+(cells||'<span class="pv-w">row…</span>')+'</div>'; }
+    return s+'</div>';
+  }
   function pvWidget(n){
     const cls = n.type==='button' ? ' btn' : (n.type==='face' ? ' face' : '');
     let label = summary(n) || n.type;

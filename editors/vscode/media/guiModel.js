@@ -32,7 +32,7 @@
     icon:        { label: 'Icon',         cont: false, props: { props: 'icon_index:1;', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
     image:       { label: 'Image',        cont: false, props: { props: '', style: '' }, fields: [['props', 'Props'], ['style', 'Style']] },
     blank:       { label: 'Blank',        cont: false, props: { count: '1' }, fields: [['count', 'Count']] },
-    table:       { label: 'Table',        cont: false, props: { items: 'rows', columns: "[{'key':'name','label':'Name'}]", select: 'true' }, fields: [['items', 'Items variable'], ['columns', 'Columns (list of dicts)'], ['select', 'Select (true/false)']] },
+    table:       { label: 'Table',        cont: true,  with: true, props: { items: 'rows', headers: '', as: 'row', select: 'true' }, fields: [['items', 'Items variable'], ['headers', 'Headers (comma-separated)'], ['as', 'Row variable'], ['select', 'Select (true/false)']] },
   };
 
   // --- code generation: model -> MAST lines ---
@@ -73,9 +73,11 @@
         case 'image': out.push(pad(ind) + 'gui_image("' + q(p.props) + '", "' + q(p.style) + '")'); break;
         case 'blank': out.push(pad(ind) + 'gui_blank(' + q(p.count) + ')'); break;
         case 'table': {
-          let a = 'gui_table(' + q(p.items) + ', ' + q(p.columns);
+          let a = 'gui_table(' + q(p.items);
+          if (p.headers) { a += ', headers=[' + q(p.headers).split(',').map(function (h) { return '"' + h.trim() + '"'; }).join(', ') + ']'; }
           if (p.select === 'true') { a += ', select=True'; }
-          a += ')'; out.push(pad(ind) + a); break;
+          a += ') as ' + (q(p.as) || 'row') + ':';
+          out.push(pad(ind) + 'with ' + a); out = out.concat(body(n, ind + 1)); break;
         }
         case 'raw': out.push(pad(ind) + q(p.line)); break;
       }
@@ -106,6 +108,15 @@
     if ((m = s.match(/^with gui_sub_section\("(.*)"\):$/))) { return { type: 'sub_section', with: true, props: { style: m[1] } }; }
     if ((m = s.match(/^with gui_grid\((.+?)\):$/))) { return { type: 'grid', with: true, props: { columns: m[1].trim() } }; }
     if ((m = s.match(/^with gui_list\((.+)\) as (\w+):$/))) { const p = parseListArgs(m[1]); p.as = m[2]; return { type: 'list', with: true, props: p }; }
+    if ((m = s.match(/^with gui_table\((.+)\) as (\w+):$/))) {
+      const inner = m[1]; const ci = inner.indexOf(',');
+      const p = { items: (ci >= 0 ? inner.slice(0, ci) : inner).trim(), headers: '', as: m[2], select: 'false' };
+      const rest = ci >= 0 ? inner.slice(ci + 1) : '';
+      if (/select\s*=\s*True/.test(rest)) { p.select = 'true'; }
+      const hm = rest.match(/headers\s*=\s*\[([^\]]*)\]/);
+      if (hm) { p.headers = hm[1].split(',').map(function (x) { return x.trim().replace(/^["']|["']$/g, ''); }).filter(function (x) { return x !== ''; }).join(', '); }
+      return { type: 'table', with: true, props: p };
+    }
     if ((m = s.match(/^gui_text\("(.*)"\)$/))) { return { type: 'text', props: parseTextProps(m[1]) }; }
     if ((m = s.match(/^gui_button\("(.*?)"(?:,\s*"(.*)")?\)(:?)$/))) { return { type: 'button', props: { text: m[1], style: m[2] || '', jump: '' }, needsJump: m[3] === ':' }; }
     if ((m = s.match(/^gui_checkbox\("(.*)",\s*"(.*)"\)$/))) { return { type: 'checkbox', props: { props: m[1], style: m[2] } }; }
@@ -115,7 +126,8 @@
     if ((m = s.match(/^gui_input\("",\s*var="(.+?)"\)$/))) { return { type: 'input', props: { var: m[1], style: '' } }; }
     if ((m = s.match(/^gui_face\((.+?)\)$/))) { return { type: 'face', props: { var: m[1], style: '' } }; }
     if ((m = s.match(/^gui_blank\((.+?)\)$/))) { return { type: 'blank', props: { count: m[1] } }; }
-    if ((m = s.match(/^gui_table\((.+?),\s*(\[[\s\S]*\])(,\s*select\s*=\s*True)?\)$/))) { return { type: 'table', props: { items: m[1].trim(), columns: m[2], select: m[3] ? 'true' : 'false' } }; }
+    // Declarative gui_table(items, [cols]) is kept verbatim as 'raw' (the editor's
+    // table is the `with` block form above).
     return { type: 'raw', props: { line: s } };
   }
   function parseStatements(lines, i, base) {

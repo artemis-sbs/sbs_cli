@@ -25,7 +25,10 @@ const model = { id: 0, type: 'root', children: [
     ] },
   ] },
   { id: 8, type: 'section', props: { area: '65,5,95,90' }, children: [
-    { id: 9, type: 'table', props: { items: 'rows', columns: "[{'key':'name','label':'Name'}]", select: 'true' } },
+    { id: 9, type: 'table', props: { items: 'rows', headers: 'Name, Hull', as: 'row', select: 'true' }, children: [
+      { id: 10, type: 'text', props: { text: "{row['name']}", style: '' } },
+      { id: 11, type: 'text', props: { text: "{row['hull']}", style: '' } },
+    ] },
   ] },
 ] };
 const code1 = GuiModel.generate(model);
@@ -75,6 +78,13 @@ const b = GuiModel.parse('gui_button("X", "color:red;")').model.children[0];
 check('button style parsed', b.props.style === 'color:red;' && b.props.jump === '');
 const lst = GuiModel.parse('with gui_list(a, row_height="3em") as x:\n    gui_text("$text:h;")').model.children[0];
 check('list row_height parsed', lst.props.row_height === '3em');
+
+// 5b) gui_table container (with form) + headers round-trip.
+const tbl = 'with gui_table(fleet, headers=["Ship", "Hull"], select=True) as row:\n    gui_text("$text:{row[\'name\']};")\n    gui_text("$text:{row[\'hull\']};")';
+check('gui_table with-form round-trip', GuiModel.generate(GuiModel.parse(tbl).model) === tbl);
+const tn = GuiModel.parse(tbl).model.children[0];
+check('table is a container with cells', tn.type === 'table' && tn.children && tn.children.length === 2);
+check('table headers parsed', tn.props.headers === 'Ship, Hull' && tn.props.as === 'row');
 
 // 6) section style round-trips; a plain section (no style) is unchanged.
 check('section style round-trip', GuiModel.generate(GuiModel.parse('gui_section("area: 5,5,95,95;background:#123;")').model) === 'gui_section("area: 5,5,95,95;background:#123;")');
