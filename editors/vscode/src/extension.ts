@@ -1100,7 +1100,7 @@ function wsEditFromChanges(changes: Record<string, { range: LspRange; newText: s
   return edit;
 }
 
-async function openLocation(uriStr: string, line: number, opts?: { onlyIfVisible?: boolean }): Promise<void> {
+async function openLocation(uriStr: string, line: number, opts?: { onlyIfVisible?: boolean; preserveFocus?: boolean }): Promise<void> {
   const uri = vscode.Uri.parse(uriStr);
   const pos = new vscode.Position(Math.max(0, line), 0);
   const range = new vscode.Range(pos, pos);
@@ -1115,7 +1115,9 @@ async function openLocation(uriStr: string, line: number, opts?: { onlyIfVisible
   }
   try {
     const doc = await vscode.workspace.openTextDocument(uri);
-    const editor = await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: true });
+    const editor = await vscode.window.showTextDocument(doc, {
+      viewColumn: vscode.ViewColumn.One, preview: true, preserveFocus: opts?.preserveFocus ?? false,
+    });
     editor.selection = new vscode.Selection(pos, pos);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
   } catch (e) {
@@ -2458,7 +2460,7 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   .top input[type=search] { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:4px; padding:2px 8px; font-size:12px; width:180px; }
   .top label { font-size:11px; color: var(--vscode-descriptionForeground); cursor:pointer; }
   .muted { color: var(--vscode-descriptionForeground); }
-  .split { display:grid; grid-template-columns: 1.4fr 1fr; flex:1; min-height:0; }
+  .split { display:grid; grid-template-columns: 1.4fr 1fr; flex:1; min-height:0; user-select:none; }
   .pane { overflow:auto; min-height:0; }
   .pane.model { border-right:1px solid var(--vscode-panel-border,#8883); }
   .bar { padding:4px 10px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); position:sticky; top:0; background:var(--vscode-editor-background); border-bottom:1px solid var(--vscode-panel-border,#8882); display:flex; gap:8px; align-items:center; z-index:1; }
@@ -2496,6 +2498,8 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   <input id="q" type="search" placeholder="Filter entities…" autofocus>
   <label><input type="checkbox" id="probOnly"> problems only</label>
   <span class="muted" id="counts"></span>
+  <span style="flex:1"></span>
+  <span class="muted" style="font-size:11px">single-click browses · double-click opens source</span>
 </div>
 <div class="split">
   <div class="pane model">
@@ -2517,6 +2521,12 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
   for (const e of MODEL.entities) byKey[e.key] = e;
   const outRefs = {};                                   // owner key -> [ref]
   for (const r of MODEL.refs) (outRefs[r.owner] = outRefs[r.owner] || []).push(r);
+  const entsByUri = {};                                 // uri -> [entity] sorted by line (map an issue -> its entity)
+  for (const e of MODEL.entities) (entsByUri[e.uri] = entsByUri[e.uri] || []).push(e);
+  for (const u in entsByUri) entsByUri[u].sort((a,b) => a.line - b.line);
+  function entityForIssue(it){ let f = null; for (const e of (entsByUri[it.uri]||[])){ if (e.line <= it.line) f = e; else break; } return f; }
+  function scrollSelIntoView(){ const el = document.querySelector('.ent.sel'); if (el) el.scrollIntoView({ block:'nearest' }); }
+  function selectEntity(key){ const e = byKey[key]; if (!e) return; sel = key; if ((outRefs[key]||[]).length) expanded[key] = true; renderTree(); scrollSelIntoView(); }
 
   const ARCH = {
     quest:'#c586c0', scene:'#4ec9b0', dialogue:'#4daafc', lifeform:'#89d185',
@@ -2585,18 +2595,22 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
     return row;
   }
   function wireTree(){
+    // Single-click browses in the panel (select / expand); double-click opens the
+    // source. Nothing moves the editor on a plain click.
     for (const c of document.querySelectorAll('.car')){
       c.onclick = (ev) => { ev.stopPropagation(); const k = c.dataset.car; if (!(outRefs[k]||[]).length) return;
         expanded[k] = !expanded[k]; renderTree(); };
     }
     for (const el of document.querySelectorAll('.ent')){
-      el.onclick = () => { const e = byKey[el.dataset.k]; sel = e.key; goto(e.uri, e.line); renderTree(); };
+      el.onclick = () => selectEntity(el.dataset.k);
+      el.ondblclick = () => { const e = byKey[el.dataset.k]; goto(e.uri, e.line); };
     }
     for (const el of document.querySelectorAll('.ref')){
       el.onclick = (ev) => { ev.stopPropagation();
+        if (el.dataset.ok === '1' && byKey[el.dataset.leaf]) selectEntity(el.dataset.leaf); };
+      el.ondblclick = (ev) => { ev.stopPropagation();
         if (el.dataset.ok === '1' && byKey[el.dataset.leaf]) { const t = byKey[el.dataset.leaf]; goto(t.uri, t.line); }
-        else { goto(el.dataset.uri, +el.dataset.line); }
-      };
+        else { goto(el.dataset.uri, +el.dataset.line); } };
     }
   }
 
@@ -2611,14 +2625,18 @@ function amdResolverHtml(model: ResolveModel, nonce: string): string {
     const errs = rows.filter(r => r.severity === 'error').length;
     document.getElementById('iCount').textContent = rows.length ? '('+errs+' err, '+(rows.length-errs)+' warn)' : '';
     const shortUri = u => { const s = String(u||''); const i = s.replace(/\\\\/g,'/').lastIndexOf('/'); return i<0? s : s.slice(i+1); };
-    document.getElementById('issues').innerHTML = rows.length ? rows.map(r =>
-      '<div class="issue" data-uri="'+esc(r.uri)+'" data-line="'+r.line+'">'
+    document.getElementById('issues').innerHTML = rows.length ? rows.map((r,i) =>
+      '<div class="issue" data-idx="'+i+'">'
       + '<span class="sev '+esc(r.severity)+'"></span>'
       + '<span class="msg">'+esc(r.message)+'</span>'
       + '<span class="code">'+esc(r.code)+'</span>'
       + '<span class="loc">'+esc(shortUri(r.uri))+':'+(r.line+1)+'</span></div>'
     ).join('') : '<div class="empty">No problems — every reference resolves and every heading is reachable. ✓</div>';
-    for (const el of document.querySelectorAll('.issue')) el.onclick = () => goto(el.dataset.uri, +el.dataset.line);
+    for (const el of document.querySelectorAll('.issue')){
+      const it = rows[+el.dataset.idx];
+      el.onclick = () => { const e = entityForIssue(it); if (e) selectEntity(e.key); };  // browse to the entity
+      el.ondblclick = () => goto(it.uri, it.line);                                        // open the source line
+    }
   }
 
   document.getElementById('counts').textContent =
@@ -2661,7 +2679,7 @@ async function showAmdResolver(): Promise<void> {
   });
   panel.onDidDispose(() => docSub.dispose());
   panel.webview.onDidReceiveMessage((msg) => {
-    if (msg?.type === 'goto') { openLocation(msg.uri, msg.line); }
+    if (msg?.type === 'goto') { openLocation(msg.uri, msg.line, { preserveFocus: true }); }
   });
 }
 
