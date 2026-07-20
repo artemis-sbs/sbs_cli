@@ -1687,9 +1687,13 @@ function guiEditorHtml(nonce: string, docMode = false): string {
   // In file mode, push generated MAST back to the document when it actually
   // changes (debounced). lastSent guards the loop: receiving an 'update' sets it,
   // so re-rendering doesn't echo the change back.
-  let lastSent = null, syncTimer = null;
-  function maybeSync(){ const c = code(); if (c === lastSent) return;
-    clearTimeout(syncTimer); syncTimer = setTimeout(function(){ lastSent = c; vscode.postMessage({ type:'apply', code: c }); }, 250); }
+  let lastSent = null, syncTimer = null, loaded = false;
+  function maybeSync(){
+    if (!loaded) return;                          // don't write until the document has loaded (avoids clearing it on open)
+    const c = code(); clearTimeout(syncTimer);
+    if (c === lastSent) return;
+    syncTimer = setTimeout(function(){ lastSent = c; vscode.postMessage({ type:'apply', code: c }); }, 250);
+  }
   // Middle tabs switch Preview vs Code; the tree lives on the right, always shown.
   function pickTab(t){
     document.getElementById('preview').classList.toggle('hidden', t!=='preview');
@@ -1971,7 +1975,7 @@ function guiEditorHtml(nonce: string, docMode = false): string {
     const r = parseStatements(lines, 0, 0);
     const root = { id:0, type:'root', children: [] }; buildFlow(r.out, root.children);
     model = root; sel = null;
-    if (DOCMODE) { lastSent = code(); }            // opening must not rewrite the file
+    if (DOCMODE) { lastSent = code(); loaded = true; }   // now safe to sync; opening must not rewrite the file
     render();
   }
   window.addEventListener('message', function(e){ const m = e.data; if (!m) return;
