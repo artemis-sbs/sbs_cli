@@ -59,7 +59,29 @@ sbs production -q       # "quiet" — skips the "are you sure?" question
 > **Heads up:** this removes your current mission folders and re-downloads them.
 > If you've been editing a mission, copy it somewhere safe first.
 
-### `sbs fetch` — get one specific mission
+### `sbs swap` — switch between mission sets
+
+Cosmos loads exactly one `data/missions` folder. If you keep several sets side by
+side — say `missions_amd` and `missions_mast` from a converter, plus the stock
+missions — `sbs swap` repoints `data/missions` at whichever one you want. Nothing
+is copied; it just moves a link.
+
+```
+sbs swap                # which set is active, and what else is available
+sbs swap amd            # load data/missions_amd
+sbs swap mast           # load data/missions_mast
+```
+
+Any folder named `missions_<name>` next to `data/missions` is a valid target, so
+adding a set is just creating the folder. The prefix is optional — `amd` and
+`missions_amd` mean the same thing.
+
+If your `data/missions` is a **real folder** (a normal install), the first swap
+renames it to `missions_cos` instead of deleting it, so `sbs swap cos` puts you
+back on the stock missions. It never deletes a mission folder — only the link.
+
+> **Heads up:** close Cosmos first. A running client holds files open under the
+> link, and the swap will refuse rather than half-finish.
 
 Downloads a single mission (and anything it depends on) from GitHub.
 
@@ -353,6 +375,7 @@ Start the server and clients and let it run.
 |---|---|
 | `sbs fetch <name>` | Download one (or several) missions |
 | `sbs production` | Download all the missions that ship with Cosmos |
+| `sbs swap <name>` | Switch which `missions_*` set Cosmos loads |
 | `sbs run <consoles>` | Launch the game — one window or many |
 | `sbs debug <folder>` | Test-fly a mission in your browser |
 | `sbs web <folder>` | Serve a mission's live web pages |

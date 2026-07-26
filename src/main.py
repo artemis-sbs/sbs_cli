@@ -13,6 +13,7 @@ from compile_cmd import compile
 from lint_cmd import lint
 from fmt_cmd import fmt
 from dap_cmd import dap
+from swap_cmd import swap
 import click
 
 
