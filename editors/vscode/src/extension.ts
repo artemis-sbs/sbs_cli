@@ -1124,11 +1124,10 @@ interface TimelineItem {
                on_complete: string | null; fail_signal: string | null };
   groups: { section: string; arc: string; side: string | null; console: string[] };
 }
-interface TimelineEdge extends GraphEdge { fromUid: string; toUid: string; }
 interface TimelineModel {
   items: TimelineItem[]; beats: number;
   lanes: { section: string[]; arc: string[]; side: string[]; console: string[] };
-  edges: TimelineEdge[];
+  edges: GraphEdge[];
   cycles: { from: string; to: string; fromUid: string; toUid: string }[];
 }
 
@@ -2608,7 +2607,7 @@ const AMD_TOOLBAR_JS = `for (const b of document.querySelectorAll('.amdtools but
 // Note: a node whose key was rewritten carries a path in `key`, so key-addressed
 // operations on it (rename) won't match - but a rename of an ambiguous bare key was
 // never well-defined either. Anything that edits goes through uri+line instead.
-function disambiguateKeys<T extends MissionGraph>(g: T): T {
+function disambiguateKeys(g: MissionGraph): MissionGraph {
   const count = new Map<string, number>();
   for (const n of g.nodes) { count.set(n.key, (count.get(n.key) ?? 0) + 1); }
   if (![...count.values()].some((c) => c > 1)) { return g; }
@@ -3012,23 +3011,32 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
     else {
       const lanes = laneOrder(spine);
       const cols = 'minmax(110px,150px) repeat('+cols4.length+', minmax(150px,1fr))';
+      // Bucket once (lane x beat) rather than re-filtering every item for every cell -
+      // this runs on each keystroke in the search box, and lanesOf() allocates.
+      const cells = new Map(), counts = new Map();
+      for (const it of spine) {
+        counts.set(it.beat, (counts.get(it.beat) || 0) + 1);
+        for (const lane of lanesOf(it)) {
+          const k = lane + ' ' + it.beat;
+          const list = cells.get(k); if (list) list.push(it); else cells.set(k, [it]);
+        }
+      }
       let g = '<div class="grid" style="grid-template-columns:'+cols+'">';
       g += '<div class="hd"></div>';
       for (const b of cols4) g += '<div class="hd">beat '+b+'</div>';
       for (const lane of lanes) {
         g += '<div class="lane" title="'+esc(lane)+'">'+esc(lane)+'</div>';
         for (const b of cols4) {
-          const cell = spine.filter(i => i.beat === b && lanesOf(i).indexOf(lane) >= 0);
-          g += '<div class="cell">'+cell.map(bar).join('')+'</div>';
+          g += '<div class="cell">'+(cells.get(lane + ' ' + b) || []).map(bar).join('')+'</div>';
         }
       }
       parts.push(g + '</div>');
       // The pacing curve: how much is in play at each beat. A thin column is a lull.
       let pace = '<div class="pace" style="grid-template-columns:'+cols+'">'
                + '<div class="n" style="text-align:right;padding-right:6px">load</div>';
-      const counts = cols4.map(b => spine.filter(i => i.beat === b).length);
-      const peak = Math.max(1, ...counts);
-      for (const c of counts) pace += '<div class="b" style="height:'+Math.round(c / peak * 30)+'px" title="'+c+' active"></div>';
+      const load = cols4.map(b => counts.get(b) || 0);
+      const peak = Math.max(1, ...load);
+      for (const c of load) pace += '<div class="b" style="height:'+Math.round(c / peak * 30)+'px" title="'+c+' active"></div>';
       parts.push(pace + '</div>');
     }
 
@@ -3038,10 +3046,14 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
     if (!pool.length) { parts.push('<div class="empty">No unordered content.</div>'); }
     else {
       const lanes = laneOrder(pool);
+      const byLane = new Map();
+      for (const it of pool) for (const lane of lanesOf(it)) {
+        const list = byLane.get(lane); if (list) list.push(it); else byLane.set(lane, [it]);
+      }
       let g = '<div class="grid" style="grid-template-columns:minmax(110px,150px) 1fr">';
       for (const lane of lanes) {
         g += '<div class="lane" title="'+esc(lane)+'">'+esc(lane)+'</div>';
-        g += '<div class="cell">'+pool.filter(i => lanesOf(i).indexOf(lane) >= 0).map(bar).join('')+'</div>';
+        g += '<div class="cell">'+(byLane.get(lane) || []).map(bar).join('')+'</div>';
       }
       parts.push(g + '</div>');
     }
