@@ -327,7 +327,7 @@ ${inspector ? inspector.scripts : ''}
     g.addEventListener('click', () => {
       if (moved || !g.dataset.key) { return; }
       vscode.postMessage({ type: 'goto', uri: g.dataset.uri, line: parseInt(g.dataset.line, 10) });
-      vscode.postMessage({ type: 'inspect', uri: g.dataset.uri, key: g.dataset.key });
+      vscode.postMessage({ type: 'inspect', uri: g.dataset.uri, key: g.dataset.key, line: parseInt(g.dataset.line, 10) });
     });
   }
 
@@ -571,10 +571,17 @@ function liveInspectors(): Inspector[] {
   return [panelInspector, ...drawerInspectors].filter(Boolean) as Inspector[];
 }
 // Fetch a node's detail and render it into a host (used by the map/graph drawer).
-async function loadNodeInto(insp: Inspector, uri: string, key: string): Promise<void> {
+// `line` (0-based, the heading's own line) disambiguates a key that is reused
+// elsewhere in the mission - `job_ghost/scan` vs `job_sweep/scan`. Without it the
+// server falls back to a bare-key lookup, which can load, and then EDIT, a namesake
+// under a different parent. Panels that know the line should always pass it.
+async function loadNodeInto(insp: Inspector, uri: string, key: string, line?: number): Promise<void> {
   if (!client) { return; }
   try {
-    const d = await client.sendRequest<NodeDetail | null>('amd/node', { textDocument: { uri }, key });
+    const params: { textDocument: { uri: string }; key: string; line?: number } =
+      { textDocument: { uri }, key };
+    if (line !== undefined) { params.line = line; }
+    const d = await client.sendRequest<NodeDetail | null>('amd/node', params);
     if (d) { renderInspectorInto(insp, uri, d); }
   } catch { /* ignore */ }
 }
@@ -1090,9 +1097,40 @@ async function openLocation(uriStr: string, line: number, opts?: { onlyIfVisible
 
 // --- Story graph preview ----------------------------------------------------
 interface Problems { error: number; warning: number; }
-interface GraphNode { key: string; display: string; section: string; uri: string; line: number; addLine: number; problems: Problems | null; }
-interface GraphEdge { from: string; to: string; kind: string; uri: string; line: number; targetRange: LspRange; }
+// `uid` (<uri>#<path>) is the true identity; `key` is the bare heading key, unique
+// only among siblings (see disambiguateKeys).
+interface GraphNode { uid: string; path: string; key: string; display: string; section: string; uri: string; line: number; addLine: number; problems: Problems | null; }
+interface GraphEdge { from: string; to: string; fromUid: string; toUid: string; kind: string; uri: string; line: number; targetRange: LspRange; }
 interface MissionGraph { nodes: GraphNode[]; edges: GraphEdge[]; }
+
+// --- Story Timeline model (from the `amd/timeline` LSP request) --------------
+// AMD has no clock, so a `beat` is CAUSAL rank (longest path from the start set),
+// not seconds - `declared` carries the one real duration the language has. Items
+// with no order to them at all (an idle job board) come back on the `pool` track
+// rather than being laid out as a sequence nobody wrote.
+interface TimelineItem {
+  // `uid` (<uri>#<path>) is the identity - a bare `key` is unique only among siblings,
+  // so three jobs can each own a step called `scan`.
+  uid: string; path: string;
+  key: string; display: string; section: string; archetype: string | null;
+  uri: string; line: number; beat: number; track: 'spine' | 'pool';
+  state: string; required: boolean; cycle: boolean;
+  declared: { seconds: number; label: string; field: string; fail: boolean } | null;
+  problems: Problems | null;
+  // Drill-down: this record's own steps, and its place in its parent's.
+  steps: number; stepsInferred: boolean;
+  parent: string | null; step: number | null; stepInferred: boolean;
+  lifecycle: { goal: string | null; when: string | null; on_accept: string | null;
+               on_complete: string | null; fail_signal: string | null };
+  groups: { section: string; arc: string; side: string | null; console: string[] };
+}
+interface TimelineEdge extends GraphEdge { fromUid: string; toUid: string; }
+interface TimelineModel {
+  items: TimelineItem[]; beats: number;
+  lanes: { section: string[]; arc: string[]; side: string[]; console: string[] };
+  edges: TimelineEdge[];
+  cycles: { from: string; to: string; fromUid: string; toUid: string }[];
+}
 
 // --- AMD Live Resolver model (from the `amd/resolve` LSP request) ------------
 interface ResolveEntity {
@@ -2469,7 +2507,7 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
       + '<div class="dactions"><button id="open">Open source</button></div>';
     document.getElementById('open').onclick = () => vscode.postMessage({ type:'goto', uri:n.uri, line:n.line });
     // The editable inspector loads inline (into #insp-mount) — no Edit button.
-    vscode.postMessage({ type:'inspect', uri:n.uri, key:n.key });
+    vscode.postMessage({ type:'inspect', uri:n.uri, key:n.key, line:n.line });
     const out = edges.filter(e => e.from === key);
     const inc = edges.filter(e => e.to === key);
     conns.innerHTML = '<div class="insp-sep"></div>'
@@ -2544,8 +2582,8 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
 // Outline / Graph / Resolver / Map / Inspector without returning to the editor.
 // Ordered for a document's lifetime: authoring tools first, then live testing.
 const AMD_TOOLS: [string, string][] = [
-  ['outline', 'Outline'], ['graph', 'Graph'], ['resolver', 'Resolver'],
-  ['map', 'Map'], ['inspector', 'Inspector'],
+  ['outline', 'Outline'], ['timeline', 'Timeline'], ['graph', 'Graph'],
+  ['resolver', 'Resolver'], ['map', 'Map'], ['inspector', 'Inspector'],
 ];
 function amdToolbar(current: string): string {
   const btns = AMD_TOOLS.map(([k, l]) =>
@@ -2558,6 +2596,36 @@ const AMD_TOOLBAR_CSS = `
   .amdtools button.cur { background:var(--vscode-button-background,#0a63c9); color:#fff; cursor:default; opacity:.85; }
   .amdtools button:not(.cur):hover { background:var(--vscode-button-secondaryHoverBackground,#555); }`;
 const AMD_TOOLBAR_JS = `for (const b of document.querySelectorAll('.amdtools button')) { if (!b.disabled) b.addEventListener('click', () => vscode.postMessage({ type:'openTool', tool:b.dataset.tool })); }`;
+
+// A record's identity is its PATH, not its bare key - keys only have to be unique
+// among siblings, so `job_ghost/scan` and `job_sweep/scan` are two records. The Graph,
+// Outline and Resolver all index by key internally (layout maps, adjacency, selection),
+// so rather than rewrite that machinery, make the keys THEMSELVES unique: a key used
+// once stays as written, a key used twice becomes its path. Identity is fixed, the
+// displayed name is unchanged (that's `display`), and a collision now reads as the
+// disambiguating path instead of silently drawing two records on top of each other.
+//
+// Note: a node whose key was rewritten carries a path in `key`, so key-addressed
+// operations on it (rename) won't match - but a rename of an ambiguous bare key was
+// never well-defined either. Anything that edits goes through uri+line instead.
+function disambiguateKeys<T extends MissionGraph>(g: T): T {
+  const count = new Map<string, number>();
+  for (const n of g.nodes) { count.set(n.key, (count.get(n.key) ?? 0) + 1); }
+  if (![...count.values()].some((c) => c > 1)) { return g; }
+  const idOf = new Map<string, string>();
+  for (const n of g.nodes) {
+    idOf.set(n.uid, (count.get(n.key) ?? 0) > 1 ? n.path : n.key);
+  }
+  return {
+    ...g,
+    nodes: g.nodes.map((n) => ({ ...n, key: idOf.get(n.uid) ?? n.key })),
+    edges: g.edges.map((e) => ({
+      ...e,
+      from: idOf.get(e.fromUid) ?? e.from,
+      to: idOf.get(e.toUid) ?? e.to,
+    })),
+  };
+}
 
 // The last .amd a tool was opened for — a fallback so a panel with no document
 // of its own (the Mission Inspector) can still launch document tools.
@@ -2578,6 +2646,7 @@ function openAmdTool(tool: string, uri?: string, column?: vscode.ViewColumn): vo
   const u = resolveAmdUri(uri);
   if (!u) { vscode.window.showWarningMessage('Artemis AMD: open an .amd file first to launch this tool.'); return; }
   if (tool === 'outline') { void showStoryOutline(u, col); }
+  else if (tool === 'timeline') { void showTimeline(u, col); }
   else if (tool === 'graph') { void showGraph(u, col); }
   else if (tool === 'resolver') { void showAmdResolver(u, col); }
   else if (tool === 'map') { void showMap(u, col); }
@@ -2614,7 +2683,7 @@ async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vsc
   lastAmdUri = uri;
   let graph: MissionGraph;
   try {
-    graph = await client.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+    graph = disambiguateKeys(await client.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } }));
   } catch (e) {
     vscode.window.showErrorMessage(`Artemis AMD: could not build the outline (${e}).`);
     return;
@@ -2641,7 +2710,7 @@ async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vsc
 
   const refresh = async () => {
     try {
-      const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+      const g = disambiguateKeys(await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } }));
       panel.webview.html = storyOutlineHtml(g, nonce(), panel.webview, selectedKey);
     } catch (e) { output.appendLine(`Outline refresh failed: ${e}`); }
   };
@@ -2663,7 +2732,7 @@ async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vsc
       openLocation(msg.uri, msg.line);
     } else if (msg?.type === 'inspect') {
       selectedKey = msg.key;
-      await loadNodeInto(drawer, msg.uri, msg.key);   // renders the form inline
+      await loadNodeInto(drawer, msg.uri, msg.key, msg.line);   // renders the form inline
     } else if (msg?.type === 'inspReady') {
       if (drawer.detail) { drawer.render(drawer.detail); }
     } else if (msg?.type === 'addEntity') {
@@ -2675,6 +2744,447 @@ async function showStoryOutline(uriArg?: string, column: vscode.ViewColumn = vsc
       openAmdTool(msg.tool, uri, panel.viewColumn);
     }
   });
+}
+
+// --- Story Timeline (§3.5.2): the TIME lens, alongside the Outline's list, the
+// Graph's topology and the Map's space. Lanes down, causal beats across, the
+// same inline inspector docked on the right.
+async function showTimeline(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
+  if (!client) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
+    return;
+  }
+  if (!client.isRunning() && !(await ensureClientReady())) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is still starting — try again in a moment.');
+    return;
+  }
+  const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
+  if (!uri) { return; }
+  lastAmdUri = uri;
+  let model: TimelineModel;
+  try {
+    model = await client.sendRequest<TimelineModel>('amd/timeline', { textDocument: { uri } });
+  } catch (e) {
+    vscode.window.showErrorMessage(`Artemis AMD: could not build the timeline (${e}).`);
+    return;
+  }
+  if (reuseToolPanel('timeline', uri, column)) { return; }
+  const panel = vscode.window.createWebviewPanel(
+    'amdStoryTimeline', 'Story Timeline', column,
+    { enableScripts: true, localResourceRoots: faceWebviewRoots() });
+  registerToolPanel('timeline', uri, panel);
+  const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
+  let selectedKey: string | undefined;
+  let laneMode = 'section';
+  let scope = 'file';
+  panel.webview.html = timelineHtml(model, nonce(), panel.webview, selectedKey, laneMode, uri, scope);
+
+  const drawer: Inspector = {
+    webview: panel.webview, uri: '', detail: undefined, selfEdit: false, busy: false,
+    prefix: 'insp:',
+    render: (d) => panel.webview.postMessage({ type: 'insp:render', model: formModel(d) }),
+    reveal: () => { /* the form is always visible in the detail pane */ },
+  };
+  drawerInspectors.add(drawer);
+  wireInspector(drawer);
+
+  const refresh = async () => {
+    try {
+      const m = await client!.sendRequest<TimelineModel>('amd/timeline', { textDocument: { uri } });
+      panel.webview.html = timelineHtml(m, nonce(), panel.webview, selectedKey, laneMode, uri, scope);
+    } catch (e) { output.appendLine(`Timeline refresh failed: ${e}`); }
+  };
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (e.document.languageId === 'amd' && !drawer.busy) {
+      clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { void refresh(); }, 300);
+    }
+  });
+  panel.onDidDispose(() => {
+    drawerInspectors.delete(drawer);
+    if (faceHost === drawer) { faceHost = undefined; }
+    docSub.dispose();
+  });
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg?.type === 'goto') {
+      openLocation(msg.uri, msg.line);
+    } else if (msg?.type === 'inspect') {
+      selectedKey = msg.uid ?? msg.key;
+      await loadNodeInto(drawer, msg.uri, msg.key, msg.line);
+    } else if (msg?.type === 'inspReady') {
+      if (drawer.detail) { drawer.render(drawer.detail); }
+    } else if (msg?.type === 'laneMode') {
+      laneMode = String(msg.mode || 'section');   // remembered across refreshes
+    } else if (msg?.type === 'scope') {
+      scope = String(msg.scope || 'file');
+    } else if (msg?.type === 'openTool') {
+      openAmdTool(msg.tool, uri, panel.viewColumn);
+    }
+  });
+}
+
+function timelineHtml(model: TimelineModel, nonce: string, webview: vscode.Webview,
+                      selectedKey?: string, laneMode = 'section', docUri = '',
+                      scope = 'file'): string {
+  const data = JSON.stringify(model).replace(/</g, '\\u003c');
+  const inj = faceInjection(webview, nonce);
+  const preselect = selectedKey ? JSON.stringify(selectedKey) : 'null';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inj.imgCsp} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; display:flex; flex-direction:column; height:100vh; }
+  .top { display:flex; gap:8px; align-items:center; padding:6px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); }
+  .top input[type=search] { flex:1; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border:1px solid var(--vscode-input-border,#8883); border-radius:4px; padding:3px 8px; font-size:12px; }
+  select { background: var(--vscode-dropdown-background,#333); color: var(--vscode-dropdown-foreground,#eee); border:1px solid var(--vscode-dropdown-border,#8883); border-radius:4px; padding:2px 6px; font-size:12px; }
+  .split { display:flex; flex:1; min-height:0; }
+  .canvas { flex:1; overflow:auto; padding:6px 0 12px; min-width:0; }
+  .detail { width:34%; min-width:270px; overflow:auto; border-left:1px solid var(--vscode-panel-border,#8883); }
+  .tsec { padding:6px 10px 2px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); }
+  .tsec .note { text-transform:none; opacity:.8; }
+  .grid { display:grid; align-items:stretch; }
+  .hd { font-size:10px; text-transform:uppercase; color:var(--vscode-descriptionForeground); padding:2px 6px; border-bottom:1px solid var(--vscode-panel-border,#8883); position:sticky; top:0; background:var(--vscode-editor-background); z-index:1; }
+  .lane { font-size:11px; color:var(--vscode-descriptionForeground); padding:6px 8px; border-right:1px solid var(--vscode-panel-border,#8883); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:sticky; left:0; background:var(--vscode-editor-background); z-index:1; }
+  .cell { padding:3px 5px; border-bottom:1px solid var(--vscode-panel-border,#8881); min-height:26px; }
+  .cell + .cell { border-left:1px dashed var(--vscode-panel-border,#8881); }
+  .bar { display:block; width:100%; text-align:left; margin:2px 0; padding:3px 7px; border-radius:4px; font-size:12px; cursor:pointer; background: var(--vscode-badge-background,#333); color: var(--vscode-badge-foreground,#eee); border:1px solid transparent; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar:hover { border-color: var(--vscode-focusBorder,#4ec9b0); }
+  .bar.sel { background: var(--vscode-list-activeSelectionBackground,#0a63c9); color: var(--vscode-list-activeSelectionForeground,#fff); }
+  .bar.req { border-left:3px solid var(--vscode-charts-yellow,#e2c08d); }
+  .bar .meta { font-size:10px; opacity:.75; margin-left:5px; }
+  .bar .drill { float:right; font-size:10px; opacity:.85; padding:0 4px; border-radius:3px; border:1px solid var(--vscode-panel-border,#8884); }
+  .bar .drill:hover { border-color: var(--vscode-focusBorder,#4ec9b0); opacity:1; }
+  .crumb { display:flex; gap:8px; align-items:center; padding:4px 10px 6px; font-size:13px; }
+  .crumb .muted { font-size:11px; font-family: var(--vscode-editor-font-family); }
+  .assumed { color: var(--vscode-charts-yellow,#e2c08d); }
+  .grid.inferred .cell + .cell { border-left:1px dotted var(--vscode-charts-yellow,#e2c08d); }
+  .life { display:flex; align-items:stretch; flex-wrap:wrap; gap:4px; padding:2px 10px 6px; }
+  .lc { border:1px solid var(--vscode-panel-border,#8884); border-radius:4px; padding:3px 8px; min-width:90px; }
+  .lk { font-size:10px; text-transform:uppercase; color:var(--vscode-descriptionForeground); }
+  .lv { font-size:12px; }
+  .lsep { align-self:center; color:var(--vscode-descriptionForeground); font-size:12px; }
+  .badge { font-size:10px; border-radius:6px; padding:0 5px; margin-left:4px; }
+  .badge.err { background: var(--vscode-inputValidation-errorBackground,#5a1d1d); color:#f88; }
+  .badge.warn { background: var(--vscode-inputValidation-warningBackground,#5a4a1d); color:#fc8; }
+  .pace { display:grid; margin:2px 0 0; align-items:end; height:34px; }
+  .pace .b { background: var(--vscode-charts-blue,#4daafc); opacity:.5; margin:0 6px; border-radius:2px 2px 0 0; min-height:1px; }
+  .pace .n { font-size:9px; text-align:center; color:var(--vscode-descriptionForeground); }
+  .dtitle { font-size:15px; font-weight:600; margin:0 0 2px; }
+  .dkey { color: var(--vscode-descriptionForeground); font-size:12px; font-family: var(--vscode-editor-font-family); }
+  .dactions { margin:6px 0 10px; display:flex; gap:6px; }
+  .grp { margin:10px 0 4px; font-size:11px; text-transform:uppercase; color:var(--vscode-descriptionForeground); }
+  .chip { display:inline-flex; align-items:center; gap:6px; margin:2px 4px 2px 0; padding:2px 8px; border-radius:12px; font-size:12px; cursor:pointer; background: var(--vscode-badge-background,#333); color: var(--vscode-badge-foreground,#eee); }
+  .chip:hover { outline:1px solid var(--vscode-focusBorder,#4ec9b0); }
+  .chip .ek { color: var(--vscode-symbolIcon-eventForeground,#c586c0); font-size:10px; text-transform:uppercase; }
+  .muted, .empty { color: var(--vscode-descriptionForeground); }
+  .empty { padding:10px; font-size:12px; }
+  button { background: var(--vscode-button-secondaryBackground,#444); color: var(--vscode-button-secondaryForeground,#fff); border:none; border-radius:4px; padding:2px 10px; cursor:pointer; font-size:12px; }
+  #detail-head { padding:8px 12px 0; }
+  .insp-sep { margin:8px 12px 0; border-top:1px solid var(--vscode-panel-border,#8883); }
+  ${AMD_TOOLBAR_CSS}
+</style></head><body>
+${amdToolbar('timeline')}
+<div class="top">
+  <label class="muted" style="font-size:11px">Lanes</label>
+  <select id="mode">
+    <option value="section">by section</option>
+    <option value="arc">by arc</option>
+    <option value="side">by side</option>
+    <option value="console">by console</option>
+  </select>
+  <select id="scope" title="Beats are always ranked across the whole mission — this only changes what is drawn.">
+    <option value="file">this file</option>
+    <option value="mission">whole mission</option>
+  </select>
+  <input id="q" type="search" placeholder="Search records…">
+  <span class="muted" id="count" style="font-size:11px"></span>
+</div>
+<div class="split">
+  <div class="canvas" id="canvas"></div>
+  <div class="detail">
+    <div id="detail-head"><div class="empty">Select a record to edit it inline.</div></div>
+    <div id="insp-mount"></div>
+  </div>
+</div>
+${inj.scripts}${inspectorFormScript(webview, nonce)}
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const model = ${data};
+  const items = model.items || [];
+  // Identity is the UID (<uri>#<path>), not the bare key: a key is only unique among
+  // SIBLINGS, so three different jobs can each own a step called 'scan'.
+  const byUid = {}; for (const it of items) byUid[it.uid] = it;
+  let mode = ${JSON.stringify(laneMode)}, scope = ${JSON.stringify(scope)};
+  let sel = null, q = '', drill = null;
+
+  // Scope is a DISPLAY filter only. The analysis is deliberately mission-wide - a
+  // signal's emit and its wait usually live in different files, so ranking one file in
+  // isolation would put everything at beat 0 - but opening one file and being shown the
+  // whole repo isn't what you asked for either. So: rank globally, draw locally, and
+  // keep the true beat numbers on the columns so the two readings agree.
+  const docUri = ${JSON.stringify(docUri)};
+  function sameFile(a, b) {
+    if (!a || !b) return false;
+    const norm = (u) => { try { return decodeURIComponent(u).toLowerCase().replace(/\\\\/g, '/'); }
+                          catch (e) { return String(u).toLowerCase().replace(/\\\\/g, '/'); } };
+    return norm(a) === norm(b);
+  }
+  const inScope = (it) => scope === 'mission' || sameFile(it.uri, docUri);
+
+  // Drawing one file hides the fact that a chain CONTINUES past it, which is the one
+  // way scoping could mislead - so a record whose causal neighbours live in another
+  // file is marked, and the neighbours are listed in the detail pane.
+  const outBy = {}, inBy = {};
+  for (const e of (model.edges || [])) {
+    (outBy[e.fromUid] = outBy[e.fromUid] || []).push(e);
+    (inBy[e.toUid] = inBy[e.toUid] || []).push(e);
+  }
+  function offFile(it) {
+    if (scope !== 'file' || !it) return [];
+    const seen = new Set(), out = [];
+    function add(u, kind, dir) {
+      const n = byUid[u];
+      if (!n || inScope(n) || seen.has(u)) return;
+      seen.add(u); out.push({ uid:u, display:n.display || n.key, kind:kind, dir:dir });
+    }
+    for (const e of (outBy[it.uid] || [])) add(e.toUid, e.kind, 'leads to');
+    for (const e of (inBy[it.uid] || [])) add(e.fromUid, e.kind, 'reached from');
+    return out;
+  }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // An item can sit in several lanes at once (a job Accept-able from two consoles),
+  // and in none (no Side declared) - so lanes are a LIST, with an explicit bucket for
+  // "not declared" rather than dropping the record off the view.
+  function lanesOf(it) {
+    const g = it.groups || {};
+    if (mode === 'console') { return (g.console && g.console.length) ? g.console : ['(no console)']; }
+    if (mode === 'side') { return [g.side || '(no side)']; }
+    return [g[mode] || '(none)'];
+  }
+  function match(it) {
+    if (!inScope(it)) return false;
+    if (!q) return true;
+    return (it.display||'').toLowerCase().includes(q) || (it.key||'').toLowerCase().includes(q);
+  }
+  function badges(it) {
+    const p = it.problems; let s = '';
+    if (p && p.error) s += ' <span class="badge err">'+p.error+'</span>';
+    if (p && p.warning) s += ' <span class="badge warn">'+p.warning+'</span>';
+    return s;
+  }
+  function meta(it, off) {
+    const bits = [];
+    if (it.declared) bits.push((it.declared.fail ? '\\u23f1 ' : '\\u2713 ') + esc(it.declared.label));
+    if (it.cycle) bits.push('loop');
+    if (it.state && it.state !== 'active') bits.push(esc(it.state));
+    if (off && off.length) bits.push('\\u2197' + off.length);
+    return bits.length ? '<span class="meta">'+bits.join(' \\u00b7 ')+'</span>' : '';
+  }
+  function bar(it) {
+    const off = offFile(it);
+    const tip = it.path + (off.length ? ' \\u2014 connects to another file: '
+      + off.map(o => o.display).join(', ') : '');
+    // A container is drillable: its own steps are a timeline of their own, and the
+    // board can't show them without inventing lanes for every job.
+    const dr = it.steps ? '<span class="drill" data-d="'+esc(it.uid)+'" title="Open this record\\'s own steps">\\u229e'+it.steps+'</span>' : '';
+    return '<div class="bar'+(it.uid===sel?' sel':'')+(it.required?' req':'')+'" data-k="'+esc(it.uid)+'" title="'+esc(tip)+'">'
+      + esc(it.display||it.key) + meta(it, off) + badges(it) + dr + '</div>';
+  }
+
+  function render() {
+    if (drill && byUid[drill]) { renderDrill(byUid[drill]); return; }
+    drill = null;
+    const shown = items.filter(match).filter(i => !i.parent);   // steps live in the drill
+    const spine = shown.filter(i => i.track === 'spine');
+    const pool  = shown.filter(i => i.track === 'pool');
+    const parts = [];
+
+    // SPINE: lanes down, causal beats across. A beat is "everything that must happen
+    // first", not a clock - so the columns are counted, never measured in seconds.
+    // Only draw the beats something actually occupies, but LABEL them with their true
+    // mission-wide rank - so a file-scoped or searched view doesn't become a sea of
+    // empty columns, and "beat 4" still means the same thing in both views.
+    const cols4 = [...new Set(spine.map(i => i.beat))].sort((a, b) => a - b);
+    const note = 'ranked across the whole mission' + (scope === 'file' ? '; showing this file' : '');
+    parts.push('<div class="tsec">Spine <span class="note">\\u2014 '+note+'</span></div>');
+    if (!spine.length) { parts.push('<div class="empty">Nothing chained, flagged or active at the start.</div>'); }
+    else {
+      const lanes = laneOrder(spine);
+      const cols = 'minmax(110px,150px) repeat('+cols4.length+', minmax(150px,1fr))';
+      let g = '<div class="grid" style="grid-template-columns:'+cols+'">';
+      g += '<div class="hd"></div>';
+      for (const b of cols4) g += '<div class="hd">beat '+b+'</div>';
+      for (const lane of lanes) {
+        g += '<div class="lane" title="'+esc(lane)+'">'+esc(lane)+'</div>';
+        for (const b of cols4) {
+          const cell = spine.filter(i => i.beat === b && lanesOf(i).indexOf(lane) >= 0);
+          g += '<div class="cell">'+cell.map(bar).join('')+'</div>';
+        }
+      }
+      parts.push(g + '</div>');
+      // The pacing curve: how much is in play at each beat. A thin column is a lull.
+      let pace = '<div class="pace" style="grid-template-columns:'+cols+'">'
+               + '<div class="n" style="text-align:right;padding-right:6px">load</div>';
+      const counts = cols4.map(b => spine.filter(i => i.beat === b).length);
+      const peak = Math.max(1, ...counts);
+      for (const c of counts) pace += '<div class="b" style="height:'+Math.round(c / peak * 30)+'px" title="'+c+' active"></div>';
+      parts.push(pace + '</div>');
+    }
+
+    // POOL: content with no authored order (an idle job board). Laying it out in beats
+    // would invent a sequence, so it gets an availability band instead.
+    parts.push('<div class="tsec">Pool <span class="note">\\u2014 no authored order; available once offered</span></div>');
+    if (!pool.length) { parts.push('<div class="empty">No unordered content.</div>'); }
+    else {
+      const lanes = laneOrder(pool);
+      let g = '<div class="grid" style="grid-template-columns:minmax(110px,150px) 1fr">';
+      for (const lane of lanes) {
+        g += '<div class="lane" title="'+esc(lane)+'">'+esc(lane)+'</div>';
+        g += '<div class="cell">'+pool.filter(i => lanesOf(i).indexOf(lane) >= 0).map(bar).join('')+'</div>';
+      }
+      parts.push(g + '</div>');
+    }
+
+    paint(parts, shown.length);
+  }
+
+  // A record's OWN timeline. t=0 is acceptance, not mission start - which is the only
+  // frame in which a job's clock means anything ("Fail after" anchors the same way).
+  function renderDrill(c) {
+    const steps = items.filter(i => i.parent === c.uid).sort((a, b) => a.step - b.step);
+    const parts = ['<div class="crumb"><button id="back">\\u25c0 Board</button> '
+      + esc(c.display || c.key) + ' <span class="muted">'+esc(c.path)+'</span></div>'];
+
+    parts.push(lifecycle(c));
+
+    if (!steps.length) {
+      parts.push('<div class="empty">One step \\u2014 no sub-records to order.</div>');
+    } else {
+      const cols = [...new Set(steps.map(s => s.step))].sort((a, b) => a - b);
+      const note = c.stepsInferred
+        ? '<span class="assumed">order assumed from file order \\u2014 not declared in the AMD</span>'
+        : 'ordered by declared references';
+      parts.push('<div class="tsec">Steps ('+steps.length+') <span class="note">\\u2014 '+note+'</span></div>');
+      let g = '<div class="grid'+(c.stepsInferred?' inferred':'')+'" style="grid-template-columns: repeat('+cols.length+', minmax(150px,1fr))">';
+      for (const s of cols) g += '<div class="hd">step '+(s + 1)+'</div>';
+      for (const s of cols) g += '<div class="cell">'+steps.filter(x => x.step === s).map(bar).join('')+'</div>';
+      parts.push(g + '</div>');
+    }
+    paint(parts, steps.length);
+    const back = document.getElementById('back');
+    if (back) back.onclick = () => { drill = null; render(); };
+  }
+
+  // The lifecycle strip: what offers this record, what finishes it, what kills it.
+  // For a single-step job this IS the drill - and it is the one place a declared
+  // duration has a real axis.
+  function lifecycle(it) {
+    const L = it.lifecycle || {};
+    const cells = [];
+    cells.push(['offered', it.state === 'idle' ? 'on the board' : (it.state || 'active')]);
+    if (L.on_accept) cells.push(['on accept', L.on_accept]);
+    if (L.when) cells.push(['starts when', L.when]);
+    if (L.goal) cells.push(['goal', L.goal]);
+    if (it.declared) cells.push([it.declared.fail ? 'fails after' : 'completes after', it.declared.label]);
+    if (L.fail_signal) cells.push(['fails on', 'signal ' + L.fail_signal]);
+    if (L.on_complete) cells.push(['on complete', L.on_complete]);
+    if (cells.length < 2) return '';
+    return '<div class="tsec">Lifecycle <span class="note">\\u2014 t=0 is acceptance</span></div>'
+      + '<div class="life">' + cells.map(c =>
+          '<div class="lc"><div class="lk">'+esc(c[0])+'</div><div class="lv">'+esc(c[1])+'</div></div>')
+        .join('<div class="lsep">\\u2192</div>') + '</div>';
+  }
+
+  function paint(parts, shownCount) {
+    document.getElementById('canvas').innerHTML = parts.join('');
+    const scoped = items.filter(inScope).length;
+    document.getElementById('count').textContent =
+      shownCount + ' / ' + scoped + (scope === 'file' ? ' (mission: ' + items.length + ')' : '');
+    document.querySelectorAll('.bar').forEach(b => b.onclick = () => select(b.dataset.k));
+    document.querySelectorAll('.drill').forEach(d => d.onclick = (ev) => {
+      ev.stopPropagation(); drill = d.dataset.d; select(drill); render();
+    });
+  }
+  // Lane order follows the server's (source order), with any lane the current filter
+  // invented - '(no console)' and friends - appended.
+  function laneOrder(list) {
+    const want = new Set(); for (const it of list) for (const l of lanesOf(it)) want.add(l);
+    const out = (model.lanes && model.lanes[mode] || []).filter(l => want.has(l));
+    for (const l of want) if (out.indexOf(l) < 0) out.push(l);
+    return out;
+  }
+
+  function select(uid) {
+    sel = uid;
+    document.querySelectorAll('.bar').forEach(b => b.classList.toggle('sel', b.dataset.k === uid));
+    const it = byUid[uid];
+    const head = document.getElementById('detail-head');
+    if (!it) { head.innerHTML = '<div class="empty">Unknown record.</div>'; return; }
+    const where = it.parent ? ('step ' + (it.step + 1)) : (it.track === 'spine' ? ('beat ' + it.beat) : 'pool');
+    const off = offFile(it);
+    const chips = off.map(o => '<span class="chip" data-k="'+esc(o.uid)+'"><span class="ek">'
+      + esc(o.dir)+' \\u00b7 '+esc(o.kind)+'</span>'+esc(o.display)+'</span>').join(' ');
+    const parent = it.parent ? byUid[it.parent] : null;
+    head.innerHTML = '<div class="dtitle">'+esc(it.display||it.key)+badges(it)+'</div>'
+      + '<div class="dkey">'+esc(it.path)+' \\u00b7 '+esc(it.section||'')+' \\u00b7 '+where+'</div>'
+      + (it.stepInferred ? '<div class="dkey assumed">position assumed from file order</div>' : '')
+      + (it.declared ? '<div class="dkey">'+(it.declared.fail?'fails':'completes')+' after '+esc(it.declared.label)+'</div>' : '')
+      + '<div class="dactions"><button id="open">Open source</button>'
+      + (it.steps ? '<button id="into">\\u229e '+it.steps+' steps</button>' : '')
+      + (parent ? '<button id="up">\\u25c0 '+esc(parent.display||parent.key)+'</button>' : '')
+      + '</div>'
+      + (off.length ? '<div class="grp">Continues outside this file ('+off.length+')</div><div>'+chips+'</div>' : '');
+    document.getElementById('open').onclick = () => vscode.postMessage({ type:'goto', uri:it.uri, line:it.line });
+    const into = document.getElementById('into');
+    if (into) into.onclick = () => { drill = it.uid; render(); };
+    const up = document.getElementById('up');
+    if (up) up.onclick = () => { drill = it.parent; render(); };
+    // Following one of these means leaving the file - so widen the scope rather than
+    // selecting a record the canvas isn't drawing.
+    head.querySelectorAll('.chip').forEach(c => c.onclick = () => { setScope('mission'); drill = null; select(c.dataset.k); render(); });
+    // The "line" arg disambiguates: a bare key is not unique, so without it the inspector
+    // load (and then EDIT) a namesake under a different parent.
+    vscode.postMessage({ type:'inspect', uri:it.uri, key:it.key, line:it.line, uid:it.uid });
+  }
+
+  const modeSel = document.getElementById('mode');
+  modeSel.value = mode;
+  modeSel.onchange = () => { mode = modeSel.value; vscode.postMessage({ type:'laneMode', mode: mode }); render(); };
+  const scopeSel = document.getElementById('scope');
+  scopeSel.value = scope;
+  function setScope(next) {
+    if (scope === next) { return; }
+    scope = next; scopeSel.value = next;
+    vscode.postMessage({ type:'scope', scope: next });   // remembered across refreshes
+    render();
+  }
+  scopeSel.onchange = () => setScope(scopeSel.value);
+  document.getElementById('q').oninput = (e) => { q = e.target.value.trim().toLowerCase(); render(); };
+
+  let inspHandle = null;
+  const inspMount = document.getElementById('insp-mount');
+  window.addEventListener('message', (e) => {
+    const m = e.data;
+    if (!m || typeof m.type !== 'string' || m.type.indexOf('insp:') !== 0) { return; }
+    if (m.type === 'insp:render') {
+      if (!inspHandle) { inspHandle = InspectorForm.mount(inspMount, vscode, { prefix: 'insp:', model: m.model, faceAvailable: ${inj.available} }); }
+      else { inspHandle.render(m.model); }
+    } else if (m.type === 'insp:patch' && inspHandle) { inspHandle.patch(m); }
+    else if (m.type === 'insp:setFace' && inspHandle) { inspHandle.setFace(m.value); }
+  });
+
+  render();
+  const preselect = ${preselect};
+  if (preselect && byUid[preselect]) {
+    // Re-entering after an edit: if the selection is a step, come back inside its
+    // container rather than dumping the writer on the board.
+    const it = byUid[preselect];
+    if (it.parent && byUid[it.parent]) { drill = it.parent; render(); }
+    select(preselect);
+  } else { vscode.postMessage({ type:'inspReady' }); }
+  ${AMD_TOOLBAR_JS}
+</script></body></html>`;
 }
 
 // --- AMD Live Resolver (static half, §3.5): two panes over the `amd/resolve`
@@ -2771,8 +3281,14 @@ ${amdToolbar('resolver')}
   });
   function goto(uri, line){ vscode.postMessage({ type:'goto', uri:uri, line:line }); }
 
+  // SELECTION is by uid (a key is unique only among siblings, so two records can share
+  // one), while REFERENCES still resolve by bare key - that is how they are written in
+  // the file, and re-keying them here would make every ref into a duplicated key read
+  // as dangling. So: two maps, each doing the job it is right for.
+  const byUid = {};
+  for (const e of MODEL.entities) byUid[e.uid] = e;
   const byKey = {};
-  for (const e of MODEL.entities) byKey[e.key] = e;
+  for (const e of MODEL.entities) if (!(e.key in byKey)) byKey[e.key] = e;
   const outRefs = {};                                   // owner key -> [ref] (what it leads to)
   const inRefs = {};                                    // target key -> [ref] (what reaches it)
   for (const r of MODEL.refs) {
@@ -2785,7 +3301,9 @@ ${amdToolbar('resolver')}
   for (const u in entsByUri) entsByUri[u].sort((a,b) => a.line - b.line);
   function entityForIssue(it){ let f = null; for (const e of (entsByUri[it.uri]||[])){ if (e.line <= it.line) f = e; else break; } return f; }
   function scrollSelIntoView(){ const el = document.querySelector('.ent.sel'); if (el) el.scrollIntoView({ block:'nearest' }); }
-  function selectEntity(key){ const e = byKey[key]; if (!e) return; sel = key; if ((outRefs[key]||[]).length || (inRefs[key]||[]).length) expanded[key] = true; renderTree(); scrollSelIntoView(); }
+  function selectEntity(uid){ const e = byUid[uid] || byKey[uid]; if (!e) return; sel = e.uid;
+    if ((outRefs[e.key]||[]).length || (inRefs[e.key]||[]).length) expanded[e.key] = true;
+    renderTree(); scrollSelIntoView(); }
 
   const ARCH = {
     quest:'#c586c0', scene:'#4ec9b0', dialogue:'#4daafc', lifeform:'#89d185',
@@ -2856,7 +3374,7 @@ ${amdToolbar('resolver')}
     const lq = liveQuests[e.key];
     if (lq){ badges += ' <span class="badge live-'+esc(lq.state)+'" title="live quest state'+(lq.progress!=null?' · progress '+lq.progress:'')+'">'+esc(lq.state)+(lq.progress!=null?' '+lq.progress:'')+'</span>'; }
     else if (liveActive && (e.archetype==='quest'||e.archetype==='scan')){ badges += ' <span class="badge live-none" title="not granted in the running mission yet">not granted</span>'; }
-    let row = '<div class="ent'+(sel===e.key?' sel':'')+'" data-k="'+esc(e.key)+'">'
+    let row = '<div class="ent'+(sel===e.uid?' sel':'')+'" data-k="'+esc(e.uid)+'">'
       + '<span class="car" data-car="'+esc(e.key)+'">'+caret+'</span>'
       + '<span class="dot" style="background:'+archColor(e.archetype || e.section)+'"></span>'
       + '<span class="ename">'+esc(e.display)+'</span> <span class="ekey">'+esc(e.key)+'</span>'
@@ -2881,10 +3399,10 @@ ${amdToolbar('resolver')}
         expanded[k] = !expanded[k]; renderTree(); };
     }
     for (const el of document.querySelectorAll('.ent')){
-      el.onclick = () => { const k = el.dataset.k;
-        if (sel === k && expanded[k]) { expanded[k] = false; renderTree(); }  // click the open one again -> collapse
-        else selectEntity(k); };
-      el.ondblclick = () => { const e = byKey[el.dataset.k]; goto(e.uri, e.line); };
+      el.onclick = () => { const uid = el.dataset.k; const ent = byUid[uid];
+        if (sel === uid && ent && expanded[ent.key]) { expanded[ent.key] = false; renderTree(); }  // click the open one again -> collapse
+        else selectEntity(uid); };
+      el.ondblclick = () => { const e = byUid[el.dataset.k]; if (e) goto(e.uri, e.line); };
     }
     for (const el of document.querySelectorAll('.ref')){
       el.onclick = (ev) => { ev.stopPropagation();
@@ -2913,7 +3431,7 @@ ${amdToolbar('resolver')}
     ).join('') : '<div class="empty">No problems — every reference resolves and every heading is reachable. ✓</div>';
     for (const el of document.querySelectorAll('.issue')){
       const it = rows[+el.dataset.idx];
-      el.onclick = () => { const e = entityForIssue(it); if (e) selectEntity(e.key); };  // browse to the entity
+      el.onclick = () => { const e = entityForIssue(it); if (e) selectEntity(e.uid); };  // browse to the entity
       el.ondblclick = () => goto(it.uri, it.line);                                        // open the source line
     }
   }
@@ -3007,7 +3525,7 @@ async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   lastAmdUri = uri;
   let graph: MissionGraph;
   try {
-    graph = await client.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+    graph = disambiguateKeys(await client.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } }));
   } catch (e) {
     vscode.window.showErrorMessage(`Artemis AMD: could not build the graph (${e}).`);
     return;
@@ -3036,7 +3554,7 @@ async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
 
   const refresh = async () => {
     try {
-      const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+      const g = disambiguateKeys(await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } }));
       panel.webview.html = renderGraph(g, nonce(), panel.webview, focus, lastView, collapsed, hiddenSections);
     } catch (e) { output.appendLine(`Graph refresh failed: ${e}`); }
   };
@@ -3069,7 +3587,7 @@ async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     } else if (msg?.type === 'addEntity') {
       await addEntityInSection(uri, msg.section);
     } else if (msg?.type === 'inspect') {
-      await loadNodeInto(drawer, msg.uri, msg.key);
+      await loadNodeInto(drawer, msg.uri, msg.key, msg.line);
     } else if (msg?.type === 'inspReady') {
       if (drawer.detail) { drawer.render(drawer.detail); }
     } else if (msg?.type === 'connect' && msg.toKey) {
@@ -3134,7 +3652,7 @@ async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
         await vscode.workspace.applyEdit(edit);
         scheduleRefresh();
       } else if (pick === 'Rewire…') {
-        const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+        const g = disambiguateKeys(await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } }));
         const items = g.nodes.filter((n) => n.key !== msg.from).map((n) => ({ label: n.key, description: n.display }));
         const target = await vscode.window.showQuickPick(items, { placeHolder: `Rewire ${msg.from}'s link to…` });
         if (target) {
@@ -3162,7 +3680,7 @@ async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
         { placeHolder: 'New node type' });
       if (!typeName) { return; }
       const t = NODE_TEMPLATES[typeName];
-      const g = await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } });
+      const g = disambiguateKeys(await client!.sendRequest<MissionGraph>('amd/graph', { textDocument: { uri } }));
       const keys = new Set(g.nodes.map((n) => n.key));
       let key = t.keyBase, i = 2;
       while (keys.has(key)) { key = `${t.keyBase}_${i++}`; }
@@ -3251,7 +3769,7 @@ async function showMap(uriArg?: string, column: vscode.ViewColumn = vscode.ViewC
     } else if (msg?.type === 'viewState') {
       lastView = { zoom: msg.zoom, sl: msg.sl, st: msg.st };
     } else if (msg?.type === 'inspect') {
-      await loadNodeInto(drawer, msg.uri, msg.key);
+      await loadNodeInto(drawer, msg.uri, msg.key, msg.line);
     } else if (msg?.type === 'inspReady') {
       if (drawer.detail) { drawer.render(drawer.detail); }
     } else if (msg?.type === 'addRegion') {
@@ -3871,6 +4389,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showMap', () => showMap()));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showGraph', () => showGraph()));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', () => showStoryOutline()));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showTimeline', () => showTimeline()));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showResolver', () => showAmdResolver()));
   context.subscriptions.push(vscode.commands.registerCommand('amd.guiEditor', showGuiEditor));
   context.subscriptions.push(GuiFileEditorProvider.register());   // *.gui.mast opens as the GUI Editor
