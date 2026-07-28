@@ -1,0 +1,58 @@
+{
+  // Debugging the AMD VS Code extension.
+  //
+  // These work BOTH ways: with `sbs_cli` opened as the only folder, and with it as one
+  // folder of a multi-root workspace (VS Code lists each folder's configs, and
+  // ${workspaceFolder} resolves to THIS folder either way).
+  //
+  // "Extension" opens a second VS Code (the Extension Development Host) running the
+  // extension from source. Set a breakpoint in editors/vscode/src/extension.ts and it
+  // will bind - the compiled JS in out/ carries source maps back to the TS.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Extension: AMD language",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/editors/vscode"
+      ],
+      "outFiles": ["${workspaceFolder}/editors/vscode/out/**/*.js"],
+      "preLaunchTask": "npm: compile - extension"
+    },
+    {
+      // The same, but the host opens a folder full of real .amd files, so the
+      // Inspector, the outline and the linter all have something to chew on.
+      "name": "Extension: AMD language (with LegendaryMissions)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/editors/vscode",
+        "${workspaceFolder}/../LegendaryMissions"
+      ],
+      "outFiles": ["${workspaceFolder}/editors/vscode/out/**/*.js"],
+      "preLaunchTask": "npm: compile - extension"
+    },
+    {
+      // The language server runs IN-PROCESS in the host, so its breakpoints bind in the
+      // same session. This one is for stepping through the Python side instead:
+      // `sbs lint --lsp` speaks LSP on stdio, so attach and drive it from a client.
+      "name": "Python: amd_lint on a mission",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/sbs.pyz",
+      "args": ["lint", "${input:missionFolder}"],
+      "cwd": "${workspaceFolder}/..",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ],
+  "inputs": [
+    {
+      "id": "missionFolder",
+      "type": "promptString",
+      "description": "Mission folder to lint (relative to data/missions)",
+      "default": "LegendaryMissions"
+    }
+  ]
+}

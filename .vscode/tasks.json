@@ -1,0 +1,97 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Compiles editors/vscode/src/extension.ts -> out/. The Extension launch configs
+      // run this first, so F5 always debugs what is on disk now.
+      "label": "npm: compile - extension",
+      "type": "npm",
+      "script": "compile",
+      "path": "editors/vscode",
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "silent", "panel": "shared" },
+      "group": "build"
+    },
+    {
+      // Leave running while working on the extension; recompiles on save.
+      "label": "npm: watch - extension",
+      "type": "npm",
+      "script": "watch",
+      "path": "editors/vscode",
+      "isBackground": true,
+      "problemMatcher": ["$tsc-watch"],
+      "presentation": { "reveal": "never", "panel": "dedicated" }
+    },
+    {
+      // The Inspector's fence round-trip guard - the one that stops an edit deleting a
+      // record's kind noun, its comments or its lists.
+      "label": "test: inspector fence",
+      "type": "npm",
+      "script": "test:fence",
+      "path": "editors/vscode",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "group": "test"
+    },
+    {
+      "label": "package: extension vsix",
+      "type": "shell",
+      "options": { "cwd": "${workspaceFolder}/editors/vscode" },
+      "command": "npx vsce package",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "build",
+      "type": "shell",
+      "options": {
+        "shell": {
+          "executable": "cmd.exe",
+          "args": [
+            "/C" // This is important for CMD to execute the command and then close
+          ]
+        }
+      },
+      "command": "dev.pyz build&&copy dist\\sbs.pyz ..",
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "release",
+      "type": "shell",
+      "options": {
+        "shell": {
+          "executable": "cmd.exe",
+          "args": [
+            "/C" 
+          ]
+        }
+      },
+      "command": "dev.pyz release \"Dev v1.3.0\" -u",
+      "problemMatcher": [],
+       "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "group": {
+        "kind": "release",
+        "isDefault": true
+      }
+    },
+  ]
+}
