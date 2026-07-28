@@ -101,7 +101,23 @@
         key: m.key || '', display: m.display || '',
         fields: m.fields || [], body: m.body || '',
         options: m.options || {},
+        kind: m.kind || '', kinds: m.kinds || [],
       };
+    }
+
+    // What the record CALLS itself. Not decoration: `Beat` decides that it is the
+    // crew's, already running, and listed only once it has happened - so the row shows
+    // what the chosen word implies rather than leaving it to be read in the docs.
+    function kindRow() {
+      const kinds = model.kinds || [];
+      if (!kinds.length) { return ''; }
+      const cur = String(model.kind || '').toLowerCase();
+      const opts = ['<option value="">(from the section name)</option>'].concat(
+        kinds.map((k) => `<option value="${esc(k.noun)}"${k.noun.toLowerCase() === cur ? ' selected' : ''}>` +
+                         `${esc(k.noun)}</option>`)).join('');
+      const hit = kinds.find((k) => k.noun.toLowerCase() === cur);
+      const implies = hit && hit.implies ? `<div class="sec insp-kind-implies">means ${esc(hit.implies)}</div>` : '';
+      return `<label class="k">This is a</label><select class="insp-kind">${opts}</select>${implies}`;
     }
 
     const q = (sel) => container.querySelector(sel);
@@ -188,6 +204,7 @@
       container.innerHTML =
         `<h3>${esc(model.display || model.key)} <span class="sec">(${esc(model.key)})</span></h3>` +
         `<label class="k">Display</label><input class="insp-display" value="${esc(model.display)}"/>` +
+        kindRow() +
         `<h4>Fields</h4><div class="insp-fields">${rows}</div>` +
         (hasFace ? '<canvas class="insp-face" width="220" height="220" title="Click to edit in the Face Builder"></canvas>' : '') +
         `<button class="insp-addf">+ add field</button>` +
@@ -234,7 +251,9 @@
       const fields = [...container.querySelectorAll('.frow')].map((r) => ({
         label: r.querySelector('.flabel').value.trim(), value: rowValue(r),
       })).filter((f) => f.label);
-      return { display: q('.insp-display').value, fields, body: q('.insp-body').value };
+      const kindSel = q('.insp-kind');
+      return { display: q('.insp-display').value, fields, body: q('.insp-body').value,
+               kind: kindSel ? kindSel.value : undefined };
     }
     function scheduleApply() {
       const st = q('.insp-status'); if (st) { st.textContent = 'Editing…'; }

@@ -543,12 +543,14 @@ interface NodeField { label: string; value: string; schema?: FieldSchema; }
 // Every line of the fence, verbatim. A line with no `label` is one the field list does
 // NOT represent - the kind noun (`Beat`), a `//` comment, a `  - item` continuation -
 // and rebuilding the fence from fields alone silently deleted all three.
-interface FenceLine { raw: string; label?: string; }
+interface FenceLine { raw: string; label?: string; kind?: boolean; }
 interface SymbolOptions { node?: string[]; side?: string[]; signal?: string[]; }
+// A noun a record may call itself, and what choosing it already means.
+interface KindChoice { noun: string; implies?: string; }
 interface NodeDetail {
   key: string; display: string; uri: string; archetype?: string | null;
   displayRange: LspRange | null; fields: NodeField[]; fenceRange: LspRange | null;
-  fenceLines?: FenceLine[];
+  fenceLines?: FenceLine[]; kind?: string | null; kinds?: KindChoice[];
   options?: SymbolOptions; bodyText: string; bodyRange: LspRange;
 }
 
@@ -562,9 +564,13 @@ interface NodeDetail {
  * Lines keep their original order; a field the author removed drops out, and a new one is
  * appended before the closing fence.
  */
-function rebuildFence(d: NodeDetail, fields: NodeField[]): string {
+function rebuildFence(d: NodeDetail, fields: NodeField[], kind?: string): string {
   const lines = d.fenceLines;
-  if (!lines || !lines.length) { return fields.map((f) => `${f.label}: ${f.value}`).join('\n'); }
+  const wantKind = kind === undefined ? undefined : kind.trim();
+  if (!lines || !lines.length) {
+    const only = fields.map((f) => `${f.label}: ${f.value}`).join('\n');
+    return wantKind ? `${wantKind}\n${only}` : only;
+  }
   const byLabel = new Map<string, NodeField[]>();
   for (const f of fields) {
     const k = f.label.trim().toLowerCase();
@@ -572,8 +578,16 @@ function rebuildFence(d: NodeDetail, fields: NodeField[]): string {
     byLabel.get(k)!.push(f);
   }
   const out: string[] = [];
+  let kindWritten = false;
   for (const ln of lines) {
-    if (ln.label === undefined) { out.push(ln.raw); continue; }    // kind / comment / list item
+    if (ln.kind) {                                   // the record's own noun
+      if (wantKind === undefined) { out.push(ln.raw); }             // untouched
+      else if (wantKind) { out.push(wantKind); }                    // changed
+      // else: cleared - drop it, and let the section name say what this is
+      kindWritten = true;
+      continue;
+    }
+    if (ln.label === undefined) { out.push(ln.raw); continue; }     // comment / list item
     const queue = byLabel.get(ln.label.trim().toLowerCase());
     const f = queue && queue.length ? queue.shift() : undefined;
     if (!f) { continue; }                            // the author removed it
@@ -583,6 +597,8 @@ function rebuildFence(d: NodeDetail, fields: NodeField[]): string {
     const orig = ln.raw.slice(ln.raw.indexOf(':') + 1).trim();
     out.push(f.value.trim() === orig ? ln.raw : `${f.label}: ${f.value}`);
   }
+  // A record that had no noun and now wants one: a kind line must come FIRST.
+  if (!kindWritten && wantKind) { out.unshift(wantKind); }
   const kept = new Set(lines.filter((l) => l.label !== undefined)
                             .map((l) => (l.label as string).trim().toLowerCase()));
   for (const f of fields) {
@@ -602,7 +618,7 @@ interface Inspector {
   detail: NodeDetail | undefined;
   selfEdit: boolean;
   busy: boolean;
-  queued?: { display: string; fields: NodeField[]; body: string };
+  queued?: { display: string; fields: NodeField[]; body: string; kind?: string };
   syncTimer?: ReturnType<typeof setTimeout>;
   prefix: string;                       // '' for standalone webviews, 'insp:' for the map/graph drawer
   render(detail: NodeDetail): void;     // full render: set webview.html (standalone) or postMessage (drawer)
@@ -684,8 +700,10 @@ function faceInjection(webview: vscode.Webview, nonce: string): { scripts: strin
 
 // The node as a plain model for the shared client-side form (media/inspectorForm.js).
 // `options` carries the mission-wide candidate lists the reference widgets need.
-function formModel(d: NodeDetail): { key: string; display: string; fields: NodeField[]; body: string; options: SymbolOptions } {
-  return { key: d.key, display: d.display, fields: d.fields, body: d.bodyText, options: d.options ?? {} };
+function formModel(d: NodeDetail): { key: string; display: string; fields: NodeField[]; body: string;
+                                     options: SymbolOptions; kind: string; kinds: KindChoice[] } {
+  return { key: d.key, display: d.display, fields: d.fields, body: d.bodyText, options: d.options ?? {},
+           kind: d.kind ?? '', kinds: d.kinds ?? [] };
 }
 
 // A <script> tag loading the shared form module into a webview.
@@ -1050,7 +1068,12 @@ ${inj.scripts}
 // Write the form's current state into the .amd — only the parts that changed —
 // then refresh ranges WITHOUT rebuilding the webview (so focus/caret survive).
 // Serialised so a fast typist's overlapping debounces can't interleave edits.
-async function applyInspectorEdit(insp: Inspector, msg: { display: string; fields: NodeField[]; body: string }): Promise<void> {
+async function applyInspectorEdit(
+  insp: Inspector,
+  // `kind` is absent from an older webview, which rebuildFence reads as "leave the
+  // record's noun alone" - not as "clear it".
+  msg: { display: string; fields: NodeField[]; body: string; kind?: string },
+): Promise<void> {
   if (!client || !insp.detail) { return; }
   if (insp.busy) { insp.queued = msg; return; }
   insp.busy = true;
@@ -1063,7 +1086,7 @@ async function applyInspectorEdit(insp: Inspector, msg: { display: string; field
     if (d.displayRange && msg.display !== d.display) {
       edit.replace(u, rng(d.displayRange), msg.display); changed = true;
     }
-    const fieldText = rebuildFence(d, msg.fields);
+    const fieldText = rebuildFence(d, msg.fields, msg.kind);
     const curFields = rebuildFence(d, d.fields);
     if (fieldText !== curFields) {
       if (d.fenceRange) { edit.replace(u, rng(d.fenceRange), fieldText); }
