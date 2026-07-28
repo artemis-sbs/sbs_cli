@@ -93,7 +93,7 @@ const added = rebuildFence(detail, fields.concat([{ label: 'Reward', value: '200
 check('new field appended', added.trim().endsWith('Reward: 200 credits'));
 check('new field appears once', added.split('Reward:').length === 2);
 
-// 5) No fenceLines (an older server) -> the old behaviour, not a crash.
+// 5) No fenceLines (an older server) -> the old behavior, not a crash.
 check('degrades to the field list', rebuildFence({}, fields) === 'Roles: \nStarts when: signal ramscoop_online');
 
 

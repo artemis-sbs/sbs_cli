@@ -1,26 +1,32 @@
 """Shared media: unpack a resource pack ONCE, beside the libraries.
 
-Art used to be copied per consuming mission - 27 MB in LegendaryMissions' git, 27 MB
+Art used to be copied per consuming mission - 27 MB in LegendaryMissions' git and 27 MB
 again in every mission that declared the pack. Everything the engine is handed is a path
 relative to `data/graphics` (sbs_utils' ImageAtlas ends with `os.path.relpath(file,
-graphics_dir)`), so a mission asset already reaches it as `..\\missions\\<mission>\\media
-\\...`. A shared copy under `__lib__` is the same shape with a different folder name, and
+graphics_dir)`), so a mission asset already reaches it as `..\missions\<mission>\media
+\...`. A shared copy under `__lib__` is the same shape with a different folder name, and
 the engine loads it - proved with `missions/media_probe`.
 
-    __lib__/artemis-sbs.LegendaryMissions.media.v1.4.0.zip     the artifact
-    __lib__/media/LegendaryMissions/**                          unpacked ONCE
-    __lib__/media/.stamp.json                                   what is unpacked, and from what
+    __lib__/artemis-sbs.LegendaryMissions.media.v1.4.0.zip       the artifact
+    __lib__/media/artemis-sbs.LegendaryMissions.media.v1.4.0/**  unpacked ONCE
+    __lib__/media/.stamp.json                                    what is unpacked, from what
 
-THE LAYOUT RULE. A pack's zip already carries its own namespace folder at the root
-(`LegendaryMissions/`), so unpacking is a plain extract into one shared root - no
-stripping, no per-pack wrapper - and every media path an addon already writes keeps its
-suffix. A zip WITHOUT a single root folder gets wrapped in the pack name instead, so a
-malformed pack cannot spill loose files into the shared root.
+UNPACKED PER VERSION, named for the zip. Two versions are pinned across the missions here
+(seven on v1.4.0, `module_3_bases` on v1.1.0), and a single shared folder would hand one
+of them art it did not ask for - a regression on today's per-mission copies. The zip name
+is already unique per pack AND version, so it is the folder name; nothing has to invent a
+namespace, and a pack's own contents need no wrapper folder of their own.
 
-THE STAMP. Version alone is not enough to decide whether to re-unpack: during development
-the art changes while the version stays `v1.4.0_dev`, which is exactly when a stale copy
-bites. The stamp records the zip's own size+mtime as well, which costs nothing to read.
+Addons never write these paths: `sbs_utils.procedural.media_shared` maps a logical path
+("casino/terran_back") onto whichever root has it, so the version in the middle stays out
+of mission code.
+
+THE STAMP. Version alone cannot decide whether to re-unpack: during development the art
+changes while the version stays `v1.4.0_dev`, which is exactly when a stale copy bites.
+The stamp records the zip's size, mtime and a digest of its LISTING - not its bodies,
+because hashing 27 MB of art on every build is a tax nobody would pay.
 """
+import glob
 import hashlib
 import json
 import os
@@ -54,12 +60,16 @@ def _write_stamp(lib_dir, stamp):
 
 
 def zip_signature(zip_path):
-    """What the stamp compares: the zip's size and mtime, plus a digest of its listing.
+    """What the stamp compares: a digest of the zip's LISTING - every entry's name, size
+    and CRC.
 
-    Not the file bodies - hashing 27 MB of art on every build is a tax nobody would pay,
-    and a change to any entry moves its size or CRC in the listing anyway.
+    Not the file bodies: hashing 27 MB of art on every build is a tax nobody would pay,
+    and any change to any entry moves its size or CRC anyway.
+
+    And deliberately NOT the zip's own mtime or size. `sbs.pyz lib` rebuilds the zip on
+    every run, which moves both even when the art is untouched - keying on them meant a
+    27 MB re-extract after every build of an unrelated addon.
     """
-    st = os.stat(zip_path)
     h = hashlib.sha1()
     try:
         with zipfile.ZipFile(zip_path) as zf:
@@ -67,7 +77,7 @@ def zip_signature(zip_path):
                 h.update(("%s|%d|%d;" % (info.filename, info.file_size, info.CRC)).encode())
     except zipfile.BadZipFile:
         return None
-    return {"size": st.st_size, "mtime": int(st.st_mtime), "listing": h.hexdigest()}
+    return {"listing": h.hexdigest()}
 
 
 def _split_name(zip_file):
@@ -89,9 +99,16 @@ def _split_name(zip_file):
 
 
 def pack_name(zip_file):
-    """The stamp key: the pack, version aside, so re-versioning REPLACES the unpacked
-    copy instead of accumulating one per version."""
+    """The pack, version aside - what two spellings of the same pack agree on."""
     return _split_name(zip_file)[0]
+
+
+def unpack_dir_name(zip_file):
+    """The folder a pack unpacks into: the zip's own name, which is already unique per
+    pack AND version. Keyed this way, a mission that pins v1.1.0 keeps v1.1.0 while
+    another mission uses v1.4.0."""
+    stem = os.path.basename(zip_file)
+    return stem[:-4] if stem.endswith(".zip") else stem
 
 
 def pack_version(zip_file):
@@ -117,7 +134,8 @@ def _roots(zf):
 
 
 def unpack_media(zip_path, lib_dir, force=False, quiet=False):
-    """Unpack one media pack into `<lib_dir>/media/`, if the stamp says it is stale.
+    """Unpack one media pack into `<lib_dir>/media/<zip name>/`, if the stamp says it is
+    stale.
 
     Returns True when files were written. Idempotent, and safe to interrupt: the extract
     lands in a temp folder and only then replaces the live one.
@@ -125,7 +143,7 @@ def unpack_media(zip_path, lib_dir, force=False, quiet=False):
     if not os.path.exists(zip_path):
         print("ERROR: no such media pack: %s" % zip_path)
         return False
-    key = pack_name(zip_path)
+    key = unpack_dir_name(zip_path)
     sig = zip_signature(zip_path)
     if sig is None:
         print("ERROR: not a readable zip: %s" % zip_path)
@@ -133,64 +151,98 @@ def unpack_media(zip_path, lib_dir, force=False, quiet=False):
 
     stamp = _read_stamp(lib_dir)
     media_root = os.path.join(lib_dir, MEDIA_DIR)
-    have = stamp.get(key)
-    if have == sig and not force:
+    if stamp.get(key) == sig and not force:
         if not quiet:
             print("media up to date: %s" % key)
         return False
 
+    dest = os.path.join(media_root, key)
+    tmp = os.path.join(media_root, ".tmp-" + key)
+    if os.path.exists(tmp):
+        shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp, exist_ok=True)
     with zipfile.ZipFile(zip_path) as zf:
-        roots = _roots(zf)
-        # One root folder is the pack's namespace - extract as-is. Anything else gets
-        # wrapped in the pack name so loose files cannot land in the shared root.
-        single = len(roots) == 1 and not any(n.rstrip("/") in roots for n in zf.namelist()
-                                             if "/" not in n.rstrip("/"))
-        target_name = None if single else key
-        dest = media_root if single else os.path.join(media_root, key)
-        tmp = os.path.join(media_root, ".tmp-" + key)
-        if os.path.exists(tmp):
-            shutil.rmtree(tmp, ignore_errors=True)
-        os.makedirs(tmp, exist_ok=True)
         zf.extractall(tmp)
 
-    # Replace only what this pack owns: its own root folder(s), not the whole shared dir.
-    owned = sorted(roots) if single else [key]
-    for name in owned:
-        live = os.path.join(dest if single else media_root, name) if single \
-            else os.path.join(media_root, key)
-        if os.path.exists(live):
-            shutil.rmtree(live, ignore_errors=True)
-    os.makedirs(dest, exist_ok=True)
-    for name in os.listdir(tmp):
-        shutil.move(os.path.join(tmp, name), os.path.join(dest, name))
-    shutil.rmtree(tmp, ignore_errors=True)
+    # Replace wholesale rather than merge: a file dropped from the pack must disappear
+    # from the unpacked copy too.
+    if os.path.exists(dest):
+        shutil.rmtree(dest, ignore_errors=True)
+    os.makedirs(media_root, exist_ok=True)
+    shutil.move(tmp, dest)
 
     stamp[key] = sig
     _write_stamp(lib_dir, stamp)
-    where = "/".join(sorted(roots)) if single else key
-    print("media unpacked: %s -> %s/%s%s" % (key, MEDIA_DIR, where,
-                                             "" if single else "  (wrapped: no single root)"))
+    print("media unpacked: %s" % key)
     return True
 
 
-def unpack_all(lib_dir, force=False, quiet=False):
-    """Unpack every media pack sitting in `__lib__`. Called after a build or a fetch, so
-    a working tree and a downloaded dependency end up in the same layout."""
+def unpack_all(lib_dir, force=False, quiet=False, pinned=None):
+    """Unpack the media packs sitting in `__lib__`, so a working tree and a downloaded
+    dependency end up in the same layout.
+
+    EVERY pinned version, not just the newest: missions pin what they pin, and one of
+    them getting art it did not ask for is the failure this layout exists to prevent.
+
+    `pinned` (from `pinned_packs`) skips packs no mission declares - `__lib__` keeps every
+    version ever built, and extracting 20 MB only for `prune_media` to delete it again is
+    work nobody asked for. Omit it to unpack whatever is there.
+    """
     if not os.path.isdir(lib_dir):
         return 0
-    # `__lib__` accumulates every version ever built or fetched. Unpacking all of them
-    # means the same art is written N times and the stamp flips on every run - so pick
-    # ONE zip per pack: the highest version, and on a tie the most recently written.
-    newest = {}
+    keep = None if pinned is None else {os.path.basename(p) for p in pinned}
+    n = 0
     for f in sorted(os.listdir(lib_dir)):
         if not (f.lower().endswith(".zip") and ".media." in f.lower()):
             continue
-        path = os.path.join(lib_dir, f)
-        key = pack_name(path)
-        rank = (pack_version(path), os.path.getmtime(path))
-        if key not in newest or rank > newest[key][0]:
-            newest[key] = (rank, path)
+        if keep is not None and f not in keep:
+            continue
+        n += unpack_media(os.path.join(lib_dir, f), lib_dir, force=force, quiet=quiet)
+    return n
+
+
+def pinned_packs(missions_dir):
+    """Every media zip the missions under `missions_dir` declare in their `story.json`.
+
+    What `prune_media` keeps. Read rather than assumed: a pack nothing pins is dead
+    weight, and a pack one old mission still pins must survive a build for a newer one.
+    """
+    out = set()
+    for story in glob.glob(os.path.join(missions_dir, "*", "story.json")):
+        try:
+            with open(story, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+        except Exception:
+            continue
+        for value in (data.get("resources") or {}).values():
+            for v in (value if isinstance(value, list) else [value]):
+                v = str(v).strip()
+                if v.lower().endswith(".zip"):
+                    out.add(v)
+    return out
+
+
+def prune_media(lib_dir, pinned, quiet=False):
+    """Drop unpacked packs nothing pins any more - `pinned` is every zip name the
+    missions declare. Keeps the shared folder from growing a copy per version ever built
+    while staying hands-off about anything still referenced."""
+    media_root = os.path.join(lib_dir, MEDIA_DIR)
+    if not os.path.isdir(media_root):
+        return 0
+    keep = {p[:-4] if p.lower().endswith(".zip") else p for p in pinned}
+    stamp = _read_stamp(lib_dir)
     n = 0
-    for _rank, path in sorted(newest.values(), key=lambda x: x[1]):
-        n += unpack_media(path, lib_dir, force=force, quiet=quiet)
+    for name in sorted(os.listdir(media_root)):
+        path = os.path.join(media_root, name)
+        if name == STAMP or not os.path.isdir(path) or name.startswith(".tmp-"):
+            continue
+        if name in keep:
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        stamp.pop(name, None)
+        n += 1
+        if not quiet:
+            print("media pruned (nothing pins it): %s" % name)
+    if n:
+        _write_stamp(lib_dir, stamp)
     return n

@@ -302,7 +302,7 @@
     }
     function onChange(e) {
       const t = e.target;
-      // A colour-swatch change writes the hex back into the row's text field.
+      // A color-swatch change writes the hex back into the row's text field.
       if (t && t.classList && t.classList.contains('fswatch')) {
         const tf = t.parentElement.querySelector('.fval');
         if (tf) { tf.value = t.value; }

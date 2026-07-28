@@ -4,7 +4,7 @@ import os
 
 from cli_cmd import cli, zipapp_dir
 from file_help import zipdir
-from media_cmd import unpack_all
+from media_cmd import unpack_all, prune_media, pinned_packs
 from pathlib import Path
 
 def lib_get_json(folder):
@@ -78,7 +78,10 @@ def lib_impl(folder, user):
     # rather than leaving every consuming mission to hold its own copy. Stamped, so this
     # is free when nothing changed.
     try:
-        unpack_all(os.path.join(working_directory, "__lib__"), quiet=True)
+        lib = os.path.join(working_directory, "__lib__")
+        pinned = pinned_packs(working_directory)
+        unpack_all(lib, quiet=True, pinned=pinned)
+        prune_media(lib, pinned)
     except Exception as e:
         print(f"WARNING: could not unpack media: {e}")
 

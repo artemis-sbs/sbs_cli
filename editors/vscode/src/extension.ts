@@ -167,7 +167,7 @@ function esc(s: string): string {
 // Shared webview shell: a fixed toolbar (title, legend, fit/overview/zoom) over a
 // bounded scroll area (real scrollbars), with zoom (buttons + Ctrl+wheel), fit-to-
 // window, drag-to-pan, and a minimap overview. `.lm`/`.nd` are click-to-jump.
-// `extraScript` is appended for view-specific behaviour (e.g. graph highlighting).
+// `extraScript` is appended for view-specific behavior (e.g. graph highlighting).
 function webviewPage(title: string, legend: string, styles: string, body: string, nonce: string, extraScript = '', inspector?: { scripts: string; imgCsp: string }, initialView?: { zoom: number; sl: number; st: number } | null, toolbar = ''): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${inspector ? inspector.imgCsp : ''} style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
@@ -459,7 +459,7 @@ function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview, init
       if (ni !== i0 || nj !== j0) { vscode.postMessage({ type: 'setAt', uri: g.dataset.uri, range: JSON.parse(g.dataset.atrange), i: ni, j: nj }); }
     });
   }
-  // Regions: drag the centre handle to move, the edge handle to resize.
+  // Regions: drag the center handle to move, the edge handle to resize.
   let rgActive = null, rgMode = null, rgx = 0, rgy = 0;
   for (const g of scroll.querySelectorAll('.rg.editable')) {
     g.querySelector('.rmove').addEventListener('mousedown', (e) => { if (e.button !== 0) { return; } e.stopPropagation(); rgActive = g; rgMode = 'move'; moved = false; rgx = e.clientX; rgy = e.clientY; });
@@ -1020,7 +1020,7 @@ async function previewInSession(): Promise<void> {
 }
 
 // A self-contained webview that draws the preview payload client-side: a dialogue
-// comms card (coloured speaker + face + lines + choices), a scan (tab + variants),
+// comms card (colored speaker + face + lines + choices), a scan (tab + variants),
 // or a lifeform face. The face uses FaceRender (face.js) via faceInjection.
 function renderPreviewHtml(p: PreviewPayload, nonce: string,
                           inj: { scripts: string; imgCsp: string; available: boolean },
@@ -4368,7 +4368,7 @@ ${amdToolbar('inspector')}
     }
   });
 
-  // --- Brains pane: render each agent's behaviour tree, marking the active node ---
+  // --- Brains pane: render each agent's behavior tree, marking the active node ---
   function renderBrains(brains) {
     const tree = document.getElementById('bTree');
     document.getElementById('bCount').textContent = brains.length ? '('+brains.length+')' : '';

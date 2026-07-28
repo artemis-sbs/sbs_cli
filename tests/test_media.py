@@ -43,60 +43,91 @@ class Unpacking(unittest.TestCase):
         _zip(p, entries)
         return p
 
-    def test_a_single_root_extracts_as_is(self):
-        """The pack carries its own namespace folder, so every media path an addon
-        already writes keeps its suffix."""
-        p = self._pack("u.Demo.media.v1.0.0.zip", ["Demo/casino/card.png", "Demo/logo.png"])
-        self.assertTrue(M.unpack_media(p, self.lib))
-        self.assertTrue(os.path.exists(os.path.join(self.lib, "media", "Demo", "casino", "card.png")))
+    def _at(self, *parts):
+        return os.path.join(self.lib, "media", *parts)
 
-    def test_no_single_root_is_wrapped(self):
-        """A malformed pack must not spill loose files into the shared root."""
-        p = self._pack("u.Loose.media.v1.0.0.zip", ["a.png", "b/c.png"])
-        M.unpack_media(p, self.lib)
-        key = M.pack_name(p)
-        self.assertTrue(os.path.exists(os.path.join(self.lib, "media", key, "a.png")))
-        self.assertFalse(os.path.exists(os.path.join(self.lib, "media", "a.png")))
+    def test_unpacks_into_a_folder_named_for_the_zip(self):
+        """The zip name is already unique per pack AND version, so nothing has to invent
+        a namespace and a pack needs no wrapper folder of its own."""
+        p = self._pack("u.Demo.media.v1.0.0.zip", ["casino/card.png", "logo.png"])
+        self.assertTrue(M.unpack_media(p, self.lib))
+        self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.0.0", "casino", "card.png")))
+
+    def test_two_pinned_versions_live_side_by_side(self):
+        """The reason for versioned folders: seven missions pin v1.4.0 while
+        module_3_bases pins v1.1.0, and one shared folder would hand one of them art it
+        never asked for."""
+        self._pack("u.Demo.media.v1.1.0.zip", ["casino/old.png"])
+        self._pack("u.Demo.media.v1.4.0.zip", ["casino/new.png"])
+        self.assertEqual(M.unpack_all(self.lib), 2)
+        self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.1.0", "casino", "old.png")))
+        self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.4.0", "casino", "new.png")))
 
     def test_second_run_is_a_no_op(self):
-        p = self._pack("u.Demo.media.v1.0.0.zip", ["Demo/x.png"])
+        p = self._pack("u.Demo.media.v1.0.0.zip", ["casino/x.png"])
         self.assertTrue(M.unpack_media(p, self.lib))
         self.assertFalse(M.unpack_media(p, self.lib))
 
     def test_changed_art_re_unpacks_even_at_the_SAME_version(self):
-        """The reason the stamp is not just the version: during development the art
-        changes while the version stays put."""
-        p = self._pack("u.Demo.media.v1.0.0.zip", ["Demo/x.png"])
+        """Why the stamp is not just the version: during development the art changes
+        while the version stays put."""
+        p = self._pack("u.Demo.media.v1.0.0.zip", ["casino/x.png"])
         M.unpack_media(p, self.lib)
-        _zip(p, ["Demo/x.png", "Demo/y.png"])
+        _zip(p, ["casino/x.png", "casino/y.png"])
         self.assertTrue(M.unpack_media(p, self.lib))
-        self.assertTrue(os.path.exists(os.path.join(self.lib, "media", "Demo", "y.png")))
+        self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.0.0", "casino", "y.png")))
 
-    def test_unpack_all_takes_ONE_zip_per_pack(self):
-        """`__lib__` accumulates every version ever built; unpacking all of them writes
-        the same art N times and flips the stamp on every run."""
-        self._pack("u.Demo.media.v1.3.0.zip", ["Demo/old.png"])
-        self._pack("u.Demo.media.v1.4.0.zip", ["Demo/new.png"])
-        self._pack("u.demo.media.v1.4.0_dev.zip", ["Demo/dev.png"])
-        self.assertEqual(M.unpack_all(self.lib), 1)
-        root = os.path.join(self.lib, "media", "Demo")
-        self.assertTrue(os.path.exists(os.path.join(root, "new.png")))
-        self.assertFalse(os.path.exists(os.path.join(root, "dev.png")))
-        self.assertFalse(os.path.exists(os.path.join(root, "old.png")))
-
-    def test_a_stale_copy_is_removed_not_merged(self):
-        p = self._pack("u.Demo.media.v1.0.0.zip", ["Demo/gone.png"])
+    def test_a_dropped_file_disappears(self):
+        p = self._pack("u.Demo.media.v1.0.0.zip", ["casino/gone.png"])
         M.unpack_media(p, self.lib)
-        _zip(p, ["Demo/kept.png"])
+        _zip(p, ["casino/kept.png"])
         M.unpack_media(p, self.lib)
-        root = os.path.join(self.lib, "media", "Demo")
-        self.assertTrue(os.path.exists(os.path.join(root, "kept.png")))
-        self.assertFalse(os.path.exists(os.path.join(root, "gone.png")))
+        self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.0.0", "casino", "kept.png")))
+        self.assertFalse(os.path.exists(self._at("u.Demo.media.v1.0.0", "casino", "gone.png")))
 
     def test_a_bad_zip_is_reported_not_raised(self):
         p = os.path.join(self.lib, "u.Bad.media.v1.0.0.zip")
         open(p, "wb").write(b"not a zip")
         self.assertFalse(M.unpack_media(p, self.lib))
+
+
+class Pruning(unittest.TestCase):
+    def setUp(self):
+        self.lib = tempfile.mkdtemp()
+        self.missions = tempfile.mkdtemp()
+
+    def tearDown(self):
+        for d in (self.lib, self.missions):
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _mission(self, name, pack):
+        d = os.path.join(self.missions, name)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "story.json"), "w", encoding="utf-8") as f:
+            json.dump({"resources": {"media": pack}}, f)
+
+    def test_pinned_packs_reads_every_story(self):
+        self._mission("a", "u.Demo.media.v1.4.0.zip")
+        self._mission("b", "u.Demo.media.v1.1.0.zip")
+        self.assertEqual(M.pinned_packs(self.missions),
+                         {"u.Demo.media.v1.4.0.zip", "u.Demo.media.v1.1.0.zip"})
+
+    def test_prune_keeps_what_is_pinned_and_drops_the_rest(self):
+        for v in ("v1.1.0", "v1.4.0", "v0.9.0"):
+            _zip(os.path.join(self.lib, "u.Demo.media.%s.zip" % v), ["casino/x.png"])
+        M.unpack_all(self.lib, quiet=True)
+        self._mission("a", "u.Demo.media.v1.4.0.zip")
+        self._mission("b", "u.Demo.media.v1.1.0.zip")
+        self.assertEqual(M.prune_media(self.lib, M.pinned_packs(self.missions), quiet=True), 1)
+        left = sorted(d for d in os.listdir(os.path.join(self.lib, "media")) if not d.startswith("."))
+        self.assertEqual(left, ["u.Demo.media.v1.1.0", "u.Demo.media.v1.4.0"])
+
+    def test_pruning_forgets_the_stamp_too(self):
+        _zip(os.path.join(self.lib, "u.Gone.media.v1.0.0.zip"), ["casino/x.png"])
+        M.unpack_all(self.lib, quiet=True)
+        M.prune_media(self.lib, set(), quiet=True)
+        with open(os.path.join(self.lib, "media", ".stamp.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {})
 
 
 if __name__ == "__main__":
