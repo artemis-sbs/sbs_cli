@@ -126,9 +126,12 @@
       // Name what it resolved to. "(from the section name)" told an author the word came
       // from somewhere else without saying what it landed on.
       const inherited = String(model.archetype || '');
+      // Say which of the two it is. "(from the section name)" was told to records where
+      // NOTHING resolved - the section did not say, so the record has no type at all and
+      // gets no typed fields, no lint and no help until someone picks one.
       const none = inherited
         ? `(from the section: ${esc(inherited[0].toUpperCase() + inherited.slice(1))})`
-        : '(from the section name)';
+        : '(no type yet - pick one)';
       const opts = [`<option value="">${none}</option>`].concat(
         groups.map((g) => g.name
           ? `<optgroup label="${esc(g.name)}">${g.items.map(opt).join('')}</optgroup>`
