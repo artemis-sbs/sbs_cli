@@ -108,6 +108,13 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
         resources = deps.get("resources")
         if resources is not None:
             fetch_deps(resources.values(), False, overwrite_libs)
+            # ...and unpack the art once, beside the libraries, so a fetched dependency
+            # lands in the same layout a locally built one does.
+            try:
+                from media_cmd import unpack_all
+                unpack_all(os.path.join(zipapp_dir, "__lib__"))
+            except Exception as e:
+                print(f"WARNING: could not unpack media: {e}")
 
         #media
         #  artemis-sbs.LegendaryMissions.media.v1.3.0.zip

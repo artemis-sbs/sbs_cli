@@ -4,6 +4,7 @@ import os
 
 from cli_cmd import cli, zipapp_dir
 from file_help import zipdir
+from media_cmd import unpack_all
 from pathlib import Path
 
 def lib_get_json(folder):
@@ -72,6 +73,14 @@ def lib_impl(folder, user):
             
             
             #print(f"Compressing {lib_dir} into  {zip_file_name}")
+
+    # A media pack is art, and art wants to live ONCE: unpack it beside the libraries
+    # rather than leaving every consuming mission to hold its own copy. Stamped, so this
+    # is free when nothing changed.
+    try:
+        unpack_all(os.path.join(working_directory, "__lib__"), quiet=True)
+    except Exception as e:
+        print(f"WARNING: could not unpack media: {e}")
 
 
 def version_file_contents(version):
