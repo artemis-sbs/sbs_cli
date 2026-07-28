@@ -112,9 +112,21 @@
       const kinds = model.kinds || [];
       if (!kinds.length) { return ''; }
       const cur = String(model.kind || '').toLowerCase();
+      // Grouped - Story / Work / Content - because a flat list of every noun reads as a
+      // wall rather than a choice. (The reader still ACCEPTS every plural and alias.)
+      const groups = [];
+      for (const k of kinds) {
+        const g = k.group || '';
+        const last = groups[groups.length - 1];
+        if (!last || last.name !== g) { groups.push({ name: g, items: [k] }); }
+        else { last.items.push(k); }
+      }
+      const opt = (k) => `<option value="${esc(k.noun)}"${k.noun.toLowerCase() === cur ? ' selected' : ''}>` +
+                         `${esc(k.noun)}</option>`;
       const opts = ['<option value="">(from the section name)</option>'].concat(
-        kinds.map((k) => `<option value="${esc(k.noun)}"${k.noun.toLowerCase() === cur ? ' selected' : ''}>` +
-                         `${esc(k.noun)}</option>`)).join('');
+        groups.map((g) => g.name
+          ? `<optgroup label="${esc(g.name)}">${g.items.map(opt).join('')}</optgroup>`
+          : g.items.map(opt).join(''))).join('');
       const hit = kinds.find((k) => k.noun.toLowerCase() === cur);
       const implies = hit && hit.implies ? `<div class="sec insp-kind-implies">means ${esc(hit.implies)}</div>` : '';
       return `<label class="k">This is a</label><select class="insp-kind">${opts}</select>${implies}`;
