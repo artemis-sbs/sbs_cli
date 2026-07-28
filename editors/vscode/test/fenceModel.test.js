@@ -12,8 +12,12 @@ function rebuildFence(d, fields, kind) {
   const lines = d.fenceLines;
   const wantKind = kind === undefined ? undefined : kind.trim();
   if (!lines || !lines.length) {
-    const only = fields.map((f) => `${f.label}: ${f.value}`).join('\n');
-    return wantKind ? `${wantKind}\n${only}` : only;
+    // A record with NO fence yet: the caller wraps what we return in `---` lines, so
+    // returning "Beat" + an empty field list used to leave a blank line inside the new
+    // fence. Give it exactly the lines it has.
+    const only = fields.map((f) => `${f.label}: ${f.value}`).filter(Boolean);
+    if (wantKind) { only.unshift(wantKind); }
+    return only.join('\n');
   }
   const byLabel = new Map();
   for (const f of fields) {
@@ -108,6 +112,17 @@ check('a record with no noun gets one, FIRST', named === 'Job\nReward: 200 credi
 
 check('an older webview (no kind sent) leaves the noun alone',
   rebuildFence(detail, fields, undefined).split('\n')[0] === 'Beat');
+
+
+// 7) A record with NO fence yet - the caller wraps the result in `---` lines, so a
+//    stray empty entry showed up as a blank line inside the brand-new fence.
+const noFence = { fenceLines: [] };
+check('a fence-less record gets just its noun',
+  rebuildFence(noFence, [], 'Character') === 'Character');
+check('...and its fields under it',
+  rebuildFence(noFence, [{ label: 'Face', value: 'terran' }], 'Character')
+    === 'Character\nFace: terran');
+check('no noun, no fields -> nothing to write', rebuildFence(noFence, []) === '');
 
 console.log(failures ? `\n${failures} FAILED` : '\nall ok');
 process.exit(failures ? 1 : 0);

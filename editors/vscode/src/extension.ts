@@ -568,8 +568,12 @@ function rebuildFence(d: NodeDetail, fields: NodeField[], kind?: string): string
   const lines = d.fenceLines;
   const wantKind = kind === undefined ? undefined : kind.trim();
   if (!lines || !lines.length) {
-    const only = fields.map((f) => `${f.label}: ${f.value}`).join('\n');
-    return wantKind ? `${wantKind}\n${only}` : only;
+    // A record with NO fence yet: the caller wraps what we return in `---` lines, so
+    // returning "Beat" + an empty field list used to leave a blank line inside the new
+    // fence. Give it exactly the lines it has.
+    const only = fields.map((f) => `${f.label}: ${f.value}`).filter(Boolean);
+    if (wantKind) { only.unshift(wantKind); }
+    return only.join('\n');
   }
   const byLabel = new Map<string, NodeField[]>();
   for (const f of fields) {
