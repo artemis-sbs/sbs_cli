@@ -2,12 +2,21 @@
   "name": "amd-language",
   "displayName": "Artemis AMD",
   "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, diagnostics/navigation/formatting via the sbs AMD language server, plus a MAST source debugger.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "artemis-sbs",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/artemis-sbs/sbs_cli" },
-  "engines": { "vscode": "^1.75.0" },
-  "categories": ["Programming Languages", "Linters", "Formatters"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/artemis-sbs/sbs_cli"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
   "main": "./out/extension.js",
   "activationEvents": [
     "onDebug"
@@ -18,8 +27,12 @@
         "viewType": "amd.guiFileEditor",
         "displayName": "GUI / Web Page Editor",
         "selector": [
-          { "filenamePattern": "*.gui.mast" },
-          { "filenamePattern": "*.web.mast" }
+          {
+            "filenamePattern": "*.gui.mast"
+          },
+          {
+            "filenamePattern": "*.web.mast"
+          }
         ],
         "priority": "default"
       }
@@ -93,51 +106,132 @@
     ],
     "menus": {
       "commandPalette": [
-        { "command": "amd.showMap", "when": "editorLangId == amd" },
-        { "command": "amd.showGraph", "when": "editorLangId == amd" },
-        { "command": "amd.showStoryOutline", "when": "editorLangId == amd" },
-        { "command": "amd.showTimeline", "when": "editorLangId == amd" },
-        { "command": "amd.showResolver", "when": "editorLangId == amd" },
-        { "command": "amd.guiEditor" },
-        { "command": "amd.showPreview", "when": "editorLangId == amd" },
-        { "command": "amd.previewInSession", "when": "editorLangId == amd" },
-        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.(gui|web)\\.mast$/" },
-        { "command": "amd.newFile" }
+        {
+          "command": "amd.showMap",
+          "when": "editorLangId == amd"
+        },
+        {
+          "command": "amd.showGraph",
+          "when": "editorLangId == amd"
+        },
+        {
+          "command": "amd.showStoryOutline",
+          "when": "editorLangId == amd"
+        },
+        {
+          "command": "amd.showTimeline",
+          "when": "editorLangId == amd"
+        },
+        {
+          "command": "amd.showResolver",
+          "when": "editorLangId == amd"
+        },
+        {
+          "command": "amd.guiEditor"
+        },
+        {
+          "command": "amd.showPreview",
+          "when": "editorLangId == amd"
+        },
+        {
+          "command": "amd.previewInSession",
+          "when": "editorLangId == amd"
+        },
+        {
+          "command": "amd.openGuiEditor",
+          "when": "resourceFilename =~ /\\.(gui|web)\\.mast$/"
+        },
+        {
+          "command": "amd.newFile"
+        }
       ],
       "editor/title": [
-        { "command": "amd.showStoryOutline", "when": "editorLangId == amd", "group": "navigation@1" },
-        { "command": "amd.showTimeline", "when": "editorLangId == amd", "group": "navigation@2" },
-        { "command": "amd.showGraph", "when": "editorLangId == amd", "group": "navigation@3" },
-        { "command": "amd.showResolver", "when": "editorLangId == amd", "group": "navigation@4" },
-        { "command": "amd.showMap", "when": "editorLangId == amd", "group": "navigation@5" },
-        { "command": "amd.showPreview", "when": "editorLangId == amd", "group": "navigation@6" },
-        { "command": "amd.previewInSession", "when": "editorLangId == amd", "group": "navigation@7" },
-        { "command": "amd.showMissionInspector", "when": "editorLangId == amd", "group": "navigation@8" },
-        { "command": "amd.openGuiEditor", "when": "resourceFilename =~ /\\.(gui|web)\\.mast$/ && activeEditor == 'workbench.editors.files.textFileEditor'", "group": "navigation@9" }
+        {
+          "command": "amd.showStoryOutline",
+          "when": "editorLangId == amd",
+          "group": "navigation@1"
+        },
+        {
+          "command": "amd.showTimeline",
+          "when": "editorLangId == amd",
+          "group": "navigation@2"
+        },
+        {
+          "command": "amd.showGraph",
+          "when": "editorLangId == amd",
+          "group": "navigation@3"
+        },
+        {
+          "command": "amd.showResolver",
+          "when": "editorLangId == amd",
+          "group": "navigation@4"
+        },
+        {
+          "command": "amd.showMap",
+          "when": "editorLangId == amd",
+          "group": "navigation@5"
+        },
+        {
+          "command": "amd.showPreview",
+          "when": "editorLangId == amd",
+          "group": "navigation@6"
+        },
+        {
+          "command": "amd.previewInSession",
+          "when": "editorLangId == amd",
+          "group": "navigation@7"
+        },
+        {
+          "command": "amd.showMissionInspector",
+          "when": "editorLangId == amd",
+          "group": "navigation@8"
+        },
+        {
+          "command": "amd.openGuiEditor",
+          "when": "resourceFilename =~ /\\.(gui|web)\\.mast$/ && activeEditor == 'workbench.editors.files.textFileEditor'",
+          "group": "navigation@9"
+        }
       ]
     },
     "languages": [
       {
         "id": "amd",
-        "aliases": ["AMD", "amd"],
-        "extensions": [".amd"],
+        "aliases": [
+          "AMD",
+          "amd"
+        ],
+        "extensions": [
+          ".amd"
+        ],
         "configuration": "./language-configuration.json"
       },
       {
         "id": "mast",
-        "aliases": ["MAST", "mast"],
-        "extensions": [".mast", ".mastlib"]
+        "aliases": [
+          "MAST",
+          "mast"
+        ],
+        "extensions": [
+          ".mast",
+          ".mastlib"
+        ]
       }
     ],
     "breakpoints": [
-      { "language": "mast" },
-      { "language": "amd" }
+      {
+        "language": "mast"
+      },
+      {
+        "language": "amd"
+      }
     ],
     "debuggers": [
       {
         "type": "mast",
         "label": "MAST",
-        "languages": ["mast"],
+        "languages": [
+          "mast"
+        ],
         "configurationAttributes": {
           "launch": {
             "properties": {
@@ -250,8 +344,13 @@
         },
         "amd.server.args": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["lint", "--lsp"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lint",
+            "--lsp"
+          ],
           "description": "Arguments that start the LSP server on stdio (appended after sbs.pyz or amd.server.command)."
         },
         "amd.sessionPort": {
