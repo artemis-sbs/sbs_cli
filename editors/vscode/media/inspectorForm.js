@@ -101,7 +101,7 @@
         key: m.key || '', display: m.display || '',
         fields: m.fields || [], body: m.body || '',
         options: m.options || {},
-        kind: m.kind || '', kinds: m.kinds || [],
+        kind: m.kind || '', kinds: m.kinds || [], archetype: m.archetype || '',
       };
     }
 
@@ -123,7 +123,13 @@
       }
       const opt = (k) => `<option value="${esc(k.noun)}"${k.noun.toLowerCase() === cur ? ' selected' : ''}>` +
                          `${esc(k.noun)}</option>`;
-      const opts = ['<option value="">(from the section name)</option>'].concat(
+      // Name what it resolved to. "(from the section name)" told an author the word came
+      // from somewhere else without saying what it landed on.
+      const inherited = String(model.archetype || '');
+      const none = inherited
+        ? `(from the section: ${esc(inherited[0].toUpperCase() + inherited.slice(1))})`
+        : '(from the section name)';
+      const opts = [`<option value="">${none}</option>`].concat(
         groups.map((g) => g.name
           ? `<optgroup label="${esc(g.name)}">${g.items.map(opt).join('')}</optgroup>`
           : g.items.map(opt).join(''))).join('');

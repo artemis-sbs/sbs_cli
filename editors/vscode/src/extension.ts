@@ -701,9 +701,13 @@ function faceInjection(webview: vscode.Webview, nonce: string): { scripts: strin
 // The node as a plain model for the shared client-side form (media/inspectorForm.js).
 // `options` carries the mission-wide candidate lists the reference widgets need.
 function formModel(d: NodeDetail): { key: string; display: string; fields: NodeField[]; body: string;
-                                     options: SymbolOptions; kind: string; kinds: KindChoice[] } {
+                                     options: SymbolOptions; kind: string; kinds: KindChoice[];
+                                     archetype: string } {
   return { key: d.key, display: d.display, fields: d.fields, body: d.bodyText, options: d.options ?? {},
-           kind: d.kind ?? '', kinds: d.kinds ?? [] };
+           // `archetype` is what the record resolved to WITHOUT a noun of its own (from
+           // the section name, or an ancestor) - so the picker can name it instead of
+           // just saying the word came from somewhere else.
+           kind: d.kind ?? '', kinds: d.kinds ?? [], archetype: d.archetype ?? '' };
 }
 
 // A <script> tag loading the shared form module into a webview.
