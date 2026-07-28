@@ -1408,7 +1408,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
     laneSvg += `<g class="lane" data-section="${esc(sec)}">`
       + `<rect x="0" y="${top}" width="${W}" height="${ht}" rx="6" fill="hsl(${hue},45%,50%)" fill-opacity="0.06" stroke="hsl(${hue},45%,55%)" stroke-opacity="0.3"/>`
       + `<text x="12" y="${top + 15}" class="lanelabel" fill="hsl(${hue},60%,72%)">${esc(sec || 'ungrouped')}</text>`
-      + (sec ? `<text x="${W - 46}" y="${top + 15}" class="laneadd" data-section="${esc(sec)}" fill="hsl(${hue},60%,72%)"><title>Add a new entity to this section</title>+ add</text>` : '')
+      + (sec ? `<text x="${W - 46}" y="${top + 15}" class="laneadd" data-section="${esc(sec)}" fill="hsl(${hue},60%,72%)"><title>Add a record to this section</title>+ add</text>` : '')
       + `</g>`;
   }
 
@@ -1574,7 +1574,7 @@ function renderGraph(fullGraph: MissionGraph, nonce: string, webview: vscode.Web
   for (const c of document.querySelectorAll('.filt input')) {
     c.addEventListener('change', () => vscode.postMessage({ type: 'toggleSection', section: c.dataset.section, hidden: !c.checked }));
   }
-  // "+ add" on a lane label creates a new entity in that section.
+  // "+ add" on a lane label creates a new record in that section.
   for (const t of scroll.querySelectorAll('.laneadd')) {
     t.addEventListener('click', (e) => { e.stopPropagation(); vscode.postMessage({ type: 'addEntity', section: t.dataset.section }); });
   }
@@ -2543,7 +2543,7 @@ ${inj.scripts}${inspectorFormScript(webview, nonce)}
       const group = nodes.filter(n => (n.section||'other') === s &&
         (!q || (n.display||'').toLowerCase().includes(q) || (n.key||'').toLowerCase().includes(q)));
       if (!group.length) continue;
-      const add = (s && s !== 'other') ? '<span class="addbtn" data-section="'+esc(s)+'" title="Add a new entity to this section">+ add</span>' : '';
+      const add = (s && s !== 'other') ? '<span class="addbtn" data-section="'+esc(s)+'" title="Add a record to this section">+ add</span>' : '';
       parts.push('<div class="sec">'+esc(s)+' ('+group.length+')'+add+'</div>');
       for (const n of group) {
         shown++;
@@ -3412,14 +3412,21 @@ ${amdToolbar('resolver')}
     document.getElementById('mCount').textContent = ents.length ? '('+ents.length+')' : '';
     // group by archetype, ordered; nodes with no archetype (e.g. dialogue prose)
     // fall back to their section so they read as "dialogue", not "other".
+    // The heading shows the AUTHOR word for the group, never the internal one -
+    // someone who wrote Beat was being shown a group called quest.
+    // (No backticks in here: this whole panel is a template literal.)
+    const GROUP_NAMES = { quest: 'Quests', lifeform: 'Characters', item: 'Items',
+      side: 'Sides', scan: 'Scans', landmark: 'Landmarks', region: 'Regions',
+      map: 'Maps', dialogue: 'Dialogue', other: 'Everything else' };
+    const groupName = (g) => GROUP_NAMES[g] || (g ? g[0].toUpperCase() + g.slice(1) : 'Everything else');
     const groups = {};
     for (const e of ents) { const gk = e.archetype || e.section || 'other'; (groups[gk] = groups[gk] || []).push(e); }
     const names = Object.keys(groups).sort((a,b) => (archRank(a)-archRank(b)) || a.localeCompare(b));
     const out = [];
     for (const g of names){
       const section = (groups[g][0] && groups[g][0].section) || '';
-      const add = section ? '<span class="addbtn" data-section="'+esc(section)+'" title="Add a new entity to this section">+ add</span>' : '';
-      out.push('<div class="grp">'+esc(g||'other')+' ('+groups[g].length+')'+add+'</div>');
+      const add = section ? '<span class="addbtn" data-section="'+esc(section)+'" title="Add a record to this section">+ add</span>' : '';
+      out.push('<div class="grp">'+esc(groupName(g))+' ('+groups[g].length+')'+add+'</div>');
       for (const e of groups[g]) out.push(entRow(e));
     }
     document.getElementById('tree').innerHTML = out.join('') || '<div class="empty">No entities match.</div>';
@@ -3534,7 +3541,7 @@ async function addEntityInSection(uri: string, section: string, openInspector = 
   let r: NewInSection | null;
   try {
     r = await client.sendRequest<NewInSection | null>('amd/newInSection', { textDocument: { uri }, section });
-  } catch (e) { output.appendLine(`Add entity failed: ${e}`); return null; }
+  } catch (e) { output.appendLine(`Could not add the record: ${e}`); return null; }
   if (!r) { return null; }
   const edit = new vscode.WorkspaceEdit();
   edit.insert(vscode.Uri.parse(uri), new vscode.Position(r.line, 0), r.text);
