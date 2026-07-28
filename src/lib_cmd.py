@@ -58,6 +58,21 @@ def lib_impl(folder, user):
         ext = key
         for folder_path in values:
             lib_dir = Path(working_directory).resolve() / folder / folder_path
+            # NEVER build from a source folder that is not there. `fetch` calls this
+            # straight after downloading, and a fetched copy can legitimately lack a
+            # folder the manifest lists - `media/` is `export-ignore`d out of the GitHub
+            # archive, because the art travels as its own pack. Zipping a missing folder
+            # writes an EMPTY zip over the real one in `__lib__`, the unpacker sees the
+            # changed listing and replaces the shared art with nothing, and every mission
+            # reading that pack goes blank. Skip, and say why.
+            if not lib_dir.is_dir():
+                print(f"SKIP {key} '{folder_path}': no such folder in {folder} "
+                      f"(kept whatever is already in __lib__)")
+                continue
+            if not any(lib_dir.rglob("*")):
+                print(f"SKIP {key} '{folder_path}': folder is empty "
+                      f"(kept whatever is already in __lib__)")
+                continue
             if key == "sbslib":
                 # sbslibs are named by package (folder_path) with the repo
                 # dropped, to match the GitHub release assets (e.g.

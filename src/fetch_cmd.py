@@ -108,6 +108,13 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
         resources = deps.get("resources")
         if resources is not None:
             fetch_deps(resources.values(), False, overwrite_libs)
+        # `shared_media` is a dependency too - the difference is only that nobody copies
+        # it into the mission. Without this the mission declares a pack that never
+        # arrives and its art silently vanishes.
+        shared_media = deps.get("shared_media")
+        if shared_media:
+            fetch_deps(shared_media, False, overwrite_libs)
+        if resources is not None or shared_media:
             # ...and unpack the art once, beside the libraries, so a fetched dependency
             # lands in the same layout a locally built one does.
             try:

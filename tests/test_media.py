@@ -130,5 +130,51 @@ class Pruning(unittest.TestCase):
             self.assertEqual(json.load(f), {})
 
 
+class BuildingWithoutTheSource(unittest.TestCase):
+    """`fetch` calls `lib_impl` right after downloading, and a fetched copy can
+    legitimately lack a folder its manifest lists - `media/` is `export-ignore`d out of
+    the GitHub archive because the art travels as its own pack. Zipping a folder that is
+    not there wrote an EMPTY zip over the real pack in `__lib__`; the unpacker then saw a
+    changed listing and replaced the shared art with nothing, blanking every mission that
+    reads it."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.root, "__lib__"))
+        self.mission = os.path.join(self.root, "Demo")
+        os.makedirs(os.path.join(self.mission, "code"))
+        open(os.path.join(self.mission, "code", "a.mast"), "w").write("x")
+        with open(os.path.join(self.mission, "__lib__.json"), "w") as f:
+            json.dump({"version": "v1.0.0", "mastlib": ["code"], "zip": ["media"]}, f)
+        self.pack = os.path.join(self.root, "__lib__", "artemis-sbs.Demo.media.v1.0.0.zip")
+        _zip(self.pack, ["casino/card.png"])
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _build(self):
+        import cli_cmd, lib_cmd
+        cli_cmd.zipapp_dir = self.root
+        lib_cmd.zipapp_dir = self.root
+        lib_cmd.lib_impl("Demo", "artemis-sbs")
+
+    def test_a_missing_source_folder_does_not_clobber_the_pack(self):
+        self._build()
+        self.assertEqual(len(zipfile.ZipFile(self.pack).namelist()), 1)
+
+    def test_an_empty_source_folder_does_not_either(self):
+        os.makedirs(os.path.join(self.mission, "media"))
+        self._build()
+        self.assertEqual(len(zipfile.ZipFile(self.pack).namelist()), 1)
+
+    def test_a_real_source_folder_still_builds(self):
+        art = os.path.join(self.mission, "media", "casino")
+        os.makedirs(art)
+        open(os.path.join(art, "new.png"), "w").write("art")
+        self._build()
+        names = zipfile.ZipFile(self.pack).namelist()
+        self.assertTrue(any("new.png" in n for n in names), names)
+
+
 if __name__ == "__main__":
     unittest.main()
