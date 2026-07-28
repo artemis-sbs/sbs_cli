@@ -540,11 +540,55 @@ function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview, init
 // added server-side flow through untouched.
 interface FieldSchema { type: string; values?: string[]; open?: boolean; ref?: string; csv?: boolean; hint?: string; verbs?: Record<string, FieldSchema>; }
 interface NodeField { label: string; value: string; schema?: FieldSchema; }
+// Every line of the fence, verbatim. A line with no `label` is one the field list does
+// NOT represent - the kind noun (`Beat`), a `//` comment, a `  - item` continuation -
+// and rebuilding the fence from fields alone silently deleted all three.
+interface FenceLine { raw: string; label?: string; }
 interface SymbolOptions { node?: string[]; side?: string[]; signal?: string[]; }
 interface NodeDetail {
   key: string; display: string; uri: string; archetype?: string | null;
   displayRange: LspRange | null; fields: NodeField[]; fenceRange: LspRange | null;
+  fenceLines?: FenceLine[];
   options?: SymbolOptions; bodyText: string; bodyRange: LspRange;
+}
+
+/**
+ * Put the fence back together from the edited fields, KEEPING every line the field list
+ * does not represent - the kind noun, `//` comments, list continuations.
+ *
+ * Without this the fence was replaced by `Label: value` lines alone, so the first edit to
+ * any field deleted the record's own noun (`Beat`, which decides how it behaves), its
+ * notes and every multi-line list - from a form that says changes apply automatically.
+ * Lines keep their original order; a field the author removed drops out, and a new one is
+ * appended before the closing fence.
+ */
+function rebuildFence(d: NodeDetail, fields: NodeField[]): string {
+  const lines = d.fenceLines;
+  if (!lines || !lines.length) { return fields.map((f) => `${f.label}: ${f.value}`).join('\n'); }
+  const byLabel = new Map<string, NodeField[]>();
+  for (const f of fields) {
+    const k = f.label.trim().toLowerCase();
+    if (!byLabel.has(k)) { byLabel.set(k, []); }
+    byLabel.get(k)!.push(f);
+  }
+  const out: string[] = [];
+  for (const ln of lines) {
+    if (ln.label === undefined) { out.push(ln.raw); continue; }    // kind / comment / list item
+    const queue = byLabel.get(ln.label.trim().toLowerCase());
+    const f = queue && queue.length ? queue.shift() : undefined;
+    if (!f) { continue; }                            // the author removed it
+    // An UNCHANGED field re-emits its original line, so an untouched record round-trips
+    // byte for byte - a label-only line heading a list (`Roles:`) would otherwise come
+    // back as `Roles: ` with a trailing space, and any spacing the author chose is kept.
+    const orig = ln.raw.slice(ln.raw.indexOf(':') + 1).trim();
+    out.push(f.value.trim() === orig ? ln.raw : `${f.label}: ${f.value}`);
+  }
+  const kept = new Set(lines.filter((l) => l.label !== undefined)
+                            .map((l) => (l.label as string).trim().toLowerCase()));
+  for (const f of fields) {
+    if (!kept.has(f.label.trim().toLowerCase())) { out.push(`${f.label}: ${f.value}`); }
+  }
+  return out.join('\n');
 }
 
 // An Inspector is one live projection of a node onto a webview — either the
@@ -1019,8 +1063,8 @@ async function applyInspectorEdit(insp: Inspector, msg: { display: string; field
     if (d.displayRange && msg.display !== d.display) {
       edit.replace(u, rng(d.displayRange), msg.display); changed = true;
     }
-    const fieldText = msg.fields.map((f) => `${f.label}: ${f.value}`).join('\n');
-    const curFields = d.fields.map((f) => `${f.label}: ${f.value}`).join('\n');
+    const fieldText = rebuildFence(d, msg.fields);
+    const curFields = rebuildFence(d, d.fields);
     if (fieldText !== curFields) {
       if (d.fenceRange) { edit.replace(u, rng(d.fenceRange), fieldText); }
       else if (fieldText) { edit.insert(u, new vscode.Position(d.bodyRange.start.line, 0), `---\n${fieldText}\n---\n`); }
