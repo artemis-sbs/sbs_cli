@@ -3,12 +3,24 @@
   "name": "AMD",
   "scopeName": "source.amd",
   "patterns": [
-    { "include": "#comment" },
-    { "include": "#fence" },
-    { "include": "#heading" },
-    { "include": "#choice" },
-    { "include": "#dialogue" },
-    { "include": "#color" }
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#fence"
+    },
+    {
+      "include": "#heading"
+    },
+    {
+      "include": "#choice"
+    },
+    {
+      "include": "#dialogue"
+    },
+    {
+      "include": "#color"
+    }
   ],
   "repository": {
     "comment": {
@@ -16,33 +28,107 @@
       "name": "comment.line.double-slash.amd"
     },
     "fence": {
-      "match": "^\\s*-{3,}\\s*$",
-      "name": "punctuation.definition.metadata.amd"
+      "begin": "^\\s*-{3,}\\s*$",
+      "end": "^\\s*-{3,}\\s*$",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.metadata.amd"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.metadata.amd"
+        }
+      },
+      "name": "meta.metadata.amd",
+      "patterns": [
+        {
+          "match": "^\\s*//.*$",
+          "name": "comment.line.double-slash.amd"
+        },
+        {
+          "match": "\\A\\s*([A-Za-z][A-Za-z0-9_-]*)\\s*$",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.amd"
+            }
+          }
+        },
+        {
+          "match": "^(\\s*)([A-Za-z][A-Za-z0-9 _-]*?)(:)(.*)$",
+          "captures": {
+            "2": {
+              "name": "variable.other.property.amd"
+            },
+            "3": {
+              "name": "punctuation.separator.key-value.amd"
+            },
+            "4": {
+              "name": "string.unquoted.amd"
+            }
+          }
+        },
+        {
+          "match": "^\\s+(-)\\s+(.*)$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.list.amd"
+            },
+            "2": {
+              "name": "string.unquoted.amd"
+            }
+          }
+        },
+        {
+          "match": "^\\s+[^:\n]+$",
+          "name": "string.unquoted.continuation.amd"
+        }
+      ]
     },
     "heading": {
       "match": "^(#+)[ \\t]+(?:(\\[)([^\\]]*)(\\])(\\()([^)]*)(\\)))?[ \\t]*(.*)$",
       "captures": {
-        "1": { "name": "punctuation.definition.heading.amd" },
-        "3": { "name": "entity.name.section.amd" },
-        "6": { "name": "support.constant.property-value.amd" },
-        "8": { "name": "markup.heading.amd" }
+        "1": {
+          "name": "punctuation.definition.heading.amd"
+        },
+        "3": {
+          "name": "entity.name.section.amd"
+        },
+        "6": {
+          "name": "support.constant.property-value.amd"
+        },
+        "8": {
+          "name": "markup.heading.amd"
+        }
       },
       "name": "markup.heading.amd"
     },
     "choice": {
       "match": "^([ \\t]*-[ \\t]*)(\\[)([^\\]]*)(\\])(\\()([^)]*)(\\))(.*)$",
       "captures": {
-        "1": { "name": "punctuation.definition.list.begin.amd" },
-        "3": { "name": "string.other.link.title.amd" },
-        "6": { "name": "support.constant.property-value.amd" },
-        "8": { "name": "meta.outcome.amd" }
+        "1": {
+          "name": "punctuation.definition.list.begin.amd"
+        },
+        "3": {
+          "name": "string.other.link.title.amd"
+        },
+        "6": {
+          "name": "support.constant.property-value.amd"
+        },
+        "8": {
+          "name": "meta.outcome.amd"
+        }
       }
     },
     "dialogue": {
       "match": "^([ \\t]*%)(.*)$",
       "captures": {
-        "1": { "name": "punctuation.definition.quote.amd" },
-        "2": { "name": "string.quoted.other.amd" }
+        "1": {
+          "name": "punctuation.definition.quote.amd"
+        },
+        "2": {
+          "name": "string.quoted.other.amd"
+        }
       }
     },
     "color": {
