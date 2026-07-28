@@ -214,7 +214,12 @@ def pinned_packs(missions_dir):
                 data = json.load(f) or {}
         except Exception:
             continue
-        for value in (data.get("resources") or {}).values():
+        # Both spellings count: `resources` asks the ENGINE to copy the pack into the
+        # mission, `shared_media` asks nobody to - either way the mission depends on it,
+        # so it must be unpacked and must survive pruning.
+        declared = list((data.get("resources") or {}).values())
+        declared += list(data.get("shared_media") or [])
+        for value in declared:
             for v in (value if isinstance(value, list) else [value]):
                 v = str(v).strip()
                 if v.lower().endswith(".zip"):
