@@ -53,6 +53,21 @@ class Unpacking(unittest.TestCase):
         self.assertTrue(M.unpack_media(p, self.lib))
         self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.0.0", "casino", "card.png")))
 
+    def test_a_media_wrapper_from_the_github_action_is_lifted(self):
+        """The Action zips the FOLDER (`path: media`) so its asset has `media/` at the
+        root; a local `sbs.pyz lib` build zips the CONTENTS. Same pack, two shapes - and
+        the wrapper put every file one level too deep for the missions reading it."""
+        p = self._pack("u.Demo.media.v1.0.0.zip", ["media/casino/card.png", "media/logo.png"])
+        M.unpack_media(p, self.lib)
+        self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.0.0", "casino", "card.png")))
+        self.assertFalse(os.path.exists(self._at("u.Demo.media.v1.0.0", "media", "casino", "card.png")))
+
+    def test_any_OTHER_single_root_is_left_alone(self):
+        """`media` is the known artifact; a lone `icons/` is a folder the author meant."""
+        p = self._pack("u.Icons.media.v1.0.0.zip", ["icons/job.png"])
+        M.unpack_media(p, self.lib)
+        self.assertTrue(os.path.exists(self._at("u.Icons.media.v1.0.0", "icons", "job.png")))
+
     def test_two_pinned_versions_live_side_by_side(self):
         """The reason for versioned folders: seven missions pin v1.4.0 while
         module_3_bases pins v1.1.0, and one shared folder would hand one of them art it

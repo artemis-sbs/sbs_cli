@@ -164,6 +164,19 @@ def unpack_media(zip_path, lib_dir, force=False, quiet=False):
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(tmp)
 
+    # A pack built by the GitHub Action has `media/` at its root - the action zips the
+    # FOLDER, while a local `sbs.pyz lib` build zips its CONTENTS. Same art, two shapes,
+    # and the wrapper puts everything one level too deep for the missions that read it.
+    # The version-named folder already namespaces the pack, so a lone `media/` wrapper is
+    # noise: lift its contents. Only that exact name - any other single root is a folder
+    # the author meant.
+    inner = os.path.join(tmp, "media")
+    if os.path.isdir(inner) and os.listdir(tmp) == ["media"]:
+        lifted = tmp + "-lift"
+        shutil.move(inner, lifted)
+        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.move(lifted, tmp)
+
     # Replace wholesale rather than merge: a file dropped from the pack must disappear
     # from the unpacked copy too.
     if os.path.exists(dest):
