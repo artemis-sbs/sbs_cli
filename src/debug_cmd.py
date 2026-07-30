@@ -109,7 +109,10 @@ def _find_cosmos_dev_sbslib(lib_dir, sbs_name):
 
 
 def _parse_asset(asset):
-    """Map a lib asset filename to (user, repo, tag) for its GitHub release.
+    """Map a lib's LOCAL filename to (user, repo, tag) for its GitHub release.
+
+    This resolves WHICH release to look on, not what the asset is called there - repos
+    disagree about that, so see `file_help.release_asset_candidates`.
 
     \b
     artemis-sbs.sbs_utils.v1.4.0.sbslib                 -> (artemis-sbs, sbs_utils, v1.4.0)
@@ -185,7 +188,7 @@ def _ensure_libs(mission_path, packaged_mode, do_fetch=True, refresh=False):
             + "\n(remove --no-fetch to download them from the GitHub release)")
 
     import zipfile
-    from file_help import curlretrieve
+    from file_help import curlretrieve, release_asset_candidates
     failed = []
     for asset in targets:
         parsed = _parse_asset(asset)
@@ -193,24 +196,36 @@ def _ensure_libs(mission_path, packaged_mode, do_fetch=True, refresh=False):
             failed.append(f"{asset} (unrecognized name)")
             continue
         user, repo, tag = parsed
-        url = f"https://github.com/{user}/{repo}/releases/download/{tag}/{asset}"
         dest = os.path.join(lib_dir, asset)
         tmp = dest + ".download"
-        click.echo(f"fetching {asset}  <-  {url}")
-        try:
-            curlretrieve(url, tmp)
-        except Exception as e:
+        # The file is stored under its LOCAL name but is not necessarily PUBLISHED under
+        # it - LegendaryMissions publishes mastlibs unprefixed. Try each candidate; this
+        # used to request the local name only, so every LM mastlib 404'd and was reported
+        # as "kept existing", which looked fine on a box that had built them locally.
+        got = False
+        last_error = None
+        for remote in release_asset_candidates(asset):
+            url = f"https://github.com/{user}/{repo}/releases/download/{tag}/{remote}"
+            click.echo(f"fetching {asset}  <-  {url}")
+            try:
+                curlretrieve(url, tmp)
+            except Exception as e:
+                last_error = e
+                _safe_remove(tmp)
+                continue
+            if os.path.isfile(tmp) and zipfile.is_zipfile(tmp):
+                os.replace(tmp, dest)                  # atomic overwrite
+                got = True
+                break
             _safe_remove(tmp)
-            failed.append(f"{asset} ({e})")
+        if got:
             continue
-        if os.path.isfile(tmp) and zipfile.is_zipfile(tmp):
-            os.replace(tmp, dest)                      # atomic overwrite
+        if os.path.isfile(dest):
+            click.echo(f"  kept existing {asset} (not on release {repo}@{tag})")
+        elif last_error is not None:
+            failed.append(f"{asset} ({last_error})")
         else:
-            _safe_remove(tmp)
-            if os.path.isfile(dest):
-                click.echo(f"  kept existing {asset} (not on release {repo}@{tag})")
-            else:
-                failed.append(f"{asset} (not found on release {repo}@{tag})")
+            failed.append(f"{asset} (not found on release {repo}@{tag})")
     if failed:
         raise RuntimeError("Could not fetch from GitHub releases:\n  " + "\n  ".join(failed))
 

@@ -117,6 +117,40 @@ def unzip_exclude(zip_path, extract_dir, exclude_files=None):
 
 
 
+def release_asset_candidates(local_name):
+    """The names to try on a GitHub release for a lib whose LOCAL name is `local_name`.
+
+    A lib is stored in `__lib__/` (and referenced from story.json) as
+    `{user}.{repo}.{folder}.{version}.{ext}`, but repos do not all PUBLISH it under that
+    name. sbs_utils' workflow interpolates owner+repo, so its sbslib asset matches the
+    local name; LegendaryMissions' workflow interpolates only the bare folder, so
+    `artemis-sbs.LegendaryMissions.hangar.v1.4.0.mastlib` is published as
+    `hangar.v1.4.0.mastlib`. Both conventions are live and neither is going away.
+
+    Returns a LIST, most likely first, so a caller can fall back rather than 404 and give
+    up: the two repos already disagree and either could change, and the fallback costs one
+    extra request only when the first name misses.
+
+    Args:
+        local_name (str): The lib's filename as stored in `__lib__/`.
+
+    Returns:
+        list[str]: Asset names to try, or `[local_name]` if the name cannot be parsed.
+    """
+    if local_name.endswith(".sbslib"):
+        # {user}.{package}.{version}.sbslib - only TWO segments precede the version, and
+        # the asset is published under exactly this name. Stripping them would leave a
+        # bare "v1.4.0.sbslib", so there is no meaningful alternative to offer.
+        return [local_name]
+    parts = local_name.split(".", 2)          # {user}.{repo}.{folder}.{version}.{ext}
+    if len(parts) != 3:
+        return [local_name]
+    # Canonical name first: the repo now publishes mastlibs under the same name they are
+    # stored as. The bare `{folder}.{version}.{ext}` form is what LegendaryMissions used
+    # to publish, kept as a fallback so an older tag still resolves.
+    return [local_name, parts[2]]
+
+
 def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
     """ This will fetch the dependencies from a github release
 
@@ -151,16 +185,30 @@ def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
             #print("SKIPPING")
             continue
         
-        if is_sbs_lib:
-            url = f"https://github.com/{user}/{repo}/releases/download/{version}/{user}.{repo}.{file}"
-        else:
-            url = f"https://github.com/{user}/{repo}/releases/download/{version}/{file}"
-        print(f"Fetching {dep_lib} from {url} to {target}")
         os.makedirs("__lib__", exist_ok=True)
-        try:
-            curlretrieve(url, target)
-        except Exception as e:
-            print(f"ERROR: Fetching {dep_lib}\n{e}")
+        base = f"https://github.com/{user}/{repo}/releases/download/{version}"
+        # Stage through a temp file: `curl -f` still CREATES the output file on a 404, and
+        # an empty lib left at `target` is silently skipped by the exists() check above on
+        # the next run - a corrupt lib that looks fetched.
+        tmp = target + ".download"
+        errors = []
+        for asset in release_asset_candidates(dep_lib):
+            url = f"{base}/{asset}"
+            print(f"Fetching {dep_lib} from {url} to {target}")
+            try:
+                curlretrieve(url, tmp)
+            except Exception as e:
+                errors.append(f"{asset}: {e}")
+                continue
+            if os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+                os.replace(tmp, target)
+                break
+            errors.append(f"{asset}: empty response")
+        else:
+            for e in errors:
+                print(f"ERROR: Fetching {dep_lib}\n{e}")
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 #https://github.com/artemis-sbs/sbs_utils/releases/download/v1.3.0/artemis-sbs.v1.3.0.sbslib 
 #https://github.com/artemis-sbs/LegendaryMissions/releases/download/v1.3.0/basic_player_destroy.v1.3.0.mastlib 
