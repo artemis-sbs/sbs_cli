@@ -259,6 +259,40 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp):
             else:  # json
                 bundle.extend(f.to_dict(file=rel) for f in findings)
 
+        # Whole-mission pass: an init signal that spawns unkeyed AND is emitted from
+        # more than one place. Needs every file at once, so it cannot live in the
+        # per-file loop above.
+        try:
+            from sbs_utils.procedural.signal_lint import signal_lint_project
+        except Exception:
+            signal_lint_project = None
+        if signal_lint_project is not None:
+            sources = []
+            for path in mast_files:
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                        sources.append((os.path.relpath(path, mission), fh.read()))
+                except OSError:
+                    continue
+            project = signal_lint_project(sources)
+            by_file = {}
+            for rel, f in project:
+                by_file.setdefault(rel, []).append(f)
+                if f.is_error():
+                    total_err += 1
+                else:
+                    total_warn += 1
+            for rel, findings in by_file.items():
+                if fmt == "text":
+                    print(f"== {rel} ==")
+                    for f in findings:
+                        print(f"  {f}")
+                elif fmt == "compact":
+                    for f in findings:
+                        print(f.compact(rel))
+                else:  # json
+                    bundle.extend(f.to_dict(file=rel) for f in findings)
+
     if fmt == "json":
         import json
         print(json.dumps(bundle, indent=2))
