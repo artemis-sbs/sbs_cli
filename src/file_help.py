@@ -157,12 +157,20 @@ def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
     Args:
         dep_libs ([str]]): The list of dependencies
         is_sbs_lib (bool): If this is a list of sbslibs they have different naming conventions
+
+    Returns:
+        list[str]: The dependencies that could NOT be fetched. A caller that ignores this
+            reports success for a mission whose libraries never arrived, which is how a
+            missing dependency became a printed line in a wall of output rather than a
+            failure.
     """
+    failed = []
     for dep_lib in dep_libs:
         parts = dep_lib.split(".", 2)
         #print(parts)
         if len(parts) != 3:
             print(f"ERROR: unsupported dependency format {dep_lib}")
+            failed.append(dep_lib)
             continue
         user = parts[0]
         repo = parts[1]
@@ -171,6 +179,7 @@ def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
         version = file.split(".")
         if len(version) < 3:
             print(f"ERROR: unsupported dependency format {dep_lib}")
+            failed.append(dep_lib)
             continue
         # remove front
         if not is_sbs_lib:
@@ -187,9 +196,11 @@ def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
         
         os.makedirs("__lib__", exist_ok=True)
         base = f"https://github.com/{user}/{repo}/releases/download/{version}"
-        # Stage through a temp file: `curl -f` still CREATES the output file on a 404, and
-        # an empty lib left at `target` is silently skipped by the exists() check above on
-        # the next run - a corrupt lib that looks fetched.
+        # Stage through a temp file and only accept a real archive. `curl -f` still CREATES
+        # the output file on a 404, and an empty (or HTML) lib left at `target` is silently
+        # skipped by the exists() check above on the next run - a corrupt lib that looks
+        # fetched. Every dependency here is a zip (.sbslib/.mastlib/.zip), so is_zipfile is
+        # the same check the `sbs debug` fetch path already made.
         tmp = target + ".download"
         errors = []
         for asset in release_asset_candidates(dep_lib):
@@ -200,15 +211,17 @@ def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
             except Exception as e:
                 errors.append(f"{asset}: {e}")
                 continue
-            if os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+            if os.path.isfile(tmp) and zipfile.is_zipfile(tmp):
                 os.replace(tmp, target)
                 break
-            errors.append(f"{asset}: empty response")
+            errors.append(f"{asset}: not a valid archive")
         else:
+            failed.append(dep_lib)
             for e in errors:
                 print(f"ERROR: Fetching {dep_lib}\n{e}")
         if os.path.exists(tmp):
             os.remove(tmp)
+    return failed
 
-#https://github.com/artemis-sbs/sbs_utils/releases/download/v1.3.0/artemis-sbs.v1.3.0.sbslib 
+#https://github.com/artemis-sbs/sbs_utils/releases/download/v1.3.0/artemis-sbs.v1.3.0.sbslib
 #https://github.com/artemis-sbs/LegendaryMissions/releases/download/v1.3.0/basic_player_destroy.v1.3.0.mastlib 

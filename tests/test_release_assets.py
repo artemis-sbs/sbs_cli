@@ -122,5 +122,58 @@ class EnsureLibsFetchTests(unittest.TestCase):
         self.assertFalse(os.path.isfile(os.path.join(self.lib_dir, MASTLIB + ".download")))
 
 
+class FetchDepsFailureTests(unittest.TestCase):
+    """A dependency that never arrived must not read as a successful fetch.
+
+    fetch_deps used to print an ERROR line into a wall of output and return nothing, so
+    `sbs fetch` / `sbs production` carried on and exited 0 with libraries missing.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._cwd = os.getcwd()
+        os.chdir(self.tmp.name)                 # fetch_deps writes to ./__lib__
+        self.addCleanup(os.chdir, self._cwd)
+
+    def test_reports_the_dependency_when_every_candidate_fails(self):
+        def curl(url, out):
+            raise RuntimeError("404")
+
+        with mock.patch.object(file_help, "curlretrieve", curl):
+            failed = file_help.fetch_deps([MASTLIB], False, True)
+        self.assertEqual(failed, [MASTLIB])
+
+    def test_a_non_archive_response_is_a_failure_not_a_lib(self):
+        # curl -f still CREATES the output file on a 404; without the archive check that
+        # HTML landed in __lib__ and the exists() skip treated it as already fetched.
+        def curl(url, out):
+            with open(out, "wb") as f:
+                f.write(b"<html>Not Found</html>")
+            return True
+
+        with mock.patch.object(file_help, "curlretrieve", curl):
+            failed = file_help.fetch_deps([MASTLIB], False, True)
+        self.assertEqual(failed, [MASTLIB])
+        self.assertFalse(os.path.exists(os.path.join("__lib__", MASTLIB)),
+                         "a non-archive must never land in __lib__")
+
+    def test_a_good_download_reports_nothing(self):
+        def curl(url, out):
+            with open(out, "wb") as f:
+                f.write(_zip_bytes())
+            return True
+
+        with mock.patch.object(file_help, "curlretrieve", curl):
+            failed = file_help.fetch_deps([MASTLIB], False, True)
+        self.assertEqual(failed, [])
+        self.assertTrue(os.path.isfile(os.path.join("__lib__", MASTLIB)))
+
+    def test_report_missing_deps_signals_and_dedupes(self):
+        import fetch_cmd
+        self.assertFalse(fetch_cmd.report_missing_deps([]))
+        self.assertTrue(fetch_cmd.report_missing_deps([MASTLIB, MASTLIB]))
+
+
 if __name__ == "__main__":
     unittest.main()

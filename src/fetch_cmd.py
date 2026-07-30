@@ -14,8 +14,14 @@ from lib_cmd import lib_impl
 # https://github.com/artemis-sbs/LegendaryMissions/archive/refs/heads/main.zip
 
 def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, overwrite_sbs_libs):
+    """Fetch one mission and its dependencies.
+
+    Returns the dependency names that could not be fetched, so the caller can end with a
+    truthful exit code: a mission whose libraries never arrived is not a successful fetch.
+    """
     url = f"https://github.com/{user}/{repo}/archive/refs/heads/{branch}.zip"
     zip_file_path = "rel.zip"
+    missing_deps = []
     click.echo(f'Fetching {repo} at {url}')
 
     # These are mostly fo testing
@@ -41,7 +47,7 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
             print(f"       Could not find repository '{repo}' for user '{user}' (branch '{branch}').")
             if os.path.exists(zip_file_path):
                 os.remove(zip_file_path)
-            return
+            return missing_deps
 
     # If we got here we have a valid zip
     # Get dependencies by processing story.json
@@ -68,7 +74,7 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
 
     except Exception as e:
         print(f"ERROR: Could not unzip: {zip_file_path} {destination_directory}\n{e}")
-        return
+        return missing_deps
 
     # Cleanup downloaded file
     try:
@@ -84,7 +90,7 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
     deps_file = Path(working_directory).resolve() / destination_directory / "story.json"
     if not os.path.exists(deps_file):
         # its is ok if there is no story.json
-        return
+        return missing_deps
     
     try:
         deps = {}
@@ -100,20 +106,20 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
         #
         sbs_libs = deps.get("sbslib")
         if sbs_libs is not None:
-            fetch_deps(sbs_libs, True, overwrite_sbs_libs)
+            missing_deps += fetch_deps(sbs_libs, True, overwrite_sbs_libs)
         mast_libs = deps.get("mastlib")
         if mast_libs is not None:
-            fetch_deps(mast_libs, False, overwrite_libs)
+            missing_deps += fetch_deps(mast_libs, False, overwrite_libs)
 
         resources = deps.get("resources")
         if resources is not None:
-            fetch_deps(resources.values(), False, overwrite_libs)
+            missing_deps += fetch_deps(resources.values(), False, overwrite_libs)
         # `shared_media` is a dependency too - the difference is only that nobody copies
         # it into the mission. Without this the mission declares a pack that never
         # arrives and its art silently vanishes.
         shared_media = deps.get("shared_media")
         if shared_media:
-            fetch_deps(shared_media, False, overwrite_libs)
+            missing_deps += fetch_deps(shared_media, False, overwrite_libs)
         if resources is not None or shared_media:
             # ...and unpack the art once, beside the libraries, so a fetched dependency
             # lands in the same layout a locally built one does.
@@ -130,21 +136,43 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
         print(f"ERROR: Could not load {deps_file}\n{e}")
     
     if skip_libs:
-        return
+        return missing_deps
     
     try:
         lib_impl(destination_directory, user)
     except Exception as e:
         print("ERROR: error trying to build libraries/addons")
+    return missing_deps
+
+
+def report_missing_deps(missing):
+    """Print a summary of dependencies that never arrived, and say whether any did.
+
+    Kept separate so `fetch` and `production` end the same way: a fetch that could not
+    get a mission's libraries must not look like a clean run.
+    """
+    if not missing:
+        return False
+    print("\nERROR: these dependencies could not be fetched:")
+    for name in dict.fromkeys(missing):          # de-duped, order kept
+        print(f"  {name}")
+    print("The mission(s) will NOT run without them.")
+    return True
+
 
 def fetch_repos(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, overwrite_sbs_libs):
-    """Fetch command"""
+    """Fetch command. Returns the dependencies that could not be fetched."""
     repos = repo.split(",")
     if len(repos)>1 and folder is not None:
         print("ERROR: You cannot set the folder with multiple missions.")
-        return
+        return []
+    missing = []
     for repo_item in repos:
-        fetch_cmd(repo_item, user, branch, folder, overwrite_libs, skip_libs, skip_clean, overwrite_sbs_libs)
+        # Keep going through the rest of the list on a failure - one unreachable
+        # dependency should not hide the state of the others - and report at the end.
+        missing += fetch_cmd(repo_item, user, branch, folder, overwrite_libs, skip_libs,
+                             skip_clean, overwrite_sbs_libs) or []
+    return missing
 
 
 @cli.command(short_help="Fetch missions from git repositories.")
@@ -164,7 +192,9 @@ def fetch(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, qui
         if not (answer[0] == "y" or answer[0] == "Y"):
             return
 
-    fetch_repos(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, True)
+    missing = fetch_repos(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, True)
+    if report_missing_deps(missing):
+        raise SystemExit(1)
 
 
 @cli.command(short_help="Fetch all the missions that ship with Artemis Cosmos from git repositories.")
@@ -184,13 +214,18 @@ def production(branch, quiet):
             return
 
 
+    missing = []
     repo  = "LegendaryMissions"
     # This should NO grab the latest sbslib, but rebuild the addons
-    fetch_repos(repo, "artemis-sbs", branch, None, True, False, False, True)
+    missing += fetch_repos(repo, "artemis-sbs", branch, None, True, False, False, True)
     # This should NO grab the latest sbslib or mastlib, etc., but rebuild the addons
     repo = "SecretMeeting,WalkTheLine,remote_mission_pick"
-    fetch_repos(repo, "artemis-sbs", branch, None, False, False, False, False)
+    missing += fetch_repos(repo, "artemis-sbs", branch, None, False, False, False, False)
     # This will ge the common folder
-    fetch_repos("sbs_common", "artemis-sbs", branch, "common", False, False, False, False)
+    missing += fetch_repos("sbs_common", "artemis-sbs", branch, "common", False, False, False, False)
+    # Every mission is attempted before this fires, so one bad dependency reports the
+    # whole picture instead of aborting the set.
+    if report_missing_deps(missing):
+        raise SystemExit(1)
 
     #https://github.com/artemis-sbs/sbs_common/archive/refs/heads/main.zip
