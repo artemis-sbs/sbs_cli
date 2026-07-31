@@ -169,10 +169,11 @@ class FetchDepsFailureTests(unittest.TestCase):
         self.assertEqual(failed, [])
         self.assertTrue(os.path.isfile(os.path.join("__lib__", MASTLIB)))
 
-    def test_report_missing_deps_signals_and_dedupes(self):
+    def test_report_problems_signals_and_dedupes(self):
         import fetch_cmd
-        self.assertFalse(fetch_cmd.report_missing_deps([]))
-        self.assertTrue(fetch_cmd.report_missing_deps([MASTLIB, MASTLIB]))
+        self.assertFalse(fetch_cmd.report_problems([]))
+        self.assertTrue(fetch_cmd.report_problems([MASTLIB, MASTLIB]))
+        self.assertTrue(fetch_cmd.report_problems([], ["LegendaryMissions"]))
 
 
 if __name__ == "__main__":

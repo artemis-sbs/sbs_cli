@@ -66,6 +66,65 @@ def _load_signal_lint(missions, mission):
         return signal_lint
 
 
+def lint_self_packaging(mission, user="artemis-sbs"):
+    """Check a repo that ships its OWN addons keeps its three lists in step.
+
+    An addon a repo packages is named in three places, and they must agree:
+
+      __lib__.json    what gets built into a .mastlib
+      story.json      what a FETCHED copy loads from __lib__
+      .gitattributes  export-ignore, so a fetched copy has no source to load instead
+
+    Miss story.json and the fetched copy silently has no addon. Miss the export-ignore
+    and the fetched copy keeps the source, which then wins over the lib - so the release
+    artifact is never actually exercised. Both fail on someone else's machine, not here.
+
+    Only applies once a repo has ADOPTED the pattern (its story.json already declares at
+    least one of its own addons); a repo that ships source only is left alone.
+
+    Returns a list of (severity, message).
+    """
+    out = []
+    try:
+        with open(os.path.join(mission, "__lib__.json")) as f:
+            lib = json.load(f) or {}
+    except Exception:
+        return out
+    addons = lib.get("mastlib") or []
+    version = lib.get("version")
+    if not addons or not version:
+        return out
+    repo = os.path.basename(os.path.abspath(mission))
+    try:
+        with open(os.path.join(mission, "story.json")) as f:
+            declared = set((json.load(f) or {}).get("mastlib") or [])
+    except Exception:
+        declared = set()
+
+    expected = {a: f"{user}.{repo}.{a}.{version}.mastlib" for a in addons}
+    if not (declared & set(expected.values())):
+        return out          # has not adopted the pattern; nothing to keep in step
+
+    missing = [a for a, name in expected.items() if name not in declared]
+    if missing:
+        out.append(("error", "story.json does not declare " + str(len(missing)) +
+                    " of this repo's own addons, so a fetched copy loads nothing for "
+                    "them: " + ", ".join(sorted(missing))))
+    try:
+        with open(os.path.join(mission, ".gitattributes")) as f:
+            attrs = f.read()
+    except Exception:
+        attrs = ""
+    unignored = [a for a in addons
+                 if not any(line.split()[0].rstrip("/") == a and "export-ignore" in line
+                            for line in attrs.splitlines() if line.split())]
+    if unignored:
+        out.append(("error", ".gitattributes does not export-ignore " + str(len(unignored)) +
+                    " packaged addon(s), so a fetched copy keeps their source and it "
+                    "wins over the declared lib: " + ", ".join(sorted(unignored))))
+    return out
+
+
 def _read_all(mission, pattern):
     """Read every file matching `pattern` under `mission` into a list of strings."""
     out = []
@@ -215,6 +274,23 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp):
 
     total_err = total_warn = 0
     bundle = []
+
+    # Packaging drift: a repo shipping its own addons must keep __lib__.json, story.json
+    # and .gitattributes in step, or a FETCHED copy is quietly wrong.
+    packaging = lint_self_packaging(mission)
+    for severity, message in packaging:
+        if severity == "error":
+            total_err += 1
+        else:
+            total_warn += 1
+        if fmt == "text":
+            print(f"== packaging ==\n  [{severity.upper()}] {message}")
+        elif fmt == "compact":
+            print(f"__lib__.json:1:1: {severity}: {message}")
+        else:
+            bundle.append({"file": "__lib__.json", "line": 1, "severity": severity,
+                           "code": "packaging-drift", "message": message})
+
     for path in amd_files:
         findings = amd_lint(file_path=path, mast_sources=mast_sources,
                             cross_file=not no_cross, known_keys=known_keys)
