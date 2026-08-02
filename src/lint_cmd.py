@@ -45,12 +45,51 @@ def _load_amd_lint(missions, mission):
     sys.path.insert(0, mission)
     try:
         from sbs_utils.procedural.amd_lint import amd_lint
-        return amd_lint
     except Exception:
         # Fall back to the libraries the mission itself declares.
         sbs_lib_import(missions, mission)
         from sbs_utils.procedural.amd_lint import amd_lint
-        return amd_lint
+    # AFTER sbs_utils resolves (the registration imports amd_schema) and before any
+    # file is linted, so the mission's own words are declared when checking starts.
+    _load_mission_vocabulary(mission)
+    return amd_lint
+
+
+def _load_mission_vocabulary(mission):
+    """Import the mission's own AMD field registrations, so its vocabulary is DECLARED
+    before anything is linted.
+
+    A mission adds its labels with `amd_register_fields`, which is exactly what stops
+    `Disposition:` or `Flies:` failing silently - but the registration runs when the
+    mission's Python is imported, and the linter never imported any. So Open Universe
+    declared ~30 fields correctly and the linter still called every one of them unknown:
+    169 warnings on OU, 46 once its module is loaded. 123 false ones, all telling an
+    author their correct file is wrong.
+
+    Convention over configuration: modules named `*_amd.py` are the ones that declare
+    vocabulary (`universe_amd.py`). Narrow on purpose - importing a mission's whole
+    Python would run spawn code and drag in the engine.
+
+    Never fatal. A mission whose module cannot import offline still lints, just without
+    its own words - which is exactly today's behaviour, so this can only improve on it.
+    """
+    root = os.path.abspath(mission)
+    found = sorted(glob.glob(os.path.join(root, "**", "*_amd.py"), recursive=True))
+    if not found:
+        return []
+    loaded = []
+    import importlib
+    for path in found:
+        pkg_dir = os.path.dirname(path)
+        name = os.path.splitext(os.path.basename(path))[0]
+        added = [d for d in (pkg_dir, root) if d not in sys.path]
+        sys.path[:0] = added
+        try:
+            importlib.import_module(name)
+            loaded.append(name)
+        except Exception:
+            pass          # a module that needs the engine simply does not contribute
+    return loaded
 
 
 def _load_signal_lint(missions, mission):
