@@ -74,22 +74,68 @@ def _load_mission_vocabulary(mission):
     its own words - which is exactly today's behaviour, so this can only improve on it.
     """
     root = os.path.abspath(mission)
-    found = sorted(glob.glob(os.path.join(root, "**", "*_amd.py"), recursive=True))
-    if not found:
-        return []
-    loaded = []
     import importlib
-    for path in found:
-        pkg_dir = os.path.dirname(path)
-        name = os.path.splitext(os.path.basename(path))[0]
-        added = [d for d in (pkg_dir, root) if d not in sys.path]
+    loaded = []
+
+    def _try(name, *dirs):
+        added = [d for d in dirs if d and d not in sys.path]
         sys.path[:0] = added
         try:
             importlib.import_module(name)
             loaded.append(name)
         except Exception:
             pass          # a module that needs the engine simply does not contribute
+
+    for path in sorted(glob.glob(os.path.join(root, "**", "*_amd.py"), recursive=True)):
+        _try(os.path.splitext(os.path.basename(path))[0], os.path.dirname(path), root)
+
+    # ...and the mission's ADDONS. A mission authors the vocabulary of what it builds ON:
+    # Storm's Beacon writes `Terrain:` and `Skybox:` because it uses the Open Universe
+    # engine, and universe_amd.py declares both - but that file lives in the addon, so a
+    # mission-only scan called seventeen correct lines unknown. Works for a packaged
+    # mastlib too: a zip on sys.path is importable.
+    for addon in _declared_addon_paths(root):
+        if os.path.isdir(addon):
+            for path in sorted(glob.glob(os.path.join(addon, "**", "*_amd.py"),
+                                         recursive=True)):
+                _try(os.path.splitext(os.path.basename(path))[0],
+                     os.path.dirname(path), addon)
+            continue
+        try:
+            with zipfile.ZipFile(addon) as z:
+                names = [n for n in z.namelist() if n.endswith("_amd.py")]
+        except Exception:
+            continue
+        for n in names:
+            _try(os.path.splitext(os.path.basename(n))[0],
+                 os.path.join(addon, os.path.dirname(n)) if os.path.dirname(n) else addon,
+                 addon)
     return loaded
+
+
+def _declared_addon_paths(mission_root):
+    """Each mastlib `story.json` declares, as a source FOLDER (a clone editing its own
+    addons) or the `__lib__` zip. Mirrors how the compiler resolves them."""
+    out = []
+    try:
+        story = os.path.join(mission_root, "story.json")
+        if not os.path.isfile(story):
+            return out
+        with open(story) as f:
+            data = json.load(f) or {}
+        lib_dir = os.path.join(os.path.dirname(mission_root), "__lib__")
+        for name in (data.get("mastlib") or []):
+            parts = str(name).split(".", 3)
+            folder = os.path.join(mission_root, parts[2]) if len(parts) >= 4 else None
+            if folder and os.path.isfile(os.path.join(folder, "__init__.mast")):
+                out.append(folder)
+                continue
+            zip_path = os.path.join(lib_dir, name)
+            if os.path.isfile(zip_path):
+                out.append(zip_path)
+    except Exception:
+        pass
+    return out
 
 
 def _load_signal_lint(missions, mission):
