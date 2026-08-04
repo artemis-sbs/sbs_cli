@@ -123,6 +123,50 @@ Just list the consoles you want, separated by commas.
 
 ---
 
+## Starting a new mission
+
+### `sbs create` — start from a boilerplate
+
+Makes a new mission folder from a template, and downloads the libraries it needs.
+Run it from your `missions` folder.
+
+```
+sbs create MyMission                 # pick a template from a list
+sbs create MyMission -t sandbox      # pick it up front
+sbs create MyMission --title "My Mission"
+```
+
+The templates live in the
+[mast_starter](https://github.com/artemis-sbs/mast_starter) repository, so new
+ones appear without you updating the tool.
+
+**About versions.** Missions are pinned to a *release line* — v1.3.0, v1.4.0 —
+and everything a mission depends on comes from the same line. `sbs create` picks
+the newest line your install already has libraries for, and never picks one newer
+than your copy of Cosmos: a mission your game can't launch is not a useful
+starting point. It tells you which line it chose and why, and you can override:
+
+```
+sbs create MyMission -l v1.4.0       # pin to a line
+sbs create MyMission -b v1.4.0_dev   # use a specific starter branch
+```
+
+Not every template exists on every line — a template can only use language
+features its line actually has.
+
+`sbs create` will not write into a folder that already has anything in it.
+
+### `sbs templates` — see what you can start from
+
+```
+sbs templates
+```
+
+Lists every template on every release line, and marks the line `sbs create` would
+choose for you.
+
+---
+
 ## For mission writers — try your mission without a full crew
 
 You don't need a room full of bridge stations (or even the game itself running)
@@ -242,6 +286,15 @@ sbs compile LegendaryMissions --run      # also try starting it (a quick smoke t
 sbs compile MyTerminalThing --terminal   # for command-line-only MAST projects
 ```
 
+It stops with an error code when the script doesn't compile, so you can use it in a
+script or a build that should fail on a broken mission.
+
+> **What it can't see.** A `{ }` list broken across several lines. MAST reads one
+> line at a time, so the first line is an unfinished `{` — the rest of the file
+> quietly stops making sense, and `compile` still says everything is fine. The
+> mission then runs and does *nothing*. Keep those on one line, or wrap them in
+> `~~ ... ~~`. If a mission mysteriously does nothing at all, suspect this first.
+
 ### `sbs lint` — check a mission's AMD files for broken links
 
 Where `compile` checks the mission's *script*, `lint` checks its *content* — the
@@ -338,6 +391,19 @@ sbs production -q
 sbs run mainscreen,helm
 ```
 
+**"I want to write my first mission and I don't know where to start."**
+```
+sbs templates              # see what's on offer
+sbs create MyMission       # pick one; it fetches the libraries too
+sbs debug MyMission --map 0
+```
+
+**"I want to build something other people's missions can use."**
+The `addon` template is a shareable add-on plus a little map to test it with:
+```
+sbs create MyAddon -t addon
+```
+
 **"I'm writing a mission and want to see it without a full crew."**
 ```
 sbs debug . --map 0
@@ -373,6 +439,8 @@ Start the server and clients and let it run.
 
 | Command | What it's for |
 |---|---|
+| `sbs create <name>` | Start a new mission from a boilerplate |
+| `sbs templates` | List the boilerplates you can start from |
 | `sbs fetch <name>` | Download one (or several) missions |
 | `sbs production` | Download all the missions that ship with Cosmos |
 | `sbs swap <name>` | Switch which `missions_*` set Cosmos loads |
