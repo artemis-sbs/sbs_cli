@@ -25,9 +25,26 @@ def sbs_lib_import(mission_dir, script_dir):
             sys.path.insert(0, f) 
 
 
+def report_compile_errors(errors):
+    """Print what `mast_run` reported and say whether it compiled.
+
+    `mast_run(..., compile_only=True)` RETURNS its error list; throwing that away meant a
+    mission with a broken .mast printed nothing and exited 0. Anything scripting this - CI
+    for the mission templates, a pre-commit hook - was reading success off a compile that
+    never happened.
+    """
+    if not errors:
+        return True
+    for e in errors:
+        print(e)
+    print(f"FAILED: {len(errors)} compile error(s)")
+    return False
+
+
 def compile_impl(folder, compile_only = True, is_sbs=True):
+    """Compile (or run) a mission. Returns True when it compiled cleanly."""
     missions = zipapp_dir
-    
+
     try:
         data_path = os.path.join(missions, "..")
         exe_path = os.path.join(data_path, "..")
@@ -47,10 +64,9 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
             fs.script_dir = mission
             
             from sbs_utils.mast.mast_run import mast_run
-            mast_run(story, compile_only)
-            return
+            return report_compile_errors(mast_run(story, compile_only))
 
-        
+
         import script
         from sbs_utils.mock import sbs
     
@@ -60,9 +76,8 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
         if compile_only:
             import sbslibs
             from sbs_utils.mast.mast_run import mast_run
-            mast_run(story, compile_only)
-            return
-        
+            return report_compile_errors(mast_run(story, compile_only))
+
         
         
         sim = sbs.create_new_sim()
@@ -89,7 +104,9 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
 
     except Exception as e:
         print (e)
+        return False
 
+    return True
 
 
 @cli.command(short_help="MAST Compile")
@@ -97,5 +114,7 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
 @click.option('-t', '--terminal', is_flag=True)
 @click.option('-r', '--run', is_flag=True)
 def compile(folder, run, terminal):
-    compile_impl(folder, not run, not terminal)
+    # Exit non-zero when it did not compile, so this can be used as a gate.
+    if not compile_impl(folder, not run, not terminal):
+        raise SystemExit(1)
     

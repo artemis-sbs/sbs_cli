@@ -117,6 +117,63 @@ def unzip_exclude(zip_path, extract_dir, exclude_files=None):
 
 
 
+def unzip_subpath(zip_path, extract_dir, subpath=None, exclude_files=None):
+    """Extract ONE folder out of a GitHub archive, as if it were the whole repo.
+
+    `unzip_exclude` strips the archive's single root folder (`repo-branch/`) and lays the
+    rest down flat. A template repo needs one more strip: `templates/amd/story.mast` has to
+    land as `story.mast`, or every created mission would carry the template's own scaffolding
+    path. Passing `subpath=None` (or ".") behaves like `unzip_exclude` - the whole repo.
+
+    Args:
+        zip_path (str): The downloaded archive.
+        extract_dir (str): Where the files should land.
+        subpath (str, optional): Folder INSIDE the repo to treat as the root.
+        exclude_files (list, optional): Substrings; a member matching any is skipped. Matched
+            against the path AFTER both strips, so callers write repo-relative patterns.
+
+    Returns:
+        int: How many files were written. Zero means the subpath does not exist in that
+            archive - a caller must treat it as a failure rather than leaving an empty
+            mission folder behind.
+    """
+    if exclude_files is None:
+        exclude_files = []
+
+    sub = (subpath or "").strip().replace("\\", "/").strip("/")
+    if sub == ".":
+        sub = ""
+    prefix = f"{sub}/" if sub else ""
+
+    written = 0
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        for member in zf.infolist():
+            if member.filename.endswith('/'):
+                continue
+            parts = member.filename.split('/')
+            if len(parts) < 2:
+                # A GitHub archive always wraps everything in `repo-branch/`; a member with
+                # no folder is not ours to place.
+                continue
+            rel = "/".join(parts[1:])
+            if prefix:
+                if not rel.startswith(prefix):
+                    continue
+                rel = rel[len(prefix):]
+            if not rel:
+                continue
+            if any(pattern in rel for pattern in exclude_files):
+                continue
+            target_path = os.path.join(extract_dir, *rel.split("/"))
+            parent = os.path.dirname(target_path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(target_path, 'wb') as f:
+                f.write(zf.read(member.filename))
+            written += 1
+    return written
+
+
 def release_asset_candidates(local_name):
     """The names to try on a GitHub release for a lib whose LOCAL name is `local_name`.
 

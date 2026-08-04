@@ -5,6 +5,7 @@ from debug_cmd import debug
 from overnight_cmd import overnight
 from web_cmd import web, web_static
 from fetch_cmd import fetch
+from create_cmd import create, templates
 from lib_cmd import lib
 from release_cmd import release
 from run_cmd import run

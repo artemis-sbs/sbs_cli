@@ -4,12 +4,24 @@ import click
 import subprocess
 import time
 import ctypes
-from ctypes import wintypes
-MessageBox = ctypes.windll.user32.MessageBoxW
-FindWindow = ctypes.windll.user32.FindWindowW
-SetWindowText = ctypes.windll.user32.SetWindowTextW
-MoveWindow = ctypes.windll.user32.MoveWindow
-GetWindowRect = ctypes.windll.user32.GetWindowRect
+
+# `sbs run` drives the Cosmos window, so it is Windows-only - but this module is imported
+# by main.py, so touching `ctypes.windll` at import time made the WHOLE tool unusable
+# anywhere else. `sbs compile`, `lint` and `create` are plain Python and have every reason
+# to run on a Linux CI box. Bind lazily: `run` still fails on a non-Windows host, and only
+# `run` does.
+if hasattr(ctypes, "windll"):
+    from ctypes import wintypes
+    MessageBox = ctypes.windll.user32.MessageBoxW
+    FindWindow = ctypes.windll.user32.FindWindowW
+    SetWindowText = ctypes.windll.user32.SetWindowTextW
+    MoveWindow = ctypes.windll.user32.MoveWindow
+    GetWindowRect = ctypes.windll.user32.GetWindowRect
+else:
+    def _windows_only(*args, **kwargs):
+        raise RuntimeError("`sbs run` drives the Cosmos window and needs Windows")
+    MessageBox = FindWindow = SetWindowText = _windows_only
+    MoveWindow = GetWindowRect = _windows_only
 
 
 
