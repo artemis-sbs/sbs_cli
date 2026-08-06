@@ -62,6 +62,9 @@ def _window_of(pid, timeout=15.0):
 @cli.command("run")
 @click.argument("consoles", default="")
 @click.argument("extra", nargs=-1)
+@click.option("--mission", "-m", default="LegendaryMissions", show_default=True,
+              help="Mission folder the server boots. Passed as defaultmission=, so "
+                   "preferences.json is left alone.")
 @click.option("--ip", default="127.0.0.1", show_default=True,
               help="Server address the clients auto-connect to.")
 @click.option("--no-auto", is_flag=True,
@@ -69,13 +72,17 @@ def _window_of(pid, timeout=15.0):
                    "(the behavior before engine 1.3.5 made autostart possible).")
 @click.option("--dry-run", is_flag=True,
               help="Print the command line each window would get, and launch nothing.")
-def run(consoles, extra, ip, no_auto, dry_run):
+def run(consoles, extra, mission, ip, no_auto, dry_run):
     """Launch a server and a set of console clients.
 
         sbs run                                  server + the five standard consoles
         sbs run comms,weapons                    just those two
         sbs run comms map=sandbox profile=soak   pass anything else straight through
         sbs run --dry-run                        show the command lines, launch nothing
+
+    The mission comes from `--mission` rather than whatever `preferences.json` happens to
+    hold - a launch should say what it is launching, and mutating a shared preferences file
+    to choose one is the same shared-global problem `console=` just removed.
 
     EXTRA arguments are appended to every window verbatim. Engine 1.3.5 passes unrecognized
     `key=value` arguments through to `command_line_dict()`, so a mission reads whatever it
@@ -117,6 +124,17 @@ def run(consoles, extra, ip, no_auto, dry_run):
     # used to be: the clients now come up connecting to a machine that is not serving,
     # rather than sitting harmlessly at the launcher menu. Say so - it is the same class of
     # quiet failure as a launch argument that matches nothing.
+    # Only check when `missions` really is the missions folder. Run from a build or test
+    # directory the path walk above lands somewhere else, and a warning that fires wrongly
+    # is worse than none - it trains people to ignore it.
+    # `__lib__` is not the marker - sbs_cli has one of its own, so the first attempt at
+    # this warned about a perfectly good mission. The folder NAME is the actual test, and
+    # it is the same condition the path walk above already relies on.
+    looks_like_missions = os.path.basename(missions).lower() == "missions"
+    if mission and looks_like_missions and not os.path.isdir(os.path.join(missions, mission)):
+        print(f"  note: mission folder '{mission}' not found in {missions} - "
+              "the server will not find it either")
+
     if not no_auto and ip in ("127.0.0.1", "localhost"):
         if not any(w.strip().lower() == "server" for w in windows):
             print("  note: no 'Server' in the list, so nothing is serving on "
@@ -135,8 +153,13 @@ def run(consoles, extra, ip, no_auto, dry_run):
                 args.append("autostartserver")
             else:
                 args += ["autostartclient", f"clientautoconnectip={ip}"]
-        # "Server" is not a console; it reaches the mission picker either way.
-        if not is_server:
+        if is_server:
+            # Only the server boots a mission; a client gets it from the server once
+            # connected, so passing it there would be noise.
+            if mission:
+                args.append(f"defaultmission={mission}")
+        else:
+            # "Server" is not a console; it reaches the mission picker either way.
             args.append(f"console={w}")
         args += list(extra)
 
