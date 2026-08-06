@@ -61,7 +61,31 @@ def _window_of(pid, timeout=15.0):
 
 @cli.command("run")
 @click.argument("consoles", default="")
-def run(consoles):
+@click.argument("extra", nargs=-1)
+@click.option("--ip", default="127.0.0.1", show_default=True,
+              help="Server address the clients auto-connect to.")
+@click.option("--no-auto", is_flag=True,
+              help="Launch without autostart, so every window shows the launcher menu "
+                   "(the behavior before engine 1.3.5 made autostart possible).")
+@click.option("--dry-run", is_flag=True,
+              help="Print the command line each window would get, and launch nothing.")
+def run(consoles, extra, ip, no_auto, dry_run):
+    """Launch a server and a set of console clients.
+
+        sbs run                                  server + the five standard consoles
+        sbs run comms,weapons                    just those two
+        sbs run comms map=sandbox profile=soak   pass anything else straight through
+        sbs run --dry-run                        show the command lines, launch nothing
+
+    EXTRA arguments are appended to every window verbatim. Engine 1.3.5 passes unrecognized
+    `key=value` arguments through to `command_line_dict()`, so a mission reads whatever it
+    likes without the engine or this tool knowing the name - `map=`, `profile=`, `var.X=`,
+    `seed=`, `record=`, `test=` all work with no change here.
+
+    Autostart makes the whole thing clickless: the server window gets `autostartserver`,
+    each client gets `autostartclient` plus `clientautoconnectip=` and its `console=`. Pass
+    `--no-auto` for the old launcher-menu behavior.
+    """
     
     #
     # get mission from args
@@ -89,15 +113,36 @@ def run(consoles):
         windows = ["Server", "comms", "weapons", "science", "engineering", "cinematic" ] 
     else:
         windows = consoles.split(",")
+    # Naming consoles explicitly drops the server, and autostart makes that worse than it
+    # used to be: the clients now come up connecting to a machine that is not serving,
+    # rather than sitting harmlessly at the launcher menu. Say so - it is the same class of
+    # quiet failure as a launch argument that matches nothing.
+    if not no_auto and ip in ("127.0.0.1", "localhost"):
+        if not any(w.strip().lower() == "server" for w in windows):
+            print("  note: no 'Server' in the list, so nothing is serving on "
+                  f"{ip} - add Server, pass --ip, or use --no-auto")
+
     x = 0
     y = 0
     c = 0
     for w in windows:
-        # "Server" is not a console, so it launches unmodified and reaches the picker as it
-        # always did. Everything else names its console on the command line.
+        is_server = w.strip().lower() == "server"
         args = ["Artemis3-x64-release.exe"]
-        if w.strip().lower() != "server":
+        if not no_auto:
+            # Clickless. The server is launched first (it heads the list), so by the time a
+            # client tries to connect the server window has already been waited for below.
+            if is_server:
+                args.append("autostartserver")
+            else:
+                args += ["autostartclient", f"clientautoconnectip={ip}"]
+        # "Server" is not a console; it reaches the mission picker either way.
+        if not is_server:
             args.append(f"console={w}")
+        args += list(extra)
+
+        if dry_run:
+            print(f"  {w:14} {' '.join(args)}")
+            continue
         proc = subprocess.Popen(args)
 
         hwnd = _window_of(proc.pid)
