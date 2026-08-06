@@ -112,14 +112,58 @@ tidily arranges the windows on your screen. Great for playing solo across
 several stations, or for testing.
 
 ```
-sbs run helm,comms              # two windows: one Helm, one Comms
-sbs run server,helm,comms       # a server plus two consoles
-sbs run mainscreen,helm         # a main screen and a helm station
 sbs run                         # six windows (server + comms/weapons/science/
                                 # engineering/cinematic) — a full test bridge
+sbs run helm,comms              # two windows: one Helm, one Comms
+sbs run server,helm,comms       # a server plus two consoles
+sbs run --dry-run               # show the command lines, launch nothing
 ```
 
 Just list the consoles you want, separated by commas.
+
+**Nothing needs clicking.** The server starts itself and each client connects on its
+own — you land on the console you asked for.
+
+**Which mission?** `LegendaryMissions` unless you say otherwise:
+
+```
+sbs run -m LM_TestRange         # a different mission
+sbs run -m SecretMeeting helm   # one console, one mission
+```
+
+Your `preferences.json` is left alone — the mission is named on the launch, not stored in
+a shared file that the next run has to undo.
+
+**Playing across machines?** Point the clients at the server:
+
+```
+sbs run comms,weapons --ip 192.168.1.50
+```
+
+### Passing things through to the mission
+
+Anything you add on the end is handed to every window as-is, so a mission can read
+launch arguments the CLI has never heard of:
+
+```
+sbs run -m LM_TestRange map=sandbox profile=soak var.DIFFICULTY=3
+sbs run -m LegendaryMissions record=session      # transcribe what you click
+sbs run -m LegendaryMissions test=60             # write a pass/fail verdict
+```
+
+`map=`, `profile=`, `var.NAME=`, `seed=`, `run=`, `record=` and `test=` are described
+under [command-line arguments](https://artemis-sbs.github.io/sbs_utils/tooling/command-line/).
+
+### If something looks wrong
+
+`--dry-run` prints exactly what each window would be launched with and starts nothing —
+the quickest way to see whether an argument is reaching the game.
+
+`--no-auto` goes back to the old behavior, where every window opens at the launcher menu
+and waits for you.
+
+Naming consoles without a `server` means nothing is serving, and `sbs run` says so rather
+than leaving you with clients that cannot connect.
 
 ---
 
