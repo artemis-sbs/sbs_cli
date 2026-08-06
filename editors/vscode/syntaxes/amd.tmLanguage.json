@@ -4,6 +4,9 @@
   "scopeName": "source.amd",
   "patterns": [
     {
+      "include": "#boneyard"
+    },
+    {
       "include": "#comment"
     },
     {
@@ -13,16 +16,36 @@
       "include": "#heading"
     },
     {
+      "include": "#synopsis"
+    },
+    {
       "include": "#choice"
     },
     {
+      "include": "#cue"
+    },
+    {
+      "include": "#direction"
+    },
+    {
+      "include": "#callout"
+    },
+    {
       "include": "#dialogue"
+    },
+    {
+      "include": "#wikilink"
     },
     {
       "include": "#color"
     }
   ],
   "repository": {
+    "boneyard": {
+      "begin": "^[ \\t]*/\\*",
+      "end": "\\*/",
+      "name": "comment.block.amd"
+    },
     "comment": {
       "match": "//.*$",
       "name": "comment.line.double-slash.amd"
@@ -103,6 +126,17 @@
       },
       "name": "markup.heading.amd"
     },
+    "synopsis": {
+      "match": "^([ \\t]*=[ \\t])(.*)$",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.comment.amd"
+        },
+        "2": {
+          "name": "comment.line.synopsis.amd"
+        }
+      }
+    },
     "choice": {
       "match": "^([ \\t]*-[ \\t]*)(\\[)([^\\]]*)(\\])(\\()([^)]*)(\\))(.*)$",
       "captures": {
@@ -120,14 +154,81 @@
         }
       }
     },
-    "dialogue": {
-      "match": "^([ \\t]*%)(.*)$",
+    "cue": {
+      "match": "^([ \\t]*@)([\\w.-]+)[ \\t]*(\\([^)]*\\))?[ \\t]*$",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.tag.amd"
+        },
+        "2": {
+          "name": "entity.name.function.cue.amd"
+        },
+        "3": {
+          "name": "support.type.property-name.amd"
+        }
+      }
+    },
+    "direction": {
+      "match": "^[ \\t]*(\\([^)]*\\))[ \\t]*$",
+      "captures": {
+        "1": {
+          "name": "support.type.property-name.amd"
+        }
+      }
+    },
+    "callout": {
+      "match": "^([ \\t]*>)[ \\t]*(\\[!)([A-Za-z]+)(\\])[ \\t]*(.*)$",
       "captures": {
         "1": {
           "name": "punctuation.definition.quote.amd"
         },
         "2": {
-          "name": "string.quoted.other.amd"
+          "name": "punctuation.definition.tag.amd"
+        },
+        "3": {
+          "name": "entity.name.type.callout.amd"
+        },
+        "4": {
+          "name": "punctuation.definition.tag.amd"
+        },
+        "5": {
+          "name": "markup.bold.amd"
+        }
+      }
+    },
+    "dialogue": {
+      "match": "^([ \\t]*%+)(.*)$",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.quote.amd"
+        },
+        "2": {
+          "name": "string.quoted.other.amd",
+          "patterns": [
+            {
+              "include": "#wikilink"
+            }
+          ]
+        }
+      }
+    },
+    "wikilink": {
+      "match": "(\\[\\[)([^\\]|\\r\\n]+?)(?:(\\|)([^\\]\\r\\n]*?))?(\\]\\])",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.link.amd"
+        },
+        "2": {
+          "name": "support.constant.property-value.amd"
+        },
+        "3": {
+          "name": "punctuation.separator.amd"
+        },
+        "4": {
+          "name": "string.other.link.title.amd"
+        },
+        "5": {
+          "name": "punctuation.definition.link.amd"
         }
       }
     },

@@ -279,6 +279,56 @@ def _mastlib_signal_source(missions, mission):
     return "\n".join(lines) if lines else None
 
 
+def _report_missing(missions, mission, amd_files, known_keys, fmt):
+    """`sbs lint --missing`: everything referenced but not written yet.
+
+    The same facts the linter reports as `dangling-*` warnings, turned into a WORK
+    LIST. Drafting a story as prose with `[[links]]` to records that do not exist is
+    a supported way to work, so this is deliberately not a failure - it always exits
+    0 and it says what to write next, grouped by target rather than by file."""
+    _prefer_working_tree_sbs_utils(missions, mission)
+    sys.path.insert(0, mission)
+    try:
+        from sbs_utils.procedural import amd_core
+        from sbs_utils.procedural.amd_lint import amd_lint_missing
+    except Exception as e:
+        print(f"ERROR: could not load sbs_utils ({e})")
+        return 2
+
+    # target -> [(kind, owner, file, line)]
+    found = {}
+    for path in amd_files:
+        rel = os.path.relpath(path, mission)
+        try:
+            doc = amd_core.parse(None, file_path=path)
+        except Exception:
+            continue
+        for target, uses in amd_lint_missing(doc, known_keys).items():
+            for kind, owner, span in uses:
+                found.setdefault(target, []).append((kind, owner, rel, span.line))
+
+    if fmt == "json":
+        print(json.dumps([{"target": t,
+                           "uses": [{"kind": k, "owner": o, "file": f, "line": ln}
+                                    for k, o, f, ln in sorted(u)]}
+                          for t, u in sorted(found.items())], indent=1))
+        return 0
+
+    if not found:
+        print("Nothing missing - every reference resolves.")
+        return 0
+
+    _KIND_WORD = {"link": "linked from", "cue": "spoken by", "choice": "chosen from",
+                  "scene": "scene of", "reveal": "revealed by", "parent": "parent of"}
+    print(f"{len(found)} thing(s) referenced but not written yet:\n")
+    for target, uses in sorted(found.items()):
+        print(f"  {target}")
+        for kind, owner, rel, line in sorted(uses):
+            word = _KIND_WORD.get(kind, kind)
+            print(f"      {word} `{owner}`   {rel}:{line}")
+    return 0
+
+
 @cli.command(short_help="Validate a mission's AMD (.amd) files")
 @click.argument("folder", default=".")
 @click.option("--strict", is_flag=True, help="Exit non-zero on warnings too (not just errors).")
@@ -291,7 +341,10 @@ def _mastlib_signal_source(missions, mission):
               "(file:line:col: for editor problem-matchers), or json (tools/CI).")
 @click.option("--lsp", is_flag=True,
               help="Run as an AMD language server (LSP over stdio) for editors.")
-def lint(folder, strict, no_cross, no_signals, fmt, lsp):
+@click.option("--missing", is_flag=True,
+              help="List what is REFERENCED but not written yet, grouped by target, "
+                   "and exit 0. A work list, not a failure.")
+def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
     """Lint a mission FOLDER: its .amd files AND its .mast signal routes.
 
     AMD: structural problems (broken headings, unclosed `---` fences, heading-level
@@ -356,6 +409,9 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp):
     # Mission-wide symbol table so cross-file references (a Scene/choice/reveal in
     # one .amd pointing at a node in another) don't false-positive as dangling.
     known_keys = _mission_amd_keys(amd_files)
+
+    if missing:
+        raise SystemExit(_report_missing(missions, mission, amd_files, known_keys, fmt))
 
     total_err = total_warn = 0
     bundle = []
