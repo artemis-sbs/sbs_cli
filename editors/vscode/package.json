@@ -69,8 +69,14 @@
         "icon": "$(checklist)"
       },
       {
+        "command": "amd.showMissing",
+        "title": "Show Missing (what is referenced but not written)",
+        "category": "Artemis AMD",
+        "icon": "$(list-unordered)"
+      },
+      {
         "command": "amd.guiEditor",
-        "title": "GUI Editor (compose a layout → MAST)",
+        "title": "GUI Editor (compose a layout \u2192 MAST)",
         "category": "Artemis AMD",
         "icon": "$(layout)"
       },
@@ -127,6 +133,10 @@
           "when": "editorLangId == amd"
         },
         {
+          "command": "amd.showMissing",
+          "when": "editorLangId == amd"
+        },
+        {
           "command": "amd.guiEditor"
         },
         {
@@ -163,6 +173,11 @@
         },
         {
           "command": "amd.showResolver",
+          "when": "editorLangId == amd",
+          "group": "navigation@4"
+        },
+        {
+          "command": "amd.showMissing",
           "when": "editorLangId == amd",
           "group": "navigation@4"
         },
@@ -242,7 +257,7 @@
               },
               "mission": {
                 "type": "string",
-                "description": "Mission folder. When set, the extension launches the mission (sbs debug --dap-port) itself, waits for it, attaches, and stops it when you end the session — one click, no task.",
+                "description": "Mission folder. When set, the extension launches the mission (sbs debug --dap-port) itself, waits for it, attaches, and stops it when you end the session \u2014 one click, no task.",
                 "default": "${workspaceFolder}"
               },
               "map": {
@@ -289,7 +304,7 @@
         "configurationSnippets": [
           {
             "label": "MAST: Debug mission (one click)",
-            "description": "Launch this mission and attach the MAST debugger — the extension starts and stops the runner for you.",
+            "description": "Launch this mission and attach the MAST debugger \u2014 the extension starts and stops the runner for you.",
             "body": {
               "type": "mast",
               "request": "launch",
@@ -335,7 +350,7 @@
         "amd.cosmosPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to your **Artemis Cosmos** install folder — the one containing `PyRuntime/` and `data/`. The extension runs the language server with that install's bundled Python and `sbs.pyz`, so `sbs` need not be on your PATH. Leave empty to **auto-detect** by walking up from the open `.amd` file (missions live inside the Cosmos tree)."
+          "markdownDescription": "Path to your **Artemis Cosmos** install folder \u2014 the one containing `PyRuntime/` and `data/`. The extension runs the language server with that install's bundled Python and `sbs.pyz`, so `sbs` need not be on your PATH. Leave empty to **auto-detect** by walking up from the open `.amd` file (missions live inside the Cosmos tree)."
         },
         "amd.server.command": {
           "type": "string",

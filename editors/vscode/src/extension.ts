@@ -3605,6 +3605,111 @@ async function showAmdResolver(uriArg?: string, column: vscode.ViewColumn = vsco
   });
 }
 
+// --- Missing panel ---------------------------------------------------------
+// What is REFERENCED but not written yet, grouped by target across the whole
+// mission. Deliberately not the Problems pane: that is per-FILE and answers "what
+// is wrong here"; this is per-TARGET and answers "what do I still have to write".
+// Drafting a story as prose with [[links]] to records that do not exist yet is a
+// supported way to work, so nothing here is an error.
+interface MissingUse { kind: string; owner: string; uri: string; line: number; col: number; }
+interface MissingEntry { target: string; uses: MissingUse[]; }
+interface MissingModel { missing: MissingEntry[]; total: number; files: number; }
+
+const MISSING_WORD: Record<string, string> = {
+  link: 'linked from', cue: 'spoken by', choice: 'chosen from',
+  scene: 'scene of', reveal: 'revealed by', parent: 'parent of',
+};
+
+function amdMissingHtml(model: MissingModel, nonce: string): string {
+  const data = JSON.stringify(model);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin:0; }
+  .top { padding:6px 10px; border-bottom:1px solid var(--vscode-panel-border,#8882); font-size:12px; }
+  .muted { color: var(--vscode-descriptionForeground); }
+  .tgt { padding:8px 10px 2px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .n { font-size:11px; font-weight:400; color:var(--vscode-descriptionForeground); }
+  .use { padding:1px 10px 1px 24px; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .use:hover { background: var(--vscode-list-hoverBackground,#8881); }
+  .kind { color: var(--vscode-descriptionForeground); }
+  .where { color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size:11px; }
+  .empty { padding:20px; text-align:center; color:var(--vscode-descriptionForeground); }
+</style></head><body>
+<div class="top" id="top"></div><div id="list"></div>
+<script nonce="${nonce}">
+const vscode = acquireVsCodeApi();
+const model = ${data};
+const WORD = ${JSON.stringify(MISSING_WORD)};
+const top = document.getElementById('top');
+const list = document.getElementById('list');
+if (!model.missing.length) {
+  top.textContent = 'Nothing missing.';
+  list.innerHTML = '<div class="empty">Every reference in this mission resolves.</div>';
+} else {
+  top.innerHTML = '<b>' + model.missing.length + '</b> thing(s) referenced but not written yet' +
+    ' <span class="muted">(' + model.total + ' reference(s) across ' + model.files + ' file(s))</span>';
+  for (const e of model.missing) {
+    const h = document.createElement('div');
+    h.className = 'tgt';
+    h.innerHTML = '<span>' + e.target + '</span><span class="n">' + e.uses.length + '</span>';
+    list.appendChild(h);
+    for (const u of e.uses) {
+      const d = document.createElement('div');
+      d.className = 'use';
+      const file = u.uri.split('/').pop();
+      d.innerHTML = '<span class="kind">' + (WORD[u.kind] || u.kind) + '</span> ' +
+        '<b>' + u.owner + '</b> <span class="where">' + file + ':' + (u.line + 1) + '</span>';
+      d.addEventListener('click', () => vscode.postMessage({ type:'goto', uri:u.uri, line:u.line }));
+      list.appendChild(d);
+    }
+  }
+}
+</script></body></html>`;
+}
+
+async function showMissing(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
+  if (!client) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
+    return;
+  }
+  if (!client.isRunning() && !(await ensureClientReady())) {
+    vscode.window.showWarningMessage('Artemis AMD: the language server is still starting - try again in a moment.');
+    return;
+  }
+  const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
+  if (!uri) { return; }
+  lastAmdUri = uri;
+  let model: MissingModel;
+  try {
+    model = await client.sendRequest<MissingModel>('amd/missing', { textDocument: { uri } });
+  } catch (e) {
+    vscode.window.showErrorMessage(`Artemis AMD: could not list what is missing (${e}).`);
+    return;
+  }
+  if (reuseToolPanel('missing', uri, column)) { return; }
+  const panel = vscode.window.createWebviewPanel(
+    'amdMissing', 'AMD Missing', column, { enableScripts: true });
+  registerToolPanel('missing', uri, panel);
+  const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
+  panel.webview.html = amdMissingHtml(model, nonce());
+
+  const refresh = async () => {
+    try {
+      const m = await client!.sendRequest<MissingModel>('amd/missing', { textDocument: { uri } });
+      panel.webview.html = amdMissingHtml(m, nonce());
+    } catch (e) { output.appendLine(`Missing refresh failed: ${e}`); }
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const docSub = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (e.document.languageId === 'amd') { clearTimeout(timer); timer = setTimeout(() => { void refresh(); }, 400); }
+  });
+  panel.onDidDispose(() => { docSub.dispose(); });
+  panel.webview.onDidReceiveMessage((msg) => {
+    if (msg?.type === 'goto') { openLocation(msg.uri, msg.line, { preserveFocus: true }); }
+  });
+}
+
 async function showGraph(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   if (!client) {
     vscode.window.showWarningMessage('Artemis AMD: the language server is not running.');
@@ -4485,6 +4590,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showStoryOutline', () => showStoryOutline()));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showTimeline', () => showTimeline()));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showResolver', () => showAmdResolver()));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.showMissing', () => showMissing()));
   context.subscriptions.push(vscode.commands.registerCommand('amd.guiEditor', showGuiEditor));
   context.subscriptions.push(GuiFileEditorProvider.register());   // *.gui.mast opens as the GUI Editor
   // Toggle a *.gui.mast text editor back into the visual GUI Editor.
