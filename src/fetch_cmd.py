@@ -282,12 +282,7 @@ def production(branch, quiet):
     repo = "SecretMeeting,WalkTheLine,remote_mission_pick"
     m, sk = fetch_repos(repo, "artemis-sbs", branch, None, False, False, False, False)
     missing += m; skipped += sk
-    # This will ge the common folder
-    m, sk = fetch_repos("sbs_common", "artemis-sbs", branch, "common", False, False, False, False)
-    missing += m; skipped += sk
     # Every mission is attempted before this fires, so one bad dependency reports the
     # whole picture instead of aborting the set.
     if report_problems(missing, skipped):
         raise SystemExit(1)
-
-    #https://github.com/artemis-sbs/sbs_common/archive/refs/heads/main.zip
