@@ -192,9 +192,11 @@ it automatically for AMD files, add to your VS Code `settings.json`:
 | `dangling-scene` | A lifeform's `Scene:` points at a dialogue node that doesn't exist. |
 | `dangling-reveal` | A quest `Then: reveal <path>` points at a node/path that doesn't exist. |
 | `dangling-parent` | A `Parent:` points at a node that doesn't exist. |
+| `dangling-link` | A `[[key]]` in prose names something not written yet. A note to itself rather than a mistake &mdash; `sbs lint --missing` lists them as a work list. |
+| `dangling-speaker` | A line is given to someone not in the cast &mdash; an `@Speaker` cue, or a `Speaker:` field naming a character nothing defines. |
+| `dangling-drop` | A `Drops:` table names an item nothing defines. Only checked when the linter can see what an item *is* (a `type: item/` MAST label with a `key:`, or an AMD item record); a mission whose items all live in an unreadable add-on gets no drop warnings rather than wrong ones. |
 | `signal-no-route` | The file emits `signal X` but nothing handles it (`//signal/X`). |
 | `unfired-signal` | A quest `When: signal X` (or `Fail on signal:`) waits on a signal nothing emits. |
-| `unfired-signal` | A quest `When: signal X` waits on a signal nothing emits. |
 | `non-ascii` | Non-ASCII text (smart quotes, em-dashes, emoji) — the engine renders ASCII only, so it misrenders or crashes. Comments are exempt. |
 | `suspect-heading` | A `#` heading has brackets but no `(key)` — maybe an intended heading missing its key. |
 

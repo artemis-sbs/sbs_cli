@@ -3394,9 +3394,10 @@ ${amdToolbar('resolver')}
 
   const ARCH = {
     quest:'#c586c0', scene:'#4ec9b0', dialogue:'#4daafc', lifeform:'#89d185',
-    scan:'#dcdcaa', side:'#e8a35c', item:'#9ca0ff', region:'#5ec8c8', face:'#d18cd1'
+    scan:'#dcdcaa', side:'#e8a35c', item:'#9ca0ff', region:'#5ec8c8', face:'#d18cd1',
+    drop:'#b58a6a'
   };
-  const ORDER = ['quest','scene','dialogue','lifeform','scan','side','item','region','face'];
+  const ORDER = ['quest','scene','dialogue','lifeform','scan','side','item','drop','region','face'];
   function archColor(a){ return ARCH[a] || '#8899aa'; }
   function archRank(a){ const i = ORDER.indexOf(a); return i < 0 ? ORDER.length : i; }
 
