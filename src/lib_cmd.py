@@ -1,6 +1,7 @@
 import click
 import json
 import os
+import zipfile
 
 from cli_cmd import cli, zipapp_dir
 from file_help import zipdir
@@ -28,6 +29,45 @@ def lib_get_json(folder):
         return {}
     return libs
 
+
+
+def _stamp_amd(zip_file_name, lib_dir, mission_root, version):
+    """Record, inside the mastlib, which of its .amd files linted clean.
+
+    The headless `--test` gate reads this and SKIPS a file whose bytes it already
+    knows are clean, so the stamp is the gate's cache rather than a second opinion.
+    A file the stamp does not cover is simply linted - which is the right answer for
+    the case a stamp structurally cannot see: a mission-folder .amd shadowing this
+    addon's copy, which is the file an author is actually editing.
+
+    Lint ERRORS are reported loudly and do NOT stop the build. A blocked release on
+    a corpus that has always carried warnings is worse than a noisy one, and the
+    stamp still records the errors so the gate lints those files rather than
+    trusting them.
+    """
+    try:
+        from sbs_utils.procedural.amd_stamp import amd_stamp_for_folder, STAMP_NAME
+    except Exception:
+        return          # no sbs_utils on the path: build the zip, skip the stamp
+    try:
+        stamp, findings = amd_stamp_for_folder(str(lib_dir), str(mission_root), version)
+    except Exception as e:
+        print(f"WARNING: could not lint .amd for {os.path.basename(zip_file_name)}: {e}")
+        return
+    if stamp is None:
+        return          # this addon ships no .amd
+    bad = [(p, f) for p, f in findings if f.is_error()]
+    for path, f in bad:
+        print(f"AMD ERROR {os.path.relpath(path, str(mission_root))}:{f.line}: "
+              f"{f.message} [{f.code}]")
+    if bad:
+        print(f"WARNING: {os.path.basename(zip_file_name)} packages "
+              f"{len(bad)} .amd error(s) - the mission will FAIL its --test gate")
+    try:
+        with zipfile.ZipFile(zip_file_name, "a", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(STAMP_NAME, json.dumps(stamp, indent=1, sort_keys=True))
+    except Exception as e:
+        print(f"WARNING: could not write {STAMP_NAME}: {e}")
 
 
 def lib_impl(folder, user):
@@ -85,6 +125,8 @@ def lib_impl(folder, user):
                 # mastlib / resource zips are repo-namespaced and flat.
                 zip_file_name = f"{working_directory}/__lib__/{user}.{repo}.{folder_path}.{version}.{ext}"
                 zipdir(lib_dir, zip_file_name)
+                _stamp_amd(zip_file_name, lib_dir,
+                           Path(working_directory).resolve() / folder, version)
             
             
             #print(f"Compressing {lib_dir} into  {zip_file_name}")
