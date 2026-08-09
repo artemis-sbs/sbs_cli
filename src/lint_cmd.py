@@ -138,6 +138,31 @@ def _declared_addon_paths(mission_root):
     return out
 
 
+def _library_mast_globals():
+    """Function names `sbs_utils.procedural` registers as MAST globals.
+
+    Mirrors register_mission_functions' own filter (`func.__module__ == mod.__name__`)
+    so a re-export is not counted as a library global. Best-effort: on any failure the
+    shadow check is simply skipped rather than reporting nonsense.
+    """
+    names = set()
+    try:
+        import pkgutil, importlib
+        from inspect import getmembers, isfunction
+        import sbs_utils.procedural as proc
+        for mi in pkgutil.iter_modules(proc.__path__):
+            try:
+                mod = importlib.import_module("sbs_utils.procedural." + mi.name)
+            except Exception:
+                continue
+            for fname, func in getmembers(mod, isfunction):
+                if getattr(func, "__module__", None) == mod.__name__ and not fname.startswith("_"):
+                    names.add(fname)
+    except Exception:
+        return set()
+    return names
+
+
 def _load_signal_lint(missions, mission):
     """Import `signal_lint` - working tree first, else the mission's own sbslib."""
     _prefer_working_tree_sbs_utils(missions, mission)
@@ -492,6 +517,55 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
                 except OSError:
                     continue
             project = signal_lint_project(sources)
+            by_file = {}
+            for rel, f in project:
+                by_file.setdefault(rel, []).append(f)
+                if f.is_error():
+                    total_err += 1
+                else:
+                    total_warn += 1
+            for rel, findings in by_file.items():
+                if fmt == "text":
+                    print(f"== {rel} ==")
+                    for f in findings:
+                        print(f"  {f}")
+                elif fmt == "compact":
+                    for f in findings:
+                        print(f.compact(rel))
+                else:  # json
+                    bundle.extend(f.to_dict(file=rel) for f in findings)
+
+    # Whole-mission namespace pass: MAST merges every addon's .py into ONE global
+    # namespace and register_mission_functions overwrites silently, so a name defined
+    # twice fails at RUNTIME in whichever addon lost - intermittently, since addon load
+    # order is not deterministic. Needs every file at once.
+    try:
+        from sbs_utils.procedural.namespace_lint import namespace_lint_project
+    except Exception:
+        namespace_lint_project = None
+    if namespace_lint_project is not None:
+        addon_dirs = set()
+        for ini in glob.glob(os.path.join(mission, "*", "__init__.mast")):
+            addon_dirs.add(os.path.dirname(ini))
+        py_sources = []
+        for d in sorted(addon_dirs):
+            for path in sorted(glob.glob(os.path.join(d, "**", "*.py"), recursive=True)):
+                if os.path.basename(path).startswith("test_"):
+                    continue
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                        py_sources.append((os.path.relpath(path, mission), fh.read()))
+                except OSError:
+                    continue
+        ns_mast = []
+        for path in sorted(glob.glob(os.path.join(mission, "**", "*.mast"), recursive=True)):
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    ns_mast.append((os.path.relpath(path, mission), fh.read()))
+            except OSError:
+                continue
+        if py_sources:
+            project = namespace_lint_project(py_sources, ns_mast, _library_mast_globals())
             by_file = {}
             for rel, f in project:
                 by_file.setdefault(rel, []).append(f)
