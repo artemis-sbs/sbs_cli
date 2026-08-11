@@ -46,6 +46,24 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
     missions = zipapp_dir
 
     try:
+        # Prefer a working-tree sbs_utils, exactly as lint/docs/fmt do. Without
+        # this, compile checked the RELEASED sbslib while lint checked your edits,
+        # so the two could disagree about the same mission and nothing said why.
+        # Imported here rather than at module scope: lint_cmd imports
+        # `sbs_lib_import` FROM this module, so the other direction is circular.
+        from lint_cmd import _prefer_working_tree_sbs_utils
+        _prefer_working_tree_sbs_utils(missions, os.path.join(missions, folder))
+        try:
+            # IMPORT it, do not merely put it on the path. `import script` below
+            # reaches PyAddons/sbslibs.py, which inserts the mission's .sbslib at
+            # sys.path[0] - after us - so the release would shadow the working
+            # tree and compile would quietly check different code from lint.
+            # Binding it in sys.modules first settles the question. lint_cmd wins
+            # the same race the same way, by importing immediately.
+            import sbs_utils  # noqa: F401
+        except ImportError:
+            pass               # no working tree; sbslibs will supply it below
+
         data_path = os.path.join(missions, "..")
         exe_path = os.path.join(data_path, "..")
         py_addons = os.path.join(exe_path, "PyAddons")
@@ -68,9 +86,35 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
 
 
         import script
-        from sbs_utils.mock import sbs
-    
+
+        # The mock has to be imported BEFORE story_nodes, and on every path -
+        # including plain compile, which never touches the `sbs` name itself.
+        # Importing it registers `sys.modules["sbs"]` (cosmos_dev/mock/sbs.py),
+        # and library code compiled below does a bare `import sbs`. So this is
+        # not, as it first appears, dead weight on the compile path: it is the
+        # only thing that makes `sbs` resolvable outside the engine.
+        #
+        # It was `sbs_utils.mock` until that package became `cosmos_dev.mock` on
+        # 2026-06-19, and this line was never updated - which broke plain
+        # `sbs compile` for everyone for two months. cosmos_dev is dev-only and no
+        # mission's story.json declares it, so it has to be put on the path
+        # deliberately; debug_cmd already does that, preferring the source tree,
+        # falling back to the version-matched sbslib pair, and naming what to
+        # fetch when it cannot find either.
+        from debug_cmd import _prepare_runner_path
+        _prepare_runner_path(mission)
+        from cosmos_dev.mock import sbs
+
         import sbs_utils.mast_sbs.story_nodes
+
+        # The --terminal branch has always set these; this one never did, because
+        # it never got far enough to need them. Without exe_dir, `fs` falls back to
+        # the directory of sys.executable - PyRuntime - and every library path
+        # comes out as `...\PyRuntime/data/missions\__lib__\...`, so a mission
+        # that compiles fine reports every mastlib missing.
+        from sbs_utils import fs
+        fs.exe_dir = exe_path
+        fs.script_dir = mission
 
         ### is_sbs:
         if compile_only:
@@ -102,11 +146,32 @@ def compile_impl(folder, compile_only = True, is_sbs=True):
 
 
 
+    except RuntimeError as e:
+        # debug_cmd raises this with the missing library named and the command to
+        # get it. That is already the actionable message; do not bury it.
+        print(e)
+        return False
     except Exception as e:
-        print (e)
+        print(e)
+        if isinstance(e, (ImportError, OSError)) or not _looks_like_mast_error(e):
+            # An environment failure, not a mission one. The bare message alone -
+            # "No module named 'sbs_utils.mock'", with no file and no line - is
+            # what made this bug take a full investigation to place.
+            import traceback
+            traceback.print_exc()
         return False
 
     return True
+
+
+def _looks_like_mast_error(e):
+    """Is this a mission problem rather than an environment one?
+
+    Only used to decide whether a traceback is worth printing: a MAST compile
+    error is about the mission and the message is the whole story, while an
+    import or path failure is about this machine and the message alone is not
+    enough to act on."""
+    return e.__class__.__module__.startswith("sbs_utils")
 
 
 @cli.command(short_help="MAST Compile")

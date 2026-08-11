@@ -1,0 +1,43 @@
+name: Tests
+
+# The RELEASE workflow (main.yml) is tag-triggered and deliberately left alone: a
+# failing test should not surprise-block a release that is already being cut. This
+# runs on the push that broke something, which is when it is useful.
+#
+# Until this existed, sbs_cli had NO test job at all - every suite ran only on a
+# developer machine, and `sbs compile` shipped broken for two months because a
+# module it imported had been renamed in the sibling repo.
+#
+# WHAT THIS DOES NOT COVER, so a green tick is not read as more than it is:
+# `test_docs_pdf_flag` and `test_doctor_cmd` skip themselves unless an `sbs_utils`
+# working tree sits beside this repo, which on a lone checkout is never. So `sbs
+# docs` and `sbs doctor` are exercised locally and NOT here. Everything else runs:
+# pdf_out, deps_cmd, fetch, file_help, media, swap, release_assets.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  tests:
+    # windows-latest, not ubuntu: this repo is Windows by construction. The browser
+    # discovery tests build `Google\Chrome\Application\chrome.exe` style paths, and
+    # dev.pyz's own exclude filter matches backslashes. The release build already
+    # runs here too, so the tests meet the same platform that ships.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # The engine embeds 3.11 and sbs.pyz runs on it; test on what ships.
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        # `tests/__init__.py` puts `src` on sys.path, so discovery needs nothing else.
+        run: python -m unittest discover -s tests -t . -v
