@@ -1,0 +1,353 @@
+"""`sbs doctor` - is this machine and this mission set up correctly?
+
+**Scope, and it is a hard line:** doctor answers *"is this set up correctly"*.
+It never answers *"is this content correct"*. It may read `story.json`,
+`__lib__.json`, directory listings and file times. It must not parse a `.amd` or
+compile a `.mast` - those questions belong to `sbs lint` and `sbs compile`, and
+doctor points at them rather than growing a second opinion.
+
+That line is not a style preference. A report that also checks content becomes a
+slower linter that disagrees with the linter, and then nobody trusts either.
+`tests/test_doctor_cmd.py` enforces it by failing if doctor opens one of those
+files.
+
+Doctor exits 0. A report that fails the build IS a linter; `--strict` is there
+for anyone who wants the other behavior.
+"""
+import json
+import os
+import subprocess
+import sys
+
+import click
+
+from cli_cmd import cli, zipapp_dir
+
+OK, ABSENT, PROBLEM = "ok", "--", "!!"
+
+
+class Report:
+    """Collects `(section, name, status, detail, remedy)` and prints them."""
+
+    def __init__(self):
+        self.rows = []
+
+    def add(self, section, name, status, detail="", remedy=""):
+        self.rows.append({"section": section, "name": name, "status": status,
+                          "detail": detail, "remedy": remedy})
+
+    @property
+    def problems(self):
+        return [r for r in self.rows if r["status"] == PROBLEM]
+
+    def echo(self):
+        section = None
+        for r in self.rows:
+            if r["section"] != section:
+                section = r["section"]
+                print(section)
+            print(f"  {r['status']}  {r['name']:<11} {r['detail']}".rstrip())
+            if r["remedy"]:
+                print(f"      {r['remedy']}")
+
+    def as_json(self):
+        from version import VERSION
+        return json.dumps({"sbs": VERSION, "checks": self.rows}, indent=2)
+
+
+def _missions_dir():
+    """The missions folder, in dev and deployed modes alike.
+
+    `zipapp_dir` is the missions folder only when deployed; from source it is
+    `sbs_cli/`, one level deeper, and a doctor that reported THAT would call
+    every mission's libraries missing. `debug_cmd` already solved this."""
+    try:
+        from debug_cmd import _missions_dir as resolved
+        return resolved()
+    except Exception:
+        return str(zipapp_dir)
+
+
+# --- environment -------------------------------------------------------------
+
+def _check_sbs(rep):
+    from version import VERSION
+    packaged = ".pyz" in os.path.abspath(__file__)
+    rep.add("sbs", "version", OK, VERSION)
+    rep.add("sbs", "running", OK,
+            "from sbs.pyz" if packaged else f"from source ({os.path.dirname(__file__)})")
+    rep.add("sbs", "missions", OK, _missions_dir())
+
+
+def _check_python(rep):
+    exe = sys.executable
+    embedded = os.path.isfile(os.path.join(os.path.dirname(exe), "python311._pth"))
+    rep.add("Python", "version", OK,
+            f"{sys.version.split()[0]} {'embedded' if embedded else 'host'} ({exe})")
+    if embedded:
+        # The single most useful line in this report. It is the reason
+        # `pip install` has never worked here and the reason `sbs deps` exists.
+        rep.add("Python", "paths", OK,
+                "PYTHONPATH is ignored and site-packages is not on sys.path",
+                "use `sbs deps install X` for optional libraries")
+
+
+def _check_layout(rep):
+    missions = _missions_dir()
+    lib = os.path.join(missions, "__lib__")
+    if os.path.isdir(lib):
+        n = len([f for f in os.listdir(lib) if f.endswith((".sbslib", ".mastlib"))])
+        rep.add("Layout", "__lib__", OK, f"{n} libraries")
+    else:
+        rep.add("Layout", "__lib__", ABSENT, "no __lib__ beside the missions",
+                "run: sbs fetch")
+
+    try:
+        from lint_cmd import _ensure_sbs_utils_importable
+        _ensure_sbs_utils_importable(missions)
+        import sbs_utils
+        # A NAMESPACE package has `__file__ = None` - which is what you get when
+        # the REPO folder (`missions/sbs_utils/`, no `__init__.py`) is on the
+        # path instead of the package inside it. That is a real misconfiguration
+        # and worth naming, not crashing on.
+        origin = getattr(sbs_utils, "__file__", None)
+        if origin is None:
+            paths = list(getattr(sbs_utils, "__path__", []) or [])
+            rep.add("Layout", "sbs_utils", PROBLEM,
+                    "imported as a namespace package with no module: "
+                    + (paths[0] if paths else "unknown"),
+                    "the sbs_utils PACKAGE is one level inside the repo folder")
+            return
+        where = os.path.dirname(os.path.dirname(os.path.abspath(origin)))
+        kind = "sbslib" if ".sbslib" in where else "working tree"
+        rep.add("Layout", "sbs_utils", OK, f"{kind}: {where}")
+    except Exception as e:
+        rep.add("Layout", "sbs_utils", PROBLEM, f"not importable ({e})",
+                "run: sbs fetch, or check __lib__")
+        return
+
+    try:
+        from sbs_utils.procedural.amd_assets import face_js_path, graphics_dir
+        gfx = graphics_dir(missions)
+        if gfx:
+            rep.add("Layout", "graphics", OK, gfx)
+        else:
+            rep.add("Layout", "graphics", ABSENT,
+                    "no Cosmos data/graphics found",
+                    "image:// engine art and face atlases will not resolve")
+        if face_js_path():
+            rep.add("Layout", "faces", OK, "compositor available")
+        else:
+            rep.add("Layout", "faces", ABSENT,
+                    "cosmos_dev is not installed",
+                    "faces will print as placeholders in `sbs docs`")
+    except Exception as e:
+        rep.add("Layout", "graphics", ABSENT, f"could not check ({e})")
+
+    py_addons = _py_addons()
+    if os.path.isdir(py_addons):
+        ry = "with ryaml" if os.path.isfile(os.path.join(py_addons, "ryaml.pyd")) \
+            else "no ryaml.pyd"
+        rep.add("Layout", "PyAddons", OK, f"{py_addons} ({ry})")
+    else:
+        rep.add("Layout", "PyAddons", ABSENT, "not found")
+
+
+def _py_addons():
+    try:
+        from deps_cmd import engine_dir
+        return engine_dir()
+    except Exception:
+        return os.path.join(_missions_dir(), "..", "..", "PyAddons")
+
+
+def _tool(rep, name, argv, remedy):
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        rep.add("Tools", name, ABSENT, "not found", remedy)
+        return
+    line = (r.stdout or r.stderr or "").strip().splitlines()
+    rep.add("Tools", name, OK, line[0] if line else "present")
+
+
+def _check_tools(rep):
+    _tool(rep, "git", ["git", "--version"], "needed by `sbs fetch --source`")
+    _tool(rep, "curl", ["curl", "--version"], "needed by `sbs fetch` and `sbs update`")
+    try:
+        import pdf_out
+        eng = pdf_out.find_browser()
+        if eng:
+            rep.add("Tools", "browser", OK, f"{eng.kind} {eng.version} ({eng.exe})")
+        else:
+            rep.add("Tools", "browser", ABSENT, "no Chromium browser found",
+                    "install Microsoft Edge or Chrome for `sbs docs --pdf`")
+        weasy = pdf_out.find_weasyprint()
+        if weasy:
+            rep.add("Tools", "weasyprint", OK, weasy)
+        else:
+            rep.add("Tools", "weasyprint", ABSENT,
+                    "not installed - PDFs will have no contents page numbers",
+                    "install the WeasyPrint package; pip alone cannot supply "
+                    "its GTK libraries")
+    except Exception as e:
+        rep.add("Tools", "browser", ABSENT, f"could not check ({e})")
+
+
+def _check_sidecar(rep):
+    try:
+        from cli_cmd import sidecar_dir
+        from deps_cmd import _installed, engine_dir, site_packages
+    except Exception as e:
+        rep.add("Sidecar", "deps", ABSENT, f"unavailable ({e})")
+        return
+    for label, path in (("sbs", sidecar_dir()), ("engine", engine_dir())):
+        rows = _installed(path)
+        if rows:
+            rep.add("Sidecar", label, OK,
+                    ", ".join(f"{n} {v}" for n, v in rows))
+        else:
+            rep.add("Sidecar", label, ABSENT, f"empty ({path})")
+    if site_packages() is None:
+        rep.add("Sidecar", "pip", PROBLEM, "pip is not reachable",
+                "`sbs deps install` will not work")
+
+
+# --- mission health ----------------------------------------------------------
+
+def _check_mission(rep, mission):
+    name = os.path.basename(os.path.abspath(mission))
+    story = os.path.join(mission, "story.json")
+    if not os.path.isfile(story):
+        rep.add(name, "story.json", ABSENT, "not a mission folder")
+        return
+    try:
+        with open(story, encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except Exception as e:
+        rep.add(name, "story.json", PROBLEM, f"will not parse ({e})",
+                "the mission cannot load until this is valid JSON")
+        return
+
+    sbslib = list(data.get("sbslib", []))
+    mastlib = list(data.get("mastlib", []))
+    media = list((data.get("resources") or {}).values())
+    rep.add(name, "story.json", OK,
+            f"{len(sbslib)} sbslib, {len(mastlib)} mastlib, {len(media)} media")
+
+    lib = os.path.join(_missions_dir(), "__lib__")
+    missing = [a for a in sbslib + mastlib + media
+               if isinstance(a, str) and not os.path.isfile(os.path.join(lib, a))]
+    if missing:
+        rep.add(name, "libraries", PROBLEM,
+                f"{len(missing)} declared but not in __lib__: "
+                + ", ".join(missing[:3]) + ("..." if len(missing) > 3 else ""),
+                "run: sbs fetch  (or `sbs lib <folder>` if you build them here)")
+    else:
+        rep.add(name, "libraries", OK, "all declared libraries present")
+
+    _check_freshness(rep, name, mission, mastlib, lib)
+    _check_packaging(rep, name, mission)
+
+    stray = [f for f in ("extraShipData.json", "extraShipData.json.bak")
+             if os.path.isfile(os.path.join(mission, f))]
+    if stray:
+        # Generated output the library reads BACK, while the addon merges the
+        # same entries again - 51 hulls become 102 from the second run onward.
+        rep.add(name, "shipdata", PROBLEM,
+                ", ".join(stray) + " present (generated output)",
+                "delete it; it double-merges hulls from run 2 onward")
+
+
+def _check_freshness(rep, name, mission, mastlib, lib):
+    """A built `.mastlib` older than its source is the classic "my change did
+    nothing" - the engine reads the lib, the runner reads the source."""
+    stale = []
+    for asset in mastlib:
+        if not isinstance(asset, str):
+            continue
+        zip_path = os.path.join(lib, asset)
+        if not os.path.isfile(zip_path):
+            continue
+        addon = asset.split(".")[-3] if asset.count(".") >= 3 else None
+        src = os.path.join(mission, addon) if addon else None
+        if not src or not os.path.isdir(src):
+            continue
+        newest = 0
+        for root, _dirs, files in os.walk(src):
+            for f in files:
+                try:
+                    newest = max(newest, os.path.getmtime(os.path.join(root, f)))
+                except OSError:
+                    pass
+        if newest > os.path.getmtime(zip_path):
+            stale.append(addon)
+    if stale:
+        rep.add(name, "freshness", PROBLEM,
+                "source newer than the built lib: " + ", ".join(sorted(set(stale))),
+                f"run: sbs lib {os.path.basename(os.path.abspath(mission))}")
+
+
+def _check_packaging(rep, name, mission):
+    try:
+        from lint_cmd import lint_self_packaging
+        findings = lint_self_packaging(mission) or []
+    except Exception:
+        return
+    for item in findings:
+        try:
+            severity, message = item[0], item[1]
+        except Exception:
+            severity, message = "warning", str(item)
+        rep.add(name, "packaging",
+                PROBLEM if str(severity).lower().startswith("err") else ABSENT,
+                message)
+
+
+@cli.command()
+@click.argument("folder", default=None, required=False)
+@click.option("--env", "env_only", is_flag=True, help="Environment only.")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+@click.option("--strict", is_flag=True, help="Exit 1 if anything is flagged.")
+def doctor(folder, env_only, as_json, strict):
+    """Check this machine, and a mission FOLDER, are set up correctly.
+
+    Reports what is installed and what a mission declares versus what is
+    actually on disk. It does NOT check content - for that, run `sbs lint`
+    (AMD) or `sbs compile` (MAST).
+
+    Exits 0: this is a report, and a report that fails a build is a linter.
+    Use --strict for the other behavior.
+    """
+    rep = Report()
+    _check_sbs(rep)
+    _check_python(rep)
+    _check_layout(rep)
+    _check_tools(rep)
+    _check_sidecar(rep)
+
+    if not env_only:
+        missions = _missions_dir()
+        targets = []
+        if folder:
+            cand = os.path.join(missions, folder)
+            targets = [cand if os.path.isdir(cand) else folder]
+        else:
+            targets = [os.path.join(missions, d) for d in sorted(os.listdir(missions))
+                       if os.path.isfile(os.path.join(missions, d, "story.json"))]
+        for mission in targets:
+            if os.path.isdir(mission):
+                _check_mission(rep, mission)
+            else:
+                print(f"ERROR: not a folder: {folder}")
+                raise SystemExit(2)
+
+    if as_json:
+        print(rep.as_json())
+    else:
+        rep.echo()
+        if not env_only:
+            print()
+            print("content checks: sbs lint <folder> (AMD), sbs compile <folder> (MAST)")
+    if strict and rep.problems:
+        raise SystemExit(1)

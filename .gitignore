@@ -12,3 +12,6 @@
 !.vscode/tasks.json
 /.vs
 rel.zip
+# Optional Python libraries installed by `sbs deps` - a pip --target
+# tree, not source. Rebuildable with one command.
+/__pylib__/

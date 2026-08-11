@@ -12,6 +12,9 @@ from run_cmd import run
 from watch_cmd import watch
 from compile_cmd import compile
 from lint_cmd import lint
+from docs_cmd import docs
+from deps_cmd import deps
+from doctor_cmd import doctor
 from fmt_cmd import fmt
 from dap_cmd import dap
 from swap_cmd import swap
