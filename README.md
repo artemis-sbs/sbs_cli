@@ -378,6 +378,107 @@ sbs fmt MyMission              # format the .amd files in place
 sbs fmt MyMission --check      # report + fail if anything isn't formatted (CI)
 ```
 
+### `sbs docs` — turn a mission into something you can read on paper
+
+Your `.amd` files hold the quests, the dialogue, the cast, the lore. Up to now the
+only thing that could read them was the game, so reviewing a script or looking up
+a faction key meant opening a code editor. `sbs docs` turns them into a document.
+
+```
+sbs docs .                      # a printable HTML page, into ./__docs__/
+sbs docs . --pdf                # ...and a PDF beside it
+sbs docs . --lens all --pdf     # all four editions, plus one bound book
+sbs docs . --open               # build it and open it
+```
+
+**Four editions, because an .amd file is four different documents depending on who
+is reading it.** Pick with `--lens`:
+
+| Lens | What you get |
+|---|---|
+| `prose` | A manual or a story book — help text, lore, the codex |
+| `catalog` | A sourcebook — sides, items, scans and landmarks as reference cards |
+| `screenplay` | A script you could read aloud, laid out like a screenplay |
+| `bible` | A design document — the quest spine, its triggers, and a map of the branches |
+
+**Who is it for?** `--profile player` leaves out everything a player should never
+see: author notes, the conditions on a dialogue choice, what a choice secretly
+costs. It genuinely leaves them out of the file, so you can hand the PDF to
+someone. (The `bible` lens has no player profile and will say so — the bible *is*
+the spoiler.)
+
+```
+sbs docs . --lens prose --profile player --pdf
+```
+
+**Getting a PDF** needs no extra install: `--pdf` drives a headless Chrome or Edge,
+which every Windows machine already has. If you also install the `weasyprint`
+command it will use that instead where it is the better choice — it numbers the
+contents list properly — except on documents with character faces, which it cannot
+draw.
+
+For a proper **bookmark sidebar** in the PDF, and to bind `--lens all` into one
+book, add `pypdf`:
+
+```
+sbs deps install pypdf
+```
+
+Without it you still get the PDFs, just no bookmarks — `sbs docs` mentions it once
+and carries on.
+
+---
+
+## When something isn't right
+
+### `sbs doctor` — check your setup
+
+Tells you what's installed, what a mission expects, and what's missing. It looks at
+your *setup*, never at your writing — for that, use `sbs lint` and `sbs compile`.
+
+```
+sbs doctor                 # everything it can see
+sbs doctor MyMission       # your setup, plus one mission
+sbs doctor --env           # just the tools and folders
+```
+
+Three markers: `ok` is fine, `--` means something optional isn't installed (not a
+problem), and `!!` is a real problem — always followed by the command that fixes
+it.
+
+It always exits successfully, because it's a report and not a test. Use `--strict`
+if you want it to fail a build, or `--json` to feed it to something else.
+
+### `sbs deps` — optional extras
+
+A few features can do more if an extra Python library is present. `sbs deps`
+installs those.
+
+```
+sbs deps install pypdf     # PDF bookmarks and bound books for `sbs docs`
+sbs deps list              # what's installed, and where
+sbs deps remove pypdf
+```
+
+**Why you need this instead of plain `pip install`.** `sbs` runs on the small copy
+of Python that ships inside Cosmos, and that copy is deliberately sealed off — it
+ignores `PYTHONPATH` and can't see anything you install normally. `pip` doesn't
+even appear to exist to it. So `pip install` cannot reach `sbs`, however correctly
+you run it. `sbs deps` knows the way in.
+
+Everything here is optional. Nothing you install is needed to run `sbs`, and every
+feature that uses one works without it.
+
+> **Heads up:** `sbs deps install weasyprint` will refuse. WeasyPrint needs
+> graphics libraries that `pip` can't deliver on Windows — it would install
+> perfectly and then fail the moment anything used it. Install the WeasyPrint
+> Windows package instead.
+
+**For missions, not just the tool.** Adding `--engine` installs somewhere a
+*running mission* can use it. It asks first, because a mission that relies on it
+will only run on machines where you've done the same — it's no longer something
+you can just hand to someone.
+
 ---
 
 ## For maintainers — publishing releases
@@ -470,6 +571,24 @@ sbs watch LegendaryMissions,sbs_utils
 sbs watch western_back:LegendaryMissions,western_back:sbs_utils
 ```
 
+**"I want to read my mission's story without playing it."**
+```
+sbs docs . --lens screenplay --pdf
+```
+The dialogue, laid out like a script. `--lens bible` instead gives you the quest
+structure and what triggers what.
+
+**"I want to hand someone the lore without spoiling the mission."**
+```
+sbs docs . --lens prose --profile player --pdf
+```
+
+**"Something isn't working and I don't know what."**
+```
+sbs doctor
+```
+Anything marked `!!` comes with the command that fixes it.
+
 **"I want to burn-in test Cosmos by letting it play itself."**
 Set up the mission's `settings.yaml` for autoplay and auto-start, then:
 ```
@@ -498,6 +617,9 @@ Start the server and clients and let it run.
 | `sbs compile <folder>` | Check a mission's script for errors |
 | `sbs lint <folder>` | Check a mission's AMD (.amd) files for broken links |
 | `sbs fmt <folder>` | Canonically format a mission's AMD (.amd) files |
+| `sbs docs <folder>` | Turn a mission's AMD into a readable document (and a PDF) |
+| `sbs doctor` | Check your setup — tools, libraries, missing pieces |
+| `sbs deps install <pkg>` | Add an optional Python library `sbs` can use |
 | `sbs release <folder>` | Publish a release (maintainers only) |
 | `sbs update` | Update the `sbs` tool itself |
 | `sbs version` | Show the tool's version |
