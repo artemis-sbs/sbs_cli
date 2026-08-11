@@ -203,10 +203,10 @@ def _pages(roots):
 
 @cli.command(short_help="Generate documentation from a mission's AMD")
 @click.argument("folder", default=".")
-@click.option("--emit", type=click.Choice(["includes", "records"]),
+@click.option("--emit", type=click.Choice(["includes", "records", "site"]),
               default="includes", show_default=True,
-              help="`includes` refills amd:begin blocks in place; "
-                   "`records` writes a page per .amd file.")
+              help="`includes` refills amd:begin blocks in place; `records` writes a "
+                   "page per .amd file; `site` builds a standalone HTML site.")
 @click.option("--docs", "docs_dir", default=None,
               help="The docs tree to process. Default: <folder>/mkdocs/docs.")
 @click.option("--root", default="records", show_default=True,
@@ -224,9 +224,14 @@ def _pages(roots):
               help="`bake` composites face:// art to PNG; `note` just says it is there.")
 @click.option("--check", is_flag=True,
               help="Write nothing; exit 1 if anything would change.")
+@click.option("-o", "--out", "out_dir", default=None,
+              help="Where `--emit site` writes. Default: <folder>/__site__.")
+@click.option("--no-search", is_flag=True, help="Build the site without a search box.")
+@click.option("--open", "do_open", is_flag=True,
+              help="Open the built site in a browser.")
 @click.option("-q", "--quiet", is_flag=True, help="Only report changes and problems.")
 def site(folder, emit, docs_dir, root, layout_path, profile, nav_path, no_nav,
-         faces, check, quiet):
+         faces, out_dir, no_search, do_open, check, quiet):
     mission = os.path.abspath(folder)
     missions = os.path.dirname(mission)
     if not os.path.isdir(mission):
@@ -238,6 +243,9 @@ def site(folder, emit, docs_dir, root, layout_path, profile, nav_path, no_nav,
         return _emit_records(mission, docs_dir, root, layout_path, profile,
                              nav_path, no_nav, faces, check, quiet,
                              amd_core, amd_markdown)
+    if emit == "site":
+        return _emit_site(mission, out_dir, layout_path, profile, faces,
+                          no_search, do_open, quiet, amd_core, amd_markdown)
 
     roots = _docs_dirs(mission, docs_dir)
     if not roots:
@@ -476,3 +484,97 @@ def _up_to_root(ctx):
     site under a subpath and from a folder opened off disk."""
     depth = (ctx.get("page") or {}).get("path", "").count("/")
     return "../" * depth
+
+
+def _emit_site(mission, out_dir, layout_path, profile, faces, no_search, do_open,
+               quiet, amd_core, amd_markdown):
+    """A standalone folder of HTML - no server, no CDN, double-click and read.
+
+    It does NOT get its own renderer. `amd_markdown_page` produces exactly the markdown
+    the mkdocs pages are written from, and `site_out` parses that. So the two outputs
+    cannot drift: any bug here is a bug there."""
+    import site_out
+
+    layout = _layout(mission, layout_path)
+    out = os.path.abspath(out_dir or os.path.join(mission, "__site__"))
+    documents = _documents(mission, amd_core, layout)
+    if not documents:
+        raise click.ClickException(f"no .amd files found under {mission}")
+    pages = amd_markdown.amd_markdown_site(documents, layout=layout)
+
+    media_dir = os.path.join(out, "_media")
+    media = _media_renderer_for_site(mission, media_dir, faces)
+
+    def markdown_of(page):
+        ctx = amd_markdown.amd_markdown_context(
+            pages, page, profile=profile, media=media,
+            link=lambda node, c: _html_link(node, c, amd_markdown))
+        return amd_markdown.amd_markdown_page(page, ctx)
+
+    try:
+        written, index = site_out.render_site(
+            pages, markdown_of, out,
+            title=layout.get("nav_title") or os.path.basename(mission),
+            media_root=media_dir, search=not no_search,
+            intro=layout.get("index_intro"))
+    except site_out.RendererUnavailable as e:
+        raise click.ClickException(str(e))
+    if os.path.isdir(media_dir):
+        import shutil
+        shutil.rmtree(media_dir, ignore_errors=True)
+
+    if not quiet:
+        click.echo(f"{len(written)} page(s), {len(index)} record(s) indexed -> {out}")
+        if no_search:
+            click.echo("search: not built (--no-search)")
+    if do_open:
+        import webbrowser
+        webbrowser.open("file:///" + os.path.join(out, "index.html").replace("\\", "/"))
+
+
+def _html_link(node, ctx, amd_markdown):
+    """The same URL the mkdocs build produces, with `.html` for `.md`. This is one of
+    exactly two things the two sites differ by."""
+    page = (ctx.get("page_of") or {}).get(id(node))
+    if page is None:
+        return None
+    import posixpath
+    anchor = amd_markdown.amd_markdown_anchor(node)
+    if page is ctx.get("page"):
+        return f"#{anchor}"
+    here = posixpath.dirname(ctx["page"]["path"])
+    rel = posixpath.relpath(page["path"], here or ".")
+    return f"{rel[:-3]}.html#{anchor}" if rel.endswith(".md") else f"{rel}#{anchor}"
+
+
+def _media_renderer_for_site(mission, media_dir, faces):
+    """Same policy as the records emitter, writing into the site's own media folder."""
+    from sbs_utils.procedural.amd_assets import MissionAssets
+
+    assets = MissionAssets(mission, embed=False)
+    baker = None
+    if faces == "bake":
+        from face_bake import FaceBaker
+        candidate = FaceBaker(assets, os.path.join(media_dir, "faces"), "media/faces")
+        baker = candidate if candidate.capable() else None
+
+    def render(block, ctx):
+        ns = (block.get("ns") or "").lower()
+        url, alt = block.get("url") or "", block.get("alt") or ""
+        rel = _up_to_root(ctx)
+        if ns == "face" and baker is not None:
+            baked = baker.bake(url)
+            return f"![{alt or 'face'}]({rel}{baked})" if baked else None
+        if ns == "image":
+            found = assets.find(url)
+            if found:
+                name = os.path.basename(found)
+                target = os.path.join(media_dir, "art", name)
+                if not os.path.isfile(target):
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with open(found, "rb") as src, open(target, "wb") as dst:
+                        dst.write(src.read())
+                return f"![{alt or url}]({rel}media/art/{name})"
+        return None
+
+    return render
