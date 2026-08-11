@@ -249,14 +249,52 @@ def _check_mission(rep, mission):
     _check_freshness(rep, name, mission, mastlib, lib)
     _check_packaging(rep, name, mission)
 
-    stray = [f for f in ("extraShipData.json", "extraShipData.json.bak")
-             if os.path.isfile(os.path.join(mission, f))]
-    if stray:
-        # Generated output the library reads BACK, while the addon merges the
-        # same entries again - 51 hulls become 102 from the second run onward.
+    _check_shipdata(rep, name, mission)
+
+
+def _check_shipdata(rep, name, mission):
+    """`extraShipData.json` is a problem only when it is GENERATED.
+
+    The hazard is real - the library reads the file back while the add-on merges
+    the same entries again, and 51 hulls become 102 from run 2 onward. But the
+    same filename is also a legitimate authored fixture: `LM_TestRange` commits
+    one because its engine probe exists to test whether the engine re-reads that
+    very file, and `VisualTestRange` commits one to reproduce an art bug.
+    Flagging those told people to delete the instrument.
+
+    Tracked in git is the tell: authored content gets committed, generated output
+    gets ignored. Asking git is cheaper and more honest than guessing from the
+    contents."""
+    present = [f for f in ("extraShipData.json", "extraShipData.json.bak")
+               if os.path.isfile(os.path.join(mission, f))]
+    if not present:
+        return
+    tracked = set()
+    try:
+        r = subprocess.run(["git", "-C", mission, "ls-files"] + present,
+                           capture_output=True, text=True, timeout=20)
+        tracked = {os.path.basename(x.strip()) for x in r.stdout.splitlines() if x.strip()}
+        if r.returncode != 0:
+            raise OSError("not a repo")
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        # Not a repo, or no git. Fall back to the other tell: a `.bak` beside the
+        # file means something WROTE it, and nobody hand-authors a `.bak`. With
+        # neither signal, say nothing rather than guess wrong.
+        if any(f.endswith(".bak") for f in present):
+            rep.add(name, "shipdata", PROBLEM,
+                    ", ".join(present) + " present (a .bak means it was written)",
+                    "delete it; the library reads it back while the add-on merges "
+                    "the same hulls again")
+        return
+    generated = [f for f in present if f not in tracked]
+    if generated:
         rep.add(name, "shipdata", PROBLEM,
-                ", ".join(stray) + " present (generated output)",
-                "delete it; it double-merges hulls from run 2 onward")
+                ", ".join(generated) + " present and untracked (generated output)",
+                "delete it; the library reads it back while the add-on merges "
+                "the same hulls again")
+    if tracked:
+        rep.add(name, "shipdata", OK,
+                ", ".join(sorted(tracked)) + " (committed - authored, left alone)")
 
 
 def _check_freshness(rep, name, mission, mastlib, lib):

@@ -117,13 +117,26 @@ class DoctorTests(unittest.TestCase):
 
     def test_generated_shipdata_is_flagged(self):
         # The library reads it back AND the addon merges the same entries again,
-        # so hull counts double from the second run onward.
+        # so hull counts double from the second run onward. Outside a repo the
+        # tell is the `.bak` - nobody hand-authors one of those.
+        path = _mission(self.missions)
+        for f in ("extraShipData.json", "extraShipData.json.bak"):
+            with open(os.path.join(path, f), "w") as fh:
+                fh.write("{}")
+        res = self.run_doctor()
+        self.assertIn("extraShipData.json", res.output)
+        self.assertIn("!!", res.output)
+
+    def test_an_authored_shipdata_file_is_left_alone(self):
+        # LM_TestRange COMMITS one because its engine probe exists to test whether
+        # the engine re-reads that very file; VisualTestRange commits one to
+        # reproduce an art bug. Telling people to delete the instrument is worse
+        # than saying nothing.
         path = _mission(self.missions)
         with open(os.path.join(path, "extraShipData.json"), "w") as f:
             f.write("{}")
         res = self.run_doctor()
-        self.assertIn("extraShipData.json", res.output)
-        self.assertIn("double-merge", res.output)
+        self.assertNotIn("!!  shipdata", res.output)
 
     def test_it_says_where_to_go_for_content_checks(self):
         _mission(self.missions)
