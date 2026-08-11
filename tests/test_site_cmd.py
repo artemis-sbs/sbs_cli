@@ -186,13 +186,133 @@ class TestOneMissionPerProcess(_Fixture):
         self.assertEqual(self.site("--check").exit_code, 0)
 
 
+MKDOCS_YML = """\
+site_name: Demo
+
+nav:
+  - Home: index.md
+
+  - Playing:
+    - How to play: playing/index.md
+
+  - About:
+    - about.md
+
+markdown_extensions:
+  - attr_list
+  - admonition
+
+plugins:
+  - search
+"""
+
+
+class TestRecords(_Fixture):
+    def setUp(self):
+        super().setUp()
+        self.yml = os.path.join(self.mission, "mkdocs", "mkdocs.yml")
+        self.write(self.yml, MKDOCS_YML)
+
+    def records(self, *args):
+        return self.runner.invoke(cli, ["site", self.mission, "--emit", "records",
+                                        *args])
+
+    def test_a_page_is_written_per_amd_file(self):
+        res = self.records()
+        self.assertEqual(res.exit_code, 0, res.output)
+        page = os.path.join(self.mission, "mkdocs", "docs", "records",
+                            "maps", "bosses", "warlord.md")
+        self.assertTrue(os.path.isfile(page))
+        self.assertIn("{#warlord}", self.read(page))
+
+    def test_the_section_gets_an_index(self):
+        # `navigation.indexes` is on in both shipped repos, so a group without a
+        # landing page has an unclickable heading.
+        self.records()
+        self.assertTrue(os.path.isfile(os.path.join(
+            self.mission, "mkdocs", "docs", "records", "index.md")))
+
+    def test_the_nav_lands_inside_nav_and_not_in_the_plugin_list(self):
+        # `markdown_extensions:` and `plugins:` are ALSO lists of `  - ` entries.
+        # Scanning the whole file for the last one splices the nav into the plugins,
+        # which mkdocs reports as `The "..." plugin is not installed` - an error that
+        # names nothing useful and points at the wrong file.
+        self.records()
+        text = self.read(self.yml)
+        nav_at = text.index("nav:")
+        self.assertLess(nav_at, text.index("# BEGIN generated records nav"))
+        self.assertLess(text.index("# END generated records nav"),
+                        text.index("markdown_extensions:"))
+        self.assertLess(text.index("# END generated records nav"),
+                        text.index("plugins:"))
+
+    def test_the_generated_section_sits_above_the_last_top_level_entry(self):
+        self.records()
+        text = self.read(self.yml)
+        self.assertLess(text.index("# BEGIN generated records nav"),
+                        text.index("  - About:"))
+        self.assertLess(text.index("  - Home: index.md"),
+                        text.index("# BEGIN generated records nav"))
+
+    def test_a_second_run_replaces_the_marked_span_rather_than_adding_one(self):
+        self.records()
+        self.records()
+        self.assertEqual(self.read(self.yml).count("# BEGIN generated records nav"), 1)
+
+    def test_it_is_idempotent(self):
+        self.records()
+        self.assertEqual(self.records("--check").exit_code, 0)
+
+    def test_check_catches_an_edited_record(self):
+        self.records()
+        self.write(self.amd, AMD.replace("Low: 25%", "Low: 40%"))
+        res = self.records("--check")
+        self.assertEqual(res.exit_code, 1)
+        self.assertIn("STALE", res.output)
+
+    def test_a_deleted_amd_loses_its_page(self):
+        # The drift pointing the other way: without this the site keeps serving a
+        # record the mission no longer has.
+        self.records()
+        page = os.path.join(self.mission, "mkdocs", "docs", "records",
+                            "maps", "bosses", "warlord.md")
+        self.write(os.path.join(self.mission, "extra.amd"), AMD)
+        self.records()
+        extra = os.path.join(self.mission, "mkdocs", "docs", "records", "extra.md")
+        self.assertTrue(os.path.isfile(extra))
+        os.remove(os.path.join(self.mission, "extra.amd"))
+        self.records()
+        self.assertFalse(os.path.isfile(extra))
+        self.assertTrue(os.path.isfile(page))
+
+    def test_no_nav_leaves_mkdocs_yml_alone(self):
+        before = self.read(self.yml)
+        self.records("--no-nav")
+        self.assertEqual(self.read(self.yml), before)
+
+    def test_the_docs_own_tree_is_never_published_as_records(self):
+        # mkdocs/ holds the documentation; publishing an .amd from in there would file
+        # a doc fixture under the mission's own records.
+        self.write(os.path.join(self.mission, "mkdocs", "docs", "sample.amd"), AMD)
+        self.records()
+        self.assertFalse(os.path.isfile(os.path.join(
+            self.mission, "mkdocs", "docs", "records", "mkdocs", "docs", "sample.md")))
+
+    def test_layout_can_exclude_a_file(self):
+        self.write(os.path.join(self.mission, "mkdocs", "records.json"),
+                   '{"exclude": ["maps/bosses/*.amd"]}')
+        res = self.records()
+        self.assertNotEqual(res.exit_code, 0)   # nothing left to publish
+        self.assertIn("no .amd files", res.output)
+
+
 class TestTheShippedRepos(unittest.TestCase):
     """The repos next door must actually be up to date.
 
     Each check runs in its OWN interpreter - both because that is how `sbs site` is
     really invoked, and because sharing one would trip the one-mission guard above."""
 
-    def _check(self, repo):
+    def _check(self, repo, emit="includes"):
         import subprocess
         path = os.path.join(_REAL_MISSIONS, repo)
         if not os.path.isdir(os.path.join(path, "mkdocs", "docs")):
@@ -203,13 +323,14 @@ class TestTheShippedRepos(unittest.TestCase):
                 "import main\n"
                 "from click.testing import CliRunner\n"
                 "from cli_cmd import cli\n"
-                "r = CliRunner().invoke(cli, ['site', sys.argv[2], '--check'])\n"
+                "r = CliRunner().invoke(cli, ['site', sys.argv[2],\n"
+                "                             '--emit', sys.argv[3], '--check'])\n"
                 "print(r.output)\n"
                 "sys.exit(r.exit_code)\n")
-        res = subprocess.run([sys.executable, "-c", code, src, path],
+        res = subprocess.run([sys.executable, "-c", code, src, path, emit],
                              capture_output=True, text=True)
         self.assertEqual(res.returncode, 0,
-                         f"{repo} has stale generated blocks:\n"
+                         f"{repo} --emit {emit} is out of date:\n"
                          f"{res.stdout}{res.stderr}")
 
     def test_sbs_utils_docs_are_current(self):
@@ -220,6 +341,12 @@ class TestTheShippedRepos(unittest.TestCase):
 
     def test_open_universe_docs_are_current(self):
         self._check("OpenUniverse")
+
+    def test_legendary_missions_records_are_current(self):
+        self._check("LegendaryMissions", "records")
+
+    def test_open_universe_records_are_current(self):
+        self._check("OpenUniverse", "records")
 
 
 if __name__ == "__main__":

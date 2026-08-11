@@ -5,12 +5,20 @@ through four editorial lenses. Two nouns, two commands: `docs` makes a thing you
 `site` makes a thing you browse. Folding this in as a flag would have made every
 `docs` option mean two things.
 
-    sbs site FOLDER --emit includes    refill <!-- amd:begin ... --> blocks in a docs tree
+    sbs site FOLDER --emit includes   refill <!-- amd:begin ... --> blocks in a docs tree
+    sbs site FOLDER --emit records    write a page per .amd, and the nav to reach it
 
 `--emit includes` is the drift killer. Documentation pages that explain AMD have to
 show some, and every one of those examples was hand-copied. One copy taught `When:` as
 the completion trigger when it is an alias of `Starts when:`, the START one - a quest
 written from that page never completes. See `procedural/amd_include.py`.
+
+`--emit records` publishes what nothing published before: roughly 380 records across
+the two shipped missions - race lore, console help, sides, bar patrons - had no web
+presence at all. Pages are written INTO the mission's own repo and committed there,
+because the parent site stitches those repos in with the multirepo plugin, which
+clones them from GitHub at build time; anything generated only in the parent would
+never appear.
 
 `--check` renders without writing and exits non-zero if anything WOULD change. That is
 what makes "edited an .amd and forgot to regenerate" a red build instead of the silent
@@ -20,6 +28,8 @@ Discovery mirrors `docs_cmd` exactly, including `_load_mission_vocabulary` - wit
 it a mission's own registered field names are undeclared when the schema is consulted,
 and every one of them renders untyped.
 """
+import glob as _glob
+import json
 import os
 import sys
 
@@ -30,6 +40,9 @@ from lint_cmd import (_load_mission_vocabulary, _prefer_working_tree_sbs_utils,
                       sbs_lib_import)
 
 _LOADED_MISSION = None
+
+NAV_BEGIN = "  # BEGIN generated records nav"
+NAV_END = "  # END generated records nav"
 
 
 def _load(missions, mission):
@@ -56,14 +69,119 @@ def _load(missions, mission):
     _prefer_working_tree_sbs_utils(missions, mission)
     sys.path.insert(0, mission)
     try:
-        from sbs_utils.procedural import amd_include
+        from sbs_utils.procedural import amd_core, amd_include, amd_markdown
     except Exception:
         sbs_lib_import(missions, mission)
-        from sbs_utils.procedural import amd_include
+        from sbs_utils.procedural import amd_core, amd_include, amd_markdown
     # AFTER sbs_utils resolves and BEFORE any file is read.
     _load_mission_vocabulary(mission)
     _LOADED_MISSION = mission
-    return amd_include
+    return amd_core, amd_include, amd_markdown
+
+
+def _layout(mission, given):
+    """Per-repo choices - page titles, which document splits, what to skip - live in
+    the repo as `mkdocs/records.json`, the way `gen_icon_gallery.py` keeps its per-page
+    knowledge in the repo it serves. One implementation, many opinions."""
+    path = given or os.path.join(mission, "mkdocs", "records.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _documents(mission, amd_core, layout):
+    """Every .amd the mission owns, parsed, in path order.
+
+    `__lib__` holds OTHER missions' shipped libraries and `mkdocs` holds the
+    documentation itself - publishing either would put someone else's records under
+    this mission's name."""
+    skip = tuple((layout or {}).get("exclude", ()))
+    docs = []
+    for path in sorted(_glob.glob(os.path.join(mission, "**", "*.amd"),
+                                  recursive=True)):
+        rel = os.path.relpath(path, mission).replace(os.sep, "/")
+        if rel.startswith("__lib__/") or rel.startswith("mkdocs/"):
+            continue
+        if any(_glob.fnmatch.fnmatch(rel, pat) for pat in skip):
+            continue
+        doc = amd_core.parse(None, file_path=path)
+        doc.rel_path = rel
+        docs.append(doc)
+    return docs
+
+
+def _nav_yaml(pages, root, title):
+    """The generated nav block, grouped by the mission's own folder layout.
+
+    Spliced as TEXT between two comment markers rather than round-tripped through a
+    YAML library, so every comment and every bit of formatting elsewhere in the file
+    survives untouched - the same reason `gen_icon_gallery.py` splices text."""
+    groups = {}
+    for page in pages:
+        folder = os.path.dirname(page["path"]) or ""
+        groups.setdefault(folder, []).append(page)
+    lines = [NAV_BEGIN, f"  - {title}:", f"    - {root}/index.md"]
+    for folder in sorted(groups):
+        entries = groups[folder]
+        if folder:
+            lines.append(f"    - {_folder_title(folder)}:")
+            indent = "      "
+        else:
+            indent = "    "
+        for page in entries:
+            lines.append(f'{indent}- "{_yaml_str(page["title"])}": '
+                         f'{root}/{page["path"]}')
+    lines.append(NAV_END)
+    return "\n".join(lines)
+
+
+def _folder_title(folder):
+    return folder.rsplit("/", 1)[-1].replace("_", " ").replace("-", " ").title()
+
+
+def _yaml_str(text):
+    return str(text).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _splice_nav(path, block):
+    """Replace the marked span, or add it just before the LAST top-level nav entry
+    (conventionally `About`), so a generated section never lands above `Home`."""
+    with open(path, encoding="utf-8", newline="") as f:
+        raw = f.read()
+    crlf = "\r\n" in raw
+    body = raw.replace("\r\n", "\n")
+    if NAV_BEGIN in body and NAV_END in body:
+        head, _, rest = body.partition(NAV_BEGIN)
+        _, _, tail = rest.partition(NAV_END)
+        body = head + block + tail
+    else:
+        lines = body.split("\n")
+        try:
+            nav_at = next(i for i, l in enumerate(lines) if l.rstrip() == "nav:")
+        except StopIteration:
+            raise click.ClickException(f"{path} has no `nav:` to splice into")
+        # BOUND THE SEARCH TO THE nav BLOCK. `markdown_extensions:` and `plugins:` are
+        # also lists of `  - ` entries, so scanning the whole file for the last one
+        # splices the nav into the plugin list - which mkdocs reports as
+        # `The "The mission data" plugin is not installed`, naming nothing useful.
+        nav_end = next((i for i in range(nav_at + 1, len(lines))
+                        if lines[i].strip() and not lines[i].startswith(" ")),
+                       len(lines))
+        tops = [i for i in range(nav_at + 1, nav_end) if lines[i].startswith("  - ")]
+        if not tops:
+            raise click.ClickException(f"{path} has an empty `nav:`")
+        # Before the LAST top-level entry (conventionally `About`), so a generated
+        # section never lands above `Home`.
+        at = tops[-1]
+        lines = lines[:at] + block.split("\n") + [""] + lines[at:]
+        body = "\n".join(lines)
+    new = body.replace("\n", "\r\n") if crlf else body
+    if new == raw:
+        return False
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(new)
+    return True
 
 
 def _docs_dirs(mission, given):
@@ -85,21 +203,38 @@ def _pages(roots):
 
 @cli.command(short_help="Generate documentation from a mission's AMD")
 @click.argument("folder", default=".")
-@click.option("--emit", type=click.Choice(["includes"]), default="includes",
-              show_default=True,
-              help="What to generate. `includes` refills amd:begin blocks in place.")
+@click.option("--emit", type=click.Choice(["includes", "records"]),
+              default="includes", show_default=True,
+              help="`includes` refills amd:begin blocks in place; "
+                   "`records` writes a page per .amd file.")
 @click.option("--docs", "docs_dir", default=None,
               help="The docs tree to process. Default: <folder>/mkdocs/docs.")
+@click.option("--root", default="records", show_default=True,
+              help="Subfolder of the docs tree that record pages are written to.")
+@click.option("--layout", "layout_path", default=None,
+              help="Per-repo choices. Default: <folder>/mkdocs/records.json.")
+@click.option("--profile", type=click.Choice(["author", "player"]), default="author",
+              show_default=True, help="`player` omits author notes and choice targets.")
+@click.option("--nav", "nav_path", default=None,
+              help="mkdocs.yml to splice the generated nav into. "
+                   "Default: <folder>/mkdocs/mkdocs.yml.")
+@click.option("--no-nav", is_flag=True, help="Write pages but leave mkdocs.yml alone.")
 @click.option("--check", is_flag=True,
-              help="Write nothing; exit 1 if any generated block is out of date.")
+              help="Write nothing; exit 1 if anything would change.")
 @click.option("-q", "--quiet", is_flag=True, help="Only report changes and problems.")
-def site(folder, emit, docs_dir, check, quiet):
+def site(folder, emit, docs_dir, root, layout_path, profile, nav_path, no_nav,
+         check, quiet):
     mission = os.path.abspath(folder)
     missions = os.path.dirname(mission)
     if not os.path.isdir(mission):
         raise click.ClickException(f"no such folder: {folder}")
 
-    amd_include = _load(missions, mission)
+    amd_core, amd_include, amd_markdown = _load(missions, mission)
+
+    if emit == "records":
+        return _emit_records(mission, docs_dir, root, layout_path, profile,
+                             nav_path, no_nav, check, quiet,
+                             amd_core, amd_markdown)
 
     roots = _docs_dirs(mission, docs_dir)
     if not roots:
@@ -153,3 +288,124 @@ def site(folder, emit, docs_dir, check, quiet):
     if not quiet:
         click.echo(f"{blocks} generated block(s) checked"
                    + ("" if check else f", {len(written)} page(s) updated"))
+
+
+def _emit_records(mission, docs_dir, root, layout_path, profile, nav_path, no_nav,
+                  check, quiet, amd_core, amd_markdown):
+    """A page per .amd file, plus an index, plus the nav entries that reach them.
+
+    These pages are COMMITTED into the mission's own repo. The parent documentation
+    site stitches LM and OU in with the multirepo plugin, which clones them from
+    GitHub at build time - so anything generated only in the parent would never
+    appear on the site."""
+    layout = _layout(mission, layout_path)
+    docs_root = (os.path.abspath(docs_dir) if docs_dir
+                 else os.path.join(mission, "mkdocs", "docs"))
+    if not os.path.isdir(docs_root):
+        raise click.ClickException(f"no docs tree at {docs_root}")
+
+    documents = _documents(mission, amd_core, layout)
+    if not documents:
+        raise click.ClickException(f"no .amd files found under {mission}")
+    pages = amd_markdown.amd_markdown_site(documents, layout=layout)
+
+    out_root = os.path.join(docs_root, root)
+    written, stale, dangling = [], [], []
+    wanted = {}
+    for page in pages:
+        ctx = amd_markdown.amd_markdown_context(pages, page, profile=profile)
+        wanted[page["path"]] = amd_markdown.amd_markdown_page(page, ctx)
+        dangling += ctx["dangling"]
+    wanted["index.md"] = _index_page(pages, layout, mission)
+
+    for rel, text in sorted(wanted.items()):
+        target = os.path.join(out_root, rel.replace("/", os.sep))
+        current = None
+        if os.path.isfile(target):
+            with open(target, encoding="utf-8", newline="") as f:
+                current = f.read().replace("\r\n", "\n")
+        if current == text:
+            continue
+        (stale if check else written).append(rel)
+        if not check:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+
+    # A record deleted from the mission must lose its page, or the site keeps serving
+    # a record that no longer exists - the drift this whole command exists to end,
+    # pointing the other way.
+    orphans = _orphans(out_root, wanted)
+    for rel in orphans:
+        if check:
+            stale.append(f"{rel} (no longer generated)")
+        else:
+            os.remove(os.path.join(out_root, rel.replace("/", os.sep)))
+            written.append(f"{rel} (removed)")
+
+    nav_changed = False
+    if not no_nav:
+        nav_file = nav_path or os.path.join(mission, "mkdocs", "mkdocs.yml")
+        if not os.path.isfile(nav_file):
+            raise click.ClickException(f"no mkdocs.yml at {nav_file}")
+        block = _nav_yaml(pages, root, layout.get("nav_title", "The mission data"))
+        if check:
+            with open(nav_file, encoding="utf-8", newline="") as f:
+                nav_changed = block not in f.read().replace("\r\n", "\n")
+            if nav_changed:
+                stale.append(os.path.relpath(nav_file, mission))
+        else:
+            nav_changed = _splice_nav(nav_file, block)
+            if nav_changed:
+                written.append(os.path.relpath(nav_file, mission))
+
+    if not quiet:
+        for rel in written:
+            click.echo(f"wrote  {rel}")
+    for rel in stale:
+        click.echo(f"STALE  {rel}")
+
+    distinct = sorted(set(dangling))
+    if distinct and not quiet:
+        # Named, never silent. An unresolved target renders as plain text rather than
+        # a link, which is right for a MAST label that is not an AMD record and wrong
+        # for a genuine typo - and only a person can tell those apart.
+        click.echo(f"{len(distinct)} unresolved reference(s) rendered as plain text: "
+                   + ", ".join(distinct[:8])
+                   + (" ..." if len(distinct) > 8 else ""))
+    if check and stale:
+        raise click.ClickException(
+            f"{len(stale)} generated file(s) are out of date - run `sbs site` again")
+    if not quiet:
+        click.echo(f"{len(pages)} page(s) from {len(documents)} .amd file(s)"
+                   + ("" if check else f", {len(written)} written"))
+
+
+def _orphans(out_root, wanted):
+    if not os.path.isdir(out_root):
+        return []
+    out = []
+    for dirpath, _dirs, names in os.walk(out_root):
+        for name in names:
+            if not name.endswith(".md"):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, name),
+                                  out_root).replace(os.sep, "/")
+            if rel not in wanted:
+                out.append(rel)
+    return sorted(out)
+
+
+def _index_page(pages, layout, mission):
+    """The section's landing page - `navigation.indexes` is on in both repos, so the
+    group needs one or its heading is not clickable."""
+    title = layout.get("nav_title", "The mission data")
+    intro = layout.get("index_intro") or (
+        "Every record this mission ships, generated from its `.amd` files. These "
+        "pages are written by `sbs site` - edit the `.amd`, not the page.")
+    rows = ["| Page | Records | Source |", "|---|---|---|"]
+    for page in pages:
+        src = page.get("uri") or ""
+        rows.append(f'| [{page["title"]}]({page["path"]}) | {len(page["nodes"])} '
+                    f'| `{src}` |')
+    return "\n".join([f"# {title}", "", intro, ""] + rows) + "\n"
