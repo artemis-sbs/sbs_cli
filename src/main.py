@@ -18,6 +18,7 @@ from doctor_cmd import doctor
 from fmt_cmd import fmt
 from dap_cmd import dap
 from swap_cmd import swap
+from site_cmd import site
 import click
 
 
