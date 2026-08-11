@@ -94,13 +94,21 @@ class FaceBaker:
     # --- baking -------------------------------------------------------------
 
     def bake(self, spec):
-        """`face://...` spec -> a URL for the written PNG, or None."""
+        """`face://...` spec -> a URL for the written PNG, or None.
+
+        AN ALREADY-BAKED PNG NEEDS NO ATLAS. The name is content-addressed from the
+        spec alone, so a face that has been composited once and committed can be
+        referenced by anyone - which is what makes the generated pages reproducible on
+        a machine with no Cosmos install, CI included. Without this, CI regenerates
+        every face as a text note, disagrees with the committed page, and reports drift
+        that is not there.
+
+        The one case that still fails is a NEW face on a machine that cannot composite
+        it, and that failing is correct: nobody has produced that art yet."""
         layers, height = _parse(spec, self.height)
         if not layers:
             return None
-        digest = hashlib.sha1(
-            f"{spec}|{height}".encode("utf-8")).hexdigest()[:12]
-        name = f"{digest}.png"
+        name = self._name_for(spec)
         url = f"{self.url_prefix}/{name}"
         target = os.path.join(self.out_dir, name)
         if name in self.baked:
@@ -108,6 +116,9 @@ class FaceBaker:
         if os.path.isfile(target):
             self.baked[name] = spec
             return url
+        if not self.capable():
+            self.failed.append(spec)
+            return None
         image = self._composite(layers, height)
         if image is None:
             self.failed.append(spec)
@@ -116,6 +127,17 @@ class FaceBaker:
         image.save(target, optimize=True)
         self.baked[name] = spec
         return url
+
+    def _name_for(self, spec):
+        """The PNG's filename, from the SPEC alone - no atlas, no PIL, no compositing.
+
+        Content-addressed for two reasons: an unchanged face is byte-identical run to
+        run, so the committed PNGs never churn; and the name can be computed by anyone,
+        which is what lets a machine that cannot composite still reference art someone
+        else already baked."""
+        _layers, height = _parse(spec, self.height)
+        digest = hashlib.sha1(f"{spec}|{height}".encode("utf-8")).hexdigest()[:12]
+        return f"{digest}.png"
 
     def _composite(self, layers, height):
         from PIL import Image, ImageChops

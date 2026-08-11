@@ -164,6 +164,35 @@ class TestCapability(unittest.TestCase):
         self.assertFalse(os.path.isdir(out),
                          "an incapable baker created a directory it never filled")
 
+    def test_an_already_baked_face_resolves_with_no_atlas_at_all(self):
+        """The property that makes the generated pages reproducible off a machine with
+        no Cosmos install - CI, and anyone who only edits prose.
+
+        A face PNG is named from its SPEC, so once composited and committed it can be
+        referenced without ever opening an atlas. Without this, CI regenerates every
+        face as a text note, disagrees with the committed page and reports drift that
+        is not there."""
+        from face_bake import FaceBaker
+
+        class NoAssets:
+            def find(self, _name):
+                return None
+
+        out = os.path.join(self.tmp.name, "f")
+        spec = "arv #ffffff 0 0;"
+        baker = FaceBaker(NoAssets(), out, "m/f")
+        self.assertFalse(baker.capable())
+        self.assertIsNone(baker.bake(spec), "a NEW face must still fail loudly")
+
+        # Now pretend a developer with the atlases composited and committed it.
+        os.makedirs(out, exist_ok=True)
+        name = os.path.basename(FaceBaker(NoAssets(), out, "m/f")
+                                ._name_for(spec))
+        with open(os.path.join(out, name), "wb") as f:
+            f.write(b"\x89PNG\r\n\x1a\n")
+        again = FaceBaker(NoAssets(), out, "m/f")
+        self.assertEqual(again.bake(spec), f"m/f/{name}")
+
 
 if __name__ == "__main__":
     unittest.main()

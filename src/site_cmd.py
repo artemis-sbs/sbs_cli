@@ -443,12 +443,16 @@ def _media_renderer(mission, docs_root, root, faces, check):
     baker = None
     if faces == "bake":
         from face_bake import FaceBaker
-        candidate = FaceBaker(assets, os.path.join(media_root, "faces"),
-                              "media/faces")
-        baker = candidate if candidate.capable() else None
-        if baker is None and not check:
-            click.echo("faces: not composited (PIL or the race atlases are "
-                       "unavailable) - pages will name them instead", err=True)
+        # Constructed even when it cannot composite: an already-baked PNG is found by
+        # its content-addressed name and referenced without ever opening an atlas,
+        # which is what lets a machine with no Cosmos install (CI) reproduce these
+        # pages exactly. Only a NEW face needs the atlases, and failing on that is
+        # correct - nobody has produced that art yet.
+        baker = FaceBaker(assets, os.path.join(media_root, "faces"), "media/faces")
+        if not baker.capable() and not check:
+            click.echo("faces: cannot composite (PIL or the race atlases are "
+                       "unavailable) - already-baked faces still resolve, new ones "
+                       "will be named instead", err=True)
 
     def render(block, ctx):
         ns = (block.get("ns") or "").lower()
@@ -555,8 +559,7 @@ def _media_renderer_for_site(mission, media_dir, faces):
     baker = None
     if faces == "bake":
         from face_bake import FaceBaker
-        candidate = FaceBaker(assets, os.path.join(media_dir, "faces"), "media/faces")
-        baker = candidate if candidate.capable() else None
+        baker = FaceBaker(assets, os.path.join(media_dir, "faces"), "media/faces")
 
     def render(block, ctx):
         ns = (block.get("ns") or "").lower()
