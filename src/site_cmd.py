@@ -219,11 +219,14 @@ def _pages(roots):
               help="mkdocs.yml to splice the generated nav into. "
                    "Default: <folder>/mkdocs/mkdocs.yml.")
 @click.option("--no-nav", is_flag=True, help="Write pages but leave mkdocs.yml alone.")
+@click.option("--faces", type=click.Choice(["bake", "note"]), default="bake",
+              show_default=True,
+              help="`bake` composites face:// art to PNG; `note` just says it is there.")
 @click.option("--check", is_flag=True,
               help="Write nothing; exit 1 if anything would change.")
 @click.option("-q", "--quiet", is_flag=True, help="Only report changes and problems.")
 def site(folder, emit, docs_dir, root, layout_path, profile, nav_path, no_nav,
-         check, quiet):
+         faces, check, quiet):
     mission = os.path.abspath(folder)
     missions = os.path.dirname(mission)
     if not os.path.isdir(mission):
@@ -233,7 +236,7 @@ def site(folder, emit, docs_dir, root, layout_path, profile, nav_path, no_nav,
 
     if emit == "records":
         return _emit_records(mission, docs_dir, root, layout_path, profile,
-                             nav_path, no_nav, check, quiet,
+                             nav_path, no_nav, faces, check, quiet,
                              amd_core, amd_markdown)
 
     roots = _docs_dirs(mission, docs_dir)
@@ -291,7 +294,7 @@ def site(folder, emit, docs_dir, root, layout_path, profile, nav_path, no_nav,
 
 
 def _emit_records(mission, docs_dir, root, layout_path, profile, nav_path, no_nav,
-                  check, quiet, amd_core, amd_markdown):
+                  faces, check, quiet, amd_core, amd_markdown):
     """A page per .amd file, plus an index, plus the nav entries that reach them.
 
     These pages are COMMITTED into the mission's own repo. The parent documentation
@@ -310,10 +313,12 @@ def _emit_records(mission, docs_dir, root, layout_path, profile, nav_path, no_na
     pages = amd_markdown.amd_markdown_site(documents, layout=layout)
 
     out_root = os.path.join(docs_root, root)
+    media = _media_renderer(mission, docs_root, root, faces, check)
     written, stale, dangling = [], [], []
     wanted = {}
     for page in pages:
-        ctx = amd_markdown.amd_markdown_context(pages, page, profile=profile)
+        ctx = amd_markdown.amd_markdown_context(pages, page, profile=profile,
+                                                media=media)
         wanted[page["path"]] = amd_markdown.amd_markdown_page(page, ctx)
         dangling += ctx["dangling"]
     wanted["index.md"] = _index_page(pages, layout, mission)
@@ -409,3 +414,65 @@ def _index_page(pages, layout, mission):
         rows.append(f'| [{page["title"]}]({page["path"]}) | {len(page["nodes"])} '
                     f'| `{src}` |')
     return "\n".join([f"# {title}", "", intro, ""] + rows) + "\n"
+
+
+def _media_renderer(mission, docs_root, root, faces, check):
+    """The `media` callable the markdown emitter injects art through.
+
+    BOTH, OR NEITHER. If a face cannot actually be composited - no PIL, no atlases -
+    every face on the page falls back to the honest note, rather than some rendering
+    and some leaving a broken image tag that claims art exists and failed to load.
+    This is `amd_render._face_capable`'s rule, and it is the reason `capable()` is
+    asked once up front instead of per image.
+
+    Copied assets live UNDER the docs tree because mkdocs cannot reference anything
+    outside `docs_dir` - the same reason `gen_icon_gallery.py` writes its sheet into
+    `docs/media/`."""
+    from sbs_utils.procedural.amd_assets import MissionAssets
+
+    assets = MissionAssets(mission, embed=False)
+    media_root = os.path.join(docs_root, root, "media")
+    baker = None
+    if faces == "bake":
+        from face_bake import FaceBaker
+        candidate = FaceBaker(assets, os.path.join(media_root, "faces"),
+                              "media/faces")
+        baker = candidate if candidate.capable() else None
+        if baker is None and not check:
+            click.echo("faces: not composited (PIL or the race atlases are "
+                       "unavailable) - pages will name them instead", err=True)
+
+    def render(block, ctx):
+        ns = (block.get("ns") or "").lower()
+        url = block.get("url") or ""
+        alt = block.get("alt") or ""
+        rel = _up_to_root(ctx)
+        if ns == "face" and baker is not None:
+            baked = baker.bake(url)
+            if baked:
+                return f"![{alt or 'face'}]({rel}{baked})"
+            return None
+        if ns == "image":
+            found = assets.find(url)
+            if found:
+                name = os.path.basename(found)
+                target = os.path.join(media_root, "art", name)
+                if not os.path.isfile(target) and not check:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with open(found, "rb") as src, open(target, "wb") as dst:
+                        dst.write(src.read())
+                return f"![{alt or url}]({rel}media/art/{name})"
+        # `ship://` is a 3D hull tag, not a picture. The .png beside a mesh is a
+        # DIFFUSE TEXTURE and prints as a near-white box, so naming it is the honest
+        # answer and the only one that does not lie about what the reader is seeing.
+        return None
+
+    return render
+
+
+def _up_to_root(ctx):
+    """`../` per folder deep, so a page in `maps/bosses/` reaches `media/` at the
+    records root. Relative, never absolute: the same pages are served from a mkdocs
+    site under a subpath and from a folder opened off disk."""
+    depth = (ctx.get("page") or {}).get("path", "").count("/")
+    return "../" * depth
