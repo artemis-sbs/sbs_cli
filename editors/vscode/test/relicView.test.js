@@ -41,7 +41,9 @@ check('a chamber draws at its authored coordinates',
   html.indexOf('cx="0" cy="0" r="900"') >= 0);
 check('...and so does its neighbour', html.indexOf('cx="3000" cy="0" r="700"') >= 0);
 check('a box draws as a rect at centre minus half-extents',
-  html.indexOf('<rect x="2700" y="2520" width="1800" height="760"') >= 0);
+  // z=2900 with hz=380: sy(2900) is -2900, so the top edge is -3280. The pre-flip
+  // expectation here was 2520, which is exactly the mirrored answer.
+  html.indexOf('<rect x="2700" y="-3280" width="1800" height="760"') >= 0);
 check('a passage joins the two chambers',
   html.indexOf('x1="3000"') >= 0 && html.indexOf('x2="0"') >= 0);
 check('a subtracted solid is dashed, so it reads as not-room',
@@ -161,6 +163,33 @@ check('the wheel zooms about the cursor',
   gh.indexOf("addEventListener('wheel'") >= 0);
 check('double-click resets, as the game radar does',
   gh.indexOf("addEventListener('dblclick'") >= 0);
+
+
+
+// ------------------------------------------------------------- +Z is UP
+// The game's radar projects `toY: wz => cyp - (wz - cz) * scale` - "+Z up" - while SVG's
+// y axis grows DOWNWARD. Getting this backwards mirrors the whole relic, which looks
+// entirely plausible and is wrong: a chamber authored north of the hub sits south of it.
+check('world z maps through sy as a negation', V.sy(2000) === -2000 && V.sy(-500) === 500);
+
+const NS = ['### [O](o)', '---', 'Loc: 0,0,0', '---', '',
+  '### [north](north)', '---', 'Relic: o', 'Chamber: 0, 0, 2000, 300', '---', '',
+  '### [south](south)', '---', 'Relic: o', 'Chamber: 0, 0, -2000, 300', '---'].join(NL);
+const nsh = V.render(R.parse(NS).relics, 'N', 0);
+check('a chamber at +Z draws ABOVE the origin',
+  nsh.indexOf('cx="0" cy="-2000" r="300"') >= 0);
+check('a chamber at -Z draws BELOW the origin',
+  nsh.indexOf('cx="0" cy="2000" r="300"') >= 0);
+
+// The webview must hand back WORLD deltas, so the model never sees screen space.
+check('the drag negates dz on its way out',
+  nsh.indexOf('dz:-drag.dz') >= 0);
+
+// A box straddles its centre, so the flip must not shift it half its own height.
+const BOXNS = ['### [O](o)', '---', 'Loc: 0,0,0', '---', '',
+  '### [hall](hall)', '---', 'Relic: o', 'Box: 0, 0, 1000, 500, 100, 200', '---'].join(NL);
+check('a box stays centred through the flip',
+  V.render(R.parse(BOXNS).relics, 'N', 0).indexOf('y="-1200"') >= 0);
 
 
 console.log('');

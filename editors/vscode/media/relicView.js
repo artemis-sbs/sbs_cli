@@ -7,8 +7,15 @@
 // Extension Development Host and an eye. Two bugs so far were visible only on screen.
 //
 // The plan is XZ, top-down, with height carried as a label rather than a third axis.
-// SVG user units ARE world units - the viewBox is the relic's own bounds - so a drag
-// delta needs no conversion beyond the CTM inverse.
+//
+// +Z IS UP, matching the game's radar - client.html projects `toY: wz => cyp - (wz - cz)
+// * scale` with the comment "+Z up". SVG's y axis grows DOWNWARD, so every world z is
+// negated on the way in (`sy`) and every drag delta is negated on the way back out.
+// Getting this backwards mirrors the whole relic, which looks plausible and is wrong -
+// a chamber authored north of the hub would sit south of it on the plan.
+//
+// Apart from that flip, SVG user units ARE world units - the viewBox is the relic's own
+// bounds - so a drag needs no conversion beyond the CTM inverse.
 //
 // The reference GRID is a square 1000u/10000u lattice, matching the game's 2D view, so a
 // chamber radius can be counted off the plan instead of read off a label. Pan and zoom
@@ -17,6 +24,9 @@
 // are the 2D view's numbers.)
 
 'use strict';
+
+/** World z -> SVG y. The radar draws +Z up; SVG grows down. */
+function sy(z) { return 0 - z; }
 
 /** How far a part reaches on the plan, for framing. */
 function extent(p) {
@@ -86,7 +96,9 @@ function bounds(rel) {
   const maxX = Math.max.apply(null, xs) + 400;
   const minZ = Math.min.apply(null, zs) - 400;
   const maxZ = Math.max.apply(null, zs) + 400;
-  return { x: minX, y: minZ, w: Math.max(maxX - minX, 1), h: Math.max(maxZ - minZ, 1) };
+  // The viewBox is in SVG space, so the flip swaps which end is the top.
+  return { x: minX, y: sy(maxZ), w: Math.max(maxX - minX, 1),
+           h: Math.max(maxZ - minZ, 1) };
 }
 
 /**
@@ -125,8 +137,10 @@ function render(relics, nonce, index, view) {
       + '" stroke="#8f98c8" stroke-opacity="' + (major ? '0.30' : '0.10')
       + '" stroke-width="' + (thin * (major ? 2 : 1)) + '"/>';
   }
+  // gz0/gz1 are already SVG y, so these lines are drawn directly - but their WORLD
+  // value is the negation, which is what decides whether a line is major.
   for (const v of gridLines(gz0, gz1, GRID_MINOR)) {
-    const major = (v % GRID_MAJOR) === 0;
+    const major = (sy(v) % GRID_MAJOR) === 0;
     grid += '<line x1="' + gx0 + '" y1="' + v + '" x2="' + gx1 + '" y2="' + v
       + '" stroke="#8f98c8" stroke-opacity="' + (major ? '0.30' : '0.10')
       + '" stroke-width="' + (thin * (major ? 2 : 1)) + '"/>';
@@ -149,7 +163,7 @@ function render(relics, nonce, index, view) {
     const a = byKey.get(p.from);
     const b = byKey.get(p.to);
     if (!a || !b) continue;         // dangling: the linter reports it, the plan omits it
-    svg += '<line x1="' + a.x + '" y1="' + a.z + '" x2="' + b.x + '" y2="' + b.z
+    svg += '<line x1="' + a.x + '" y1="' + sy(a.z) + '" x2="' + b.x + '" y2="' + sy(b.z)
       + '" stroke="#7aa2f7" stroke-width="' + ((p.radius == null ? 200 : p.radius) * 2)
       + '" stroke-opacity="0.30" stroke-linecap="round"/>';
   }
@@ -157,26 +171,26 @@ function render(relics, nonce, index, view) {
     const st = rows.get(c.key) || { row: 0, of: 1 };
     const top = (0 - fs * 0.9) + st.row * fs * 2.0;
     svg += '<g class="part" data-key="' + esc(c.key) + '" data-kind="chamber">'
-      + '<circle cx="' + c.x + '" cy="' + c.z + '" r="' + c.r + '" fill="#7aa2f7"'
+      + '<circle cx="' + c.x + '" cy="' + sy(c.z) + '" r="' + c.r + '" fill="#7aa2f7"'
       + ' fill-opacity="0.16" stroke="#7aa2f7" stroke-width="6"/>'
       + (st.of > 1
         // A leader line, so a fanned label is visibly tied to the dot it belongs to.
-        ? '<line x1="' + c.x + '" y1="' + c.z + '" x2="' + c.x + '" y2="' + (c.z + top)
+        ? '<line x1="' + c.x + '" y1="' + sy(c.z) + '" x2="' + c.x + '" y2="' + (sy(c.z) + top)
           + '" stroke="#7aa2f7" stroke-opacity="0.35" stroke-width="2"/>' : '')
-      + '<text x="' + c.x + '" y="' + c.z + '" text-anchor="middle" dy="' + top
+      + '<text x="' + c.x + '" y="' + sy(c.z) + '" text-anchor="middle" dy="' + top
       + '" font-size="' + fs + '" fill="var(--vscode-foreground)">'
       + esc(c.name || c.key) + '</text>'
-      + '<text x="' + c.x + '" y="' + c.z + '" text-anchor="middle" dy="'
+      + '<text x="' + c.x + '" y="' + sy(c.z) + '" text-anchor="middle" dy="'
       + (top + fs * 0.85) + '" font-size="' + (fs * 0.66)
       + '" fill="var(--vscode-descriptionForeground)">y ' + c.y + '  r ' + c.r
       + '</text></g>';
   }
   for (const b of rel.boxes) {
     svg += '<g class="part" data-key="' + esc(b.key) + '" data-kind="box">'
-      + '<rect x="' + (b.x - (b.hx || 0)) + '" y="' + (b.z - (b.hz || 0)) + '" width="'
+      + '<rect x="' + (b.x - (b.hx || 0)) + '" y="' + (sy(b.z) - (b.hz || 0)) + '" width="'
       + ((b.hx || 0) * 2) + '" height="' + ((b.hz || 0) * 2)
       + '" fill="#9ece6a" fill-opacity="0.16" stroke="#9ece6a" stroke-width="6"/>'
-      + '<text x="' + b.x + '" y="' + b.z + '" text-anchor="middle" dy="'
+      + '<text x="' + b.x + '" y="' + sy(b.z) + '" text-anchor="middle" dy="'
       + ((0 - fs * 0.9) + ((rows.get(b.key) || { row: 0 }).row * fs * 2.0))
       + '" font-size="' + fs + '" fill="var(--vscode-foreground)">'
       + esc(b.name || b.key) + '</text></g>';
@@ -185,16 +199,16 @@ function render(relics, nonce, index, view) {
     // Subtracted space is drawn dashed and warm, so it reads as "not room" at a glance.
     svg += '<g class="part" data-key="' + esc(s.key) + '" data-kind="solid">';
     if (s.shape === 'capsule') {
-      svg += '<line x1="' + s.ax + '" y1="' + s.az + '" x2="' + s.bx + '" y2="' + s.bz
+      svg += '<line x1="' + s.ax + '" y1="' + sy(s.az) + '" x2="' + s.bx + '" y2="' + sy(s.bz)
         + '" stroke="#f7768e" stroke-opacity="0.45" stroke-width="' + ((s.r || 100) * 2)
         + '" stroke-linecap="round"/>';
     } else if (s.shape === 'box') {
-      svg += '<rect x="' + (s.x - (s.hx || 0)) + '" y="' + (s.z - (s.hz || 0))
+      svg += '<rect x="' + (s.x - (s.hx || 0)) + '" y="' + (sy(s.z) - (s.hz || 0))
         + '" width="' + ((s.hx || 0) * 2) + '" height="' + ((s.hz || 0) * 2)
         + '" fill="#f7768e" fill-opacity="0.30" stroke="#f7768e" stroke-width="6"'
         + ' stroke-dasharray="18 10"/>';
     } else {
-      svg += '<circle cx="' + s.x + '" cy="' + s.z + '" r="' + (s.r || 100)
+      svg += '<circle cx="' + s.x + '" cy="' + sy(s.z) + '" r="' + (s.r || 100)
         + '" fill="#f7768e" fill-opacity="0.30" stroke="#f7768e" stroke-width="6"'
         + ' stroke-dasharray="18 10"/>';
     }
@@ -254,7 +268,9 @@ function render(relics, nonce, index, view) {
     + "if(pan){pan=null;svg.classList.remove('panning');report();return;}"
     + "if(!drag)return;"
     // A click to SELECT must never touch the file - only a real move writes.
-    + "if(drag.moved)vscode.postMessage({type:'move',key:drag.key,dx:drag.dx,dz:drag.dz});"
+    // SVG y grows down and world +Z is up, so the drag's dz is negated here -
+    // the message carries WORLD deltas and the model never sees screen space.
+    + "if(drag.moved)vscode.postMessage({type:'move',key:drag.key,dx:drag.dx,dz:-drag.dz});"
     + "drag.g.removeAttribute('transform');drag=null;});"
     // Zoom about the cursor, so the thing under the pointer stays under it.
     + "svg.addEventListener('wheel',function(e){e.preventDefault();"
@@ -284,5 +300,5 @@ function render(relics, nonce, index, view) {
     + '<script nonce="' + nonce + '">' + script + '</script></body></html>';
 }
 
-module.exports = { render, extent, stackRows, gridLines, bounds,
+module.exports = { render, extent, stackRows, gridLines, bounds, sy,
                    GRID_MINOR, GRID_MAJOR };
