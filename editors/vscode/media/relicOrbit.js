@@ -91,7 +91,20 @@ function script(rel, cam, vb, sel) {
     + 'svg.classList.add("panning");}'
     + 'else{sel=null;orbit={x0:e.clientX,y0:e.clientY,yaw:cam.yaw,pitch:cam.pitch};'
     + 'svg.classList.add("orbiting");draw();}e.preventDefault();});'
+    // ONE PLACE that ends a gesture, and several things that call it.
+    //
+    // A drag lives in `move`/`orbit`/`pan` between mousedown and mouseup, so anything that
+    // swallows the mouseup leaves it set - and then every later mouse movement keeps
+    // dragging with no button held, which is felt as the mouse being captured. That is not
+    // hypothetical: finishing a gizmo drag REWRITES the document, and the edit can move
+    // focus away from the webview, so the release lands somewhere that is not us.
+    + 'function endGesture(){orbit=null;pan=null;move=null;'
+    + 'svg.classList.remove("orbiting");svg.classList.remove("panning");}'
+    // The backstop: a mouse moving with NO BUTTON DOWN cannot be a drag, whatever we
+    // think we are in the middle of. Cheap, and it recovers on the very next movement
+    // rather than needing a click to clear.
     + 'window.addEventListener("mousemove",function(e){'
+    + 'if(!e.buttons&&(move||orbit||pan)){endGesture();return;}'
     + 'if(move){const q=pt(e);'
     + 'const t=along(move.h,q.x-move.x0,q.y-move.y0);'
     + 'const d=t*move.L;'
@@ -108,13 +121,23 @@ function script(rel, cam, vb, sel) {
     + 'cam.pitch=Math.max(-1.5533,Math.min(1.5533,orbit.pitch+(e.clientY-orbit.y0)*0.008));'
     + 'draw();});'
     + 'window.addEventListener("mouseup",function(){'
+    // try/finally, because the state MUST come back even if the post throws. Clearing it
+    // last was how one failed message could capture the mouse for good.
+    + 'try{'
     // Only a drag that MOVED writes. A click that merely grabbed a handle must not put an
     // edit on the undo stack.
     + 'if(move&&move.moved){vscode.postMessage({type:"field",key:move.p.key,'
     + 'patch:{x:move.p.x,y:move.p.y,z:move.p.z}});}'
     + 'if(orbit||pan)report();'
-    + 'orbit=null;pan=null;move=null;'
-    + 'svg.classList.remove("orbiting");svg.classList.remove("panning");});'
+    + '}finally{endGesture();}});'
+    // The webview losing focus mid-drag - which an edit can cause by itself - means the
+    // mouseup is going to land somewhere else. End the gesture rather than wait for a
+    // release that is never coming here.
+    + 'window.addEventListener("blur",endGesture);'
+    + 'window.addEventListener("mouseleave",endGesture);'
+    + 'svg.addEventListener("mouseleave",function(e){if(!e.buttons)endGesture();});'
+    + 'window.addEventListener("pointercancel",endGesture);'
+    + 'window.addEventListener("keydown",function(e){if(e.key==="Escape")endGesture();});'
     // Zoom about the cursor: the point under the pointer stays put, so you zoom into the
     // chamber you are looking at rather than into the middle of the relic.
     + 'svg.addEventListener("wheel",function(e){e.preventDefault();'

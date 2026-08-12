@@ -334,7 +334,20 @@ function render(relics, nonce, index, view, live, mode, cam, sel3) {
     // decided by what is under the cursor.
     + "else{show(null);pan={x0:e.clientX,y0:e.clientY,vx:vb.x,vy:vb.y};"
     + "svg.classList.add('panning');}});"
+    // ONE PLACE that ends a gesture. A drag lives between mousedown and mouseup, so
+    // anything that swallows the mouseup leaves it set - and then every later mouse
+    // movement keeps dragging with no button held, which is felt as the mouse being
+    // captured. An edit rewrites the document and can move focus off the webview, so the
+    // release genuinely does land elsewhere sometimes. Reported against the 3D view; the
+    // plan view had exactly the same hole.
+    + "function endGesture(){if(drag&&drag.g)drag.g.removeAttribute('transform');"
+    + "drag=null;pan=null;link=null;"
+    + "svg.classList.remove('panning');svg.classList.remove('linking');}"
+    + "window.addEventListener('blur',endGesture);"
     + "window.addEventListener('mousemove',function(e){"
+    // A mouse moving with NO BUTTON DOWN cannot be a drag, whatever we think we are in
+    // the middle of. Recovers on the next movement rather than needing a click.
+    + "if(!e.buttons&&(drag||pan||link)){endGesture();return;}"
     + "if(pan){const k=vb.w/svg.clientWidth;"
     + "vb.x=pan.vx-(e.clientX-pan.x0)*k;vb.y=pan.vy-(e.clientY-pan.y0)*k;apply();return;}"
     + "if(!drag)return;const p=pt(e);drag.dx=p.x-drag.x0;drag.dz=p.y-drag.z0;"
@@ -352,8 +365,10 @@ function render(relics, nonce, index, view, live, mode, cam, sel3) {
     // A click to SELECT must never touch the file - only a real move writes.
     // SVG y grows down and world +Z is up, so the drag's dz is negated here -
     // the message carries WORLD deltas and the model never sees screen space.
-    + "if(drag.moved)vscode.postMessage({type:'move',key:drag.key,dx:drag.dx,dz:-drag.dz});"
-    + "drag.g.removeAttribute('transform');drag=null;});"
+    + "try{if(drag.moved)vscode.postMessage({type:'move',key:drag.key,dx:drag.dx,dz:-drag.dz});}"
+    // finally, because the state MUST come back even if the post throws - clearing it
+    // last was how one failed message could capture the mouse for good.
+    + "finally{endGesture();}});"
     // Zoom about the cursor, so the thing under the pointer stays under it.
     + "svg.addEventListener('wheel',function(e){e.preventDefault();"
     + "const p=pt(e);const k=e.deltaY>0?1.15:1/1.15;"

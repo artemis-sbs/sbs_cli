@@ -168,6 +168,29 @@ check('the selection is reported so a redraw does not drop the gizmo',
 check('a passage is not movable - it has no position of its own',
   sel.indexOf('REL.chambers.concat(REL.boxes,REL.solids)') >= 0);
 
+// --- a gesture must always end ----------------------------------------------
+// Reported from use: after a gizmo drag the mouse felt captured and nothing else worked.
+// A drag lives between mousedown and mouseup, so ANY swallowed mouseup leaves it set and
+// every later movement keeps dragging with no button held. Finishing a drag rewrites the
+// document, and that edit can move focus off the webview - so the release really does
+// land somewhere else sometimes.
+check('one place ends a gesture', sel.indexOf('function endGesture()') >= 0);
+check('a mouse moving with no button held cancels the drag',
+  sel.indexOf('!e.buttons&&(move||orbit||pan)') >= 0);
+check('the state comes back even if the write post throws',
+  sel.indexOf('}finally{endGesture();}') >= 0);
+check('losing focus mid-drag ends it rather than waiting for a release',
+  sel.indexOf('"blur",endGesture') >= 0);
+check('so does the pointer being cancelled', sel.indexOf('pointercancel') >= 0);
+
+// The plan view has the same shape and had the same hole.
+const planScript = V.render([rel], 'N', 0);
+check('the plan view ends a gesture the same way',
+  planScript.indexOf('function endGesture()') >= 0
+  && planScript.indexOf('!e.buttons&&(drag||pan||link)') >= 0);
+check('...and clears in a finally there too',
+  planScript.indexOf('finally{endGesture();}') >= 0);
+
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.
 check('the page script parses', (() => {
