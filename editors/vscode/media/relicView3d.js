@@ -160,6 +160,22 @@ function body(rel, cam) {
   return out;
 }
 
+/** Shift a viewBox so a pivot that has moved on screen appears not to have.
+ *
+ *  The projection turns about the world ORIGIN, so orbiting swings whatever you were
+ *  looking at out of frame - worst exactly when you have zoomed in on it. Rather than
+ *  complicate the camera with a pivot, project the pivot before and after and slide the
+ *  viewBox by the difference: the pivot lands back on the same pixel and the view reads as
+ *  turning around it.
+ *
+ *  Exact, not approximate. The pivot's offset within the box is
+ *  `after - (vb + (after - before))` = `before - vb`, which is what it was.
+ */
+function holdPivot(vb, before, after) {
+  return { x: vb.x + (after.x - before.x), y: vb.y + (after.y - before.y),
+           w: vb.w, h: vb.h };
+}
+
 /** The SAME functions, as source, for the webview to run.
  *
  *  Orbiting has to redraw on every mouse move, so the projection must live in the page -
@@ -168,10 +184,11 @@ function body(rel, cam) {
  *  the tests exercise IS the code the page runs.
  */
 function clientBundle() {
-  return [esc, project, boxCorners, scene, extent, shade, body]
+  return [esc, project, boxCorners, scene, extent, shade, body, holdPivot]
     .map(function (f) { return f.toString(); }).join('\n')
     + '\nconst BOX_EDGES = ' + JSON.stringify(BOX_EDGES) + ';\n';
 }
 
 module.exports = { project, scene, body, extent, boxCorners, shade, clientBundle,
+                   holdPivot,
                    topDown, defaultCamera, BOX_EDGES };

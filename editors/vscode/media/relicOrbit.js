@@ -62,6 +62,15 @@ function script(rel, cam, vb, sel) {
     // Handle length in WORLD units, taken from the current zoom so the gizmo stays the
     // same size on screen however far in you are.
     + 'function gizL(){return vb.w*0.09;}'
+    // What the view turns AROUND. The selection if there is one - you orbit to see the
+    // thing you are working on from another side, and turning about the world origin
+    // instead swings it out of frame just as you get close to it. With nothing selected,
+    // the middle of the relic, which is still better than a corner of it.
+    + 'function pivot(){const p=partOf(sel);if(p)return p;'
+    + 'const all=REL.chambers.concat(REL.boxes);'
+    + 'if(!all.length)return{x:0,y:0,z:0};'
+    + 'let x=0,y=0,z=0;all.forEach(function(q){x+=q.x;y+=q.y;z+=q.z;});'
+    + 'return{x:x/all.length,y:y/all.length,z:z/all.length};}'
     + 'function apply(){svg.setAttribute("viewBox",vb.x+" "+vb.y+" "+vb.w+" "+vb.h);}'
     + 'function draw(){const p=partOf(sel);'
     + 'g.innerHTML=body(REL,cam)+(p?gizmoSvg(p,cam,gizL(),project)'
@@ -102,8 +111,14 @@ function script(rel, cam, vb, sel) {
     + 'if(g2&&!e.shiftKey){sel=g2.dataset.key;draw();e.preventDefault();return;}'
     + 'if(e.shiftKey){pan={x0:e.clientX,y0:e.clientY,vx:vb.x,vy:vb.y};'
     + 'svg.classList.add("panning");}'
-    + 'else{sel=null;orbit={x0:e.clientX,y0:e.clientY,yaw:cam.yaw,pitch:cam.pitch};'
-    + 'svg.classList.add("orbiting");draw();}e.preventDefault();});'
+    // Starting an orbit KEEPS the selection. You orbit in order to look at the selected
+    // thing from another side, so throwing it away is the opposite of what was asked for.
+    // A click on empty space that does NOT turn into a drag still deselects - that is
+    // handled on mouseup, where a click and a drag can be told apart.
+    + 'else{orbit={x0:e.clientX,y0:e.clientY,yaw:cam.yaw,pitch:cam.pitch,'
+    + 'p:pivot(),s:null,moved:false};'
+    + 'orbit.s=project(orbit.p,cam);'
+    + 'svg.classList.add("orbiting");}e.preventDefault();});'
     // ONE PLACE that ends a gesture, and several things that call it.
     //
     // A drag lives in `move`/`orbit`/`pan` between mousedown and mouseup, so anything that
@@ -143,6 +158,13 @@ function script(rel, cam, vb, sel) {
     // Pitch is CLAMPED to a hemisphere. Past straight down the scene mirrors and the
     // relic appears to flip, which reads as a bug rather than a rotation.
     + 'cam.pitch=Math.max(-1.5533,Math.min(1.5533,orbit.pitch+(e.clientY-orbit.y0)*0.008));'
+    + 'orbit.moved=true;'
+    // Hold the pivot still on screen. The projection itself turns about the world origin,
+    // so after each camera change the pivot has moved; shifting the viewBox by exactly
+    // that much puts it back, and the result is a view that turns around the pivot rather
+    // than one that swings it away.
+    + 'const a=project(orbit.p,cam);'
+    + 'vb=holdPivot(vb,orbit.s,a);orbit.s=a;apply();'
     + 'draw();});'
     + 'window.addEventListener("mouseup",function(){'
     // try/finally, because the state MUST come back even if the post throws. Clearing it
@@ -154,6 +176,10 @@ function script(rel, cam, vb, sel) {
     + 'patch:{x:move.p.x,y:move.p.y,z:move.p.z}});}'
     + 'if(size&&size.moved){const pa={};pa[size.field]=size.p[size.field];'
     + 'vscode.postMessage({type:"field",key:size.p.key,patch:pa});}'
+    // A press on empty space that never turned into a drag is a CLICK, and a click on
+    // nothing means deselect. Told apart here rather than at mousedown, because at
+    // mousedown the two are still the same event.
+    + 'if(orbit&&!orbit.moved&&sel){sel=null;draw();}'
     + 'if(orbit||pan)report();'
     + '}finally{endGesture();}});'
     // The webview losing focus mid-drag - which an edit can cause by itself - means the

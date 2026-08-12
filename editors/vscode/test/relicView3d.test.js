@@ -191,6 +191,38 @@ check('the plan view ends a gesture the same way',
 check('...and clears in a finally there too',
   planScript.indexOf('finally{endGesture();}') >= 0);
 
+// --- orbiting around what you are looking at --------------------------------
+// Reported from use: orbiting lost the selection, and turned about the world origin -
+// which swings the thing you are working on out of frame, worst exactly when you have
+// zoomed in on it.
+check('starting an orbit keeps the selection',
+  sel.indexOf('else{sel=null;orbit=') < 0);
+check('the view turns about the SELECTION when there is one',
+  sel.indexOf('function pivot(){const p=partOf(sel);if(p)return p;') >= 0);
+check('...and about the middle of the relic when there is not',
+  sel.indexOf('x/all.length') >= 0);
+// A press that never became a drag is a click, and a click on nothing deselects. Told
+// apart at mouseup, because at mousedown they are still the same event.
+check('a click on empty space still deselects',
+  sel.indexOf('orbit&&!orbit.moved&&sel') >= 0);
+
+// The pivot hold, as arithmetic rather than as a string match. Slide the viewBox by
+// exactly how far the pivot moved and it lands back on the same pixel.
+const P = { x: 3000, y: 0, z: 2500 };
+const vb0 = { x: -500, y: -500, w: 4000, h: 3000 };
+const c0 = { yaw: 0.6, pitch: 0.5 }, c1 = { yaw: 1.4, pitch: 0.2 };
+const pb = V3.project(P, c0), pa = V3.project(P, c1);
+const vb1 = V3.holdPivot(vb0, pb, pa);
+check('the pivot keeps its place in the frame across an orbit step',
+  near(pb.x - vb0.x, pa.x - vb1.x, 1e-9) && near(pb.y - vb0.y, pa.y - vb1.y, 1e-9));
+check('...without changing the zoom', vb1.w === vb0.w && vb1.h === vb0.h);
+check('a pivot that did not move does not move the frame', (() => {
+  const same = V3.holdPivot(vb0, pb, pb);
+  return same.x === vb0.x && same.y === vb0.y;
+})());
+check('the page uses that function, not its own copy of the sum',
+  sel.indexOf('vb=holdPivot(vb,orbit.s,a)') >= 0);
+
 // --- the navigation gizmo ---------------------------------------------------
 // Blender's control, NOT Blender's axes. Blender is Z-up; Cosmos is Y-up, because a
 // chamber's second number is altitude. Anyone reading this widget as Blender's will reach
