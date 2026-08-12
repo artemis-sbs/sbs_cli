@@ -4678,6 +4678,9 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   const nonce = () => String(Date.now()) + Math.random().toString(36).slice(2);
   let index = 0;
   let writing = false;                 // loop guard, as the GUI file editor uses
+  // The panel redraws on every document change, so without remembering the viewBox a
+  // single keystroke would throw away the author's zoom and pan.
+  let lastView: { x: number; y: number; w: number; h: number } | undefined;
 
   const panel = vscode.window.createWebviewPanel(
     'amdRelic', 'Relic Plan', column, { enableScripts: true },
@@ -4685,12 +4688,21 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   const draw = () => {
     const model = RelicModel.parse(doc.getText());
     if (index >= model.relics.length) { index = 0; }
-    panel.webview.html = RelicView.render(model.relics, nonce(), index);
+    panel.webview.html = RelicView.render(model.relics, nonce(), index, lastView);
   };
   draw();
 
   panel.webview.onDidReceiveMessage(async (msg: any) => {
-    if (msg && msg.type === 'pick') { index = Number(msg.index) || 0; draw(); return; }
+    if (msg && msg.type === 'view') {
+      lastView = { x: msg.x, y: msg.y, w: msg.w, h: msg.h };
+      return;                          // a view report is not an edit - never redraw here
+    }
+    if (msg && msg.type === 'pick') {
+      index = Number(msg.index) || 0;
+      lastView = undefined;            // a different relic deserves its own framing
+      draw();
+      return;
+    }
     if (!msg || msg.type !== 'move') { return; }
     const model = RelicModel.parse(doc.getText());
     const rel = model.relics[index];

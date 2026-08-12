@@ -122,6 +122,47 @@ check('a lone chamber has no leader line',
   V.render(R.parse(LONE).relics, 'N', 0).indexOf('stroke-opacity="0.35"') < 0);
 
 
+
+// ------------------------------------------------------------ grid, pan, zoom
+// The grid is a RULER, so its spacing has to be a number you can count in - 1000 minor,
+// 10000 major, the game's own 2D view spacing. Arbitrary spacing would make it decoration.
+check('minor spacing is 1000', V.GRID_MINOR === 1000);
+check('major spacing is 10000', V.GRID_MAJOR === 10000);
+check('lines land on round world coordinates',
+  V.gridLines(-4100, 6100, 1000)[0] === -4000);
+check('a line is emitted per step across the span',
+  V.gridLines(0, 5000, 1000).length === 6);
+check('an absurd span emits nothing rather than solid ink',
+  V.gridLines(0, 10000000, 1000).length === 0);
+
+const gh = V.render(R.parse(DOC).relics, 'N', 0);
+check('the grid is drawn', gh.indexOf('class="grid"') >= 0);
+check('the grid never eats a mouse gesture', gh.indexOf('pointer-events="none"') >= 0);
+check('major lines are drawn heavier than minor',
+  gh.indexOf('stroke-opacity="0.30"') >= 0 && gh.indexOf('stroke-opacity="0.10"') >= 0);
+check('the header says what the spacing is', gh.indexOf('grid 1k, bold 10k') >= 0);
+
+// The view must survive a redraw. The panel redraws on EVERY document change, so without
+// this a single keystroke would throw away your zoom and pan.
+const VIEW = { x: 100, y: 200, w: 3000, h: 1500 };
+const vh2 = V.render(R.parse(DOC).relics, 'N', 0, VIEW);
+check('a supplied view is honoured', vh2.indexOf('viewBox="100 200 3000 1500"') >= 0);
+check('no view falls back to the relic bounds',
+  V.render(R.parse(DOC).relics, 'N', 0).indexOf('viewBox="100 200 3000 1500"') < 0);
+check('a nonsense view is ignored rather than blanking the panel',
+  V.render(R.parse(DOC).relics, 'N', 0, { x: 0, y: 0, w: 0, h: 0 })
+    .indexOf('viewBox="0 0 0 0"') < 0);
+check('the view is reported back so the panel can restore it',
+  gh.indexOf("type:'view'") >= 0);
+
+check('dragging the background pans, dragging a part moves it',
+  gh.indexOf("e.target.closest('.part')") >= 0 && gh.indexOf('panning') >= 0);
+check('the wheel zooms about the cursor',
+  gh.indexOf("addEventListener('wheel'") >= 0);
+check('double-click resets, as the game radar does',
+  gh.indexOf("addEventListener('dblclick'") >= 0);
+
+
 console.log('');
 if (failures) { console.log(failures + ' failure(s)'); process.exit(1); }
 console.log('all relic view tests passed');

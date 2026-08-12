@@ -4,11 +4,17 @@
 // no I/O - so a plain node test can assert that a chamber lands at the coordinates it was
 // authored at, which is the half of this editor that unit tests can actually reach.
 // Everything else (does the drag feel right, does the panel look right) needs an
-// Extension Development Host and an eye.
+// Extension Development Host and an eye. Two bugs so far were visible only on screen.
 //
 // The plan is XZ, top-down, with height carried as a label rather than a third axis.
-// SVG user units ARE world units - the viewBox is set to the relic's own bounds - so a
-// drag delta needs no conversion beyond the CTM inverse.
+// SVG user units ARE world units - the viewBox is the relic's own bounds - so a drag
+// delta needs no conversion beyond the CTM inverse.
+//
+// The reference GRID is a square 1000u/10000u lattice, matching the game's 2D view, so a
+// chamber radius can be counted off the plan instead of read off a label. Pan and zoom
+// follow the same view's gestures - drag to pan, wheel to zoom, DOUBLE-CLICK TO RESET -
+// so the muscle memory carries over. (The browser mock's 3D grids use 5000u cells; these
+// are the 2D view's numbers.)
 
 'use strict';
 
@@ -23,14 +29,27 @@ function extent(p) {
   return p.r || 100;
 }
 
+// Grid spacing, matching the game's own views: a minor line every 1000 units and a major
+// every 10000, so a chamber radius can be counted off the plan rather than read off a
+// label. (The browser mock's 3D grids use 5000u cells; these are the 2D view's numbers.)
+const GRID_MINOR = 1000;
+const GRID_MAJOR = 10000;
+
+/** Grid lines for a span, thinned out so a huge relic does not become solid ink. */
+function gridLines(min, max, step) {
+  const out = [];
+  if ((max - min) / step > 400) return out;      // absurd density helps nobody
+  const first = Math.ceil(min / step) * step;
+  for (let v = first; v <= max; v += step) out.push(v);
+  return out;
+}
 
 /**
  * Which parts share a spot on the plan, and in what order to stack their labels.
  *
  * A top-down plan cannot show a vertical stack: a shaft directly above a hub is the SAME
  * DOT, and without this their names and readouts print on top of each other into mush.
- * Returns key -> row index, ordered by height so the labels read like an elevation with
- * the highest chamber on top.
+ * Returns key -> row, ordered by height so the labels read like an elevation.
  */
 function stackRows(parts) {
   const groups = new Map();
@@ -53,21 +72,8 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-/**
- * Render the plan.
- *
- * `relics` is relicModel.parse(...).relics; `index` picks which one.
- * Returns a complete HTML document for a webview.
- */
-function render(relics, nonce, index) {
-  const rel = relics[index];
-  if (!rel) {
-    return '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);'
-      + 'color:var(--vscode-foreground);padding:12px"><p>No relic in this file.</p>'
-      + '<p style="opacity:.7">A relic is a record in a <code>Relics</code> section '
-      + 'carrying a <code>Loc:</code>; its chambers are records carrying '
-      + '<code>Relic:</code>.</p></body></html>';
-  }
+/** The relic's own bounds, before any zoom or pan. */
+function bounds(rel) {
   const placed = [].concat(rel.chambers, rel.boxes, rel.solids);
   const xs = [0];
   const zs = [0];
@@ -80,9 +86,59 @@ function render(relics, nonce, index) {
   const maxX = Math.max.apply(null, xs) + 400;
   const minZ = Math.min.apply(null, zs) - 400;
   const maxZ = Math.max.apply(null, zs) + 400;
-  const w = Math.max(maxX - minX, 1);
-  const h = Math.max(maxZ - minZ, 1);
-  const fs = Math.max(w, h) / 42;
+  return { x: minX, y: minZ, w: Math.max(maxX - minX, 1), h: Math.max(maxZ - minZ, 1) };
+}
+
+/**
+ * Render the plan.
+ *
+ * `view` is an optional {x, y, w, h} viewBox - the webview reports its own after a zoom
+ * or pan so the panel can be redrawn without throwing away where you were looking. A
+ * redraw happens on every keystroke in the document, so losing it would make the plan
+ * unusable while editing.
+ */
+function render(relics, nonce, index, view) {
+  const rel = relics[index];
+  if (!rel) {
+    return '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);'
+      + 'color:var(--vscode-foreground);padding:12px"><p>No relic in this file.</p>'
+      + '<p style="opacity:.7">A relic is a record in a <code>Relics</code> section '
+      + 'carrying a <code>Loc:</code>; its chambers are records carrying '
+      + '<code>Relic:</code>.</p></body></html>';
+  }
+  const base = bounds(rel);
+  const vb = (view && isFinite(view.w) && view.w > 0) ? view : base;
+  const fs = Math.max(base.w, base.h) / 42;
+
+  // ---- reference grid ------------------------------------------------------
+  // Drawn over the relic's own bounds rather than the current view, so panning moves the
+  // world under a grid that stays put in world space - which is what makes it a ruler.
+  const gx0 = base.x;
+  const gx1 = base.x + base.w;
+  const gz0 = base.y;
+  const gz1 = base.y + base.h;
+  const thin = Math.max(base.w, base.h) / 2000;
+  let grid = '<g class="grid" pointer-events="none">';
+  for (const v of gridLines(gx0, gx1, GRID_MINOR)) {
+    const major = (v % GRID_MAJOR) === 0;
+    grid += '<line x1="' + v + '" y1="' + gz0 + '" x2="' + v + '" y2="' + gz1
+      + '" stroke="#8f98c8" stroke-opacity="' + (major ? '0.30' : '0.10')
+      + '" stroke-width="' + (thin * (major ? 2 : 1)) + '"/>';
+  }
+  for (const v of gridLines(gz0, gz1, GRID_MINOR)) {
+    const major = (v % GRID_MAJOR) === 0;
+    grid += '<line x1="' + gx0 + '" y1="' + v + '" x2="' + gx1 + '" y2="' + v
+      + '" stroke="#8f98c8" stroke-opacity="' + (major ? '0.30' : '0.10')
+      + '" stroke-width="' + (thin * (major ? 2 : 1)) + '"/>';
+  }
+  // Label the major lines, so the ruler says what it is measuring.
+  for (const v of gridLines(gx0, gx1, GRID_MAJOR)) {
+    if (v === 0) continue;
+    grid += '<text x="' + v + '" y="' + gz0 + '" dy="' + (fs * 0.9) + '" font-size="'
+      + (fs * 0.6) + '" fill="#8f98c8" fill-opacity="0.6" text-anchor="middle">'
+      + v + '</text>';
+  }
+  grid += '</g>';
 
   const byKey = new Map([].concat(rel.chambers, rel.boxes).map((p) => [p.key, p]));
   const rows = stackRows([].concat(rel.chambers, rel.boxes));
@@ -99,13 +155,11 @@ function render(relics, nonce, index) {
   }
   for (const c of rel.chambers) {
     const st = rows.get(c.key) || { row: 0, of: 1 };
-    // One label block per part, pushed down a line for each part already at this spot.
     const top = (0 - fs * 0.9) + st.row * fs * 2.0;
-    const stacked = st.of > 1;
     svg += '<g class="part" data-key="' + esc(c.key) + '" data-kind="chamber">'
       + '<circle cx="' + c.x + '" cy="' + c.z + '" r="' + c.r + '" fill="#7aa2f7"'
       + ' fill-opacity="0.16" stroke="#7aa2f7" stroke-width="6"/>'
-      + (stacked
+      + (st.of > 1
         // A leader line, so a fanned label is visibly tied to the dot it belongs to.
         ? '<line x1="' + c.x + '" y1="' + c.z + '" x2="' + c.x + '" y2="' + (c.z + top)
           + '" stroke="#7aa2f7" stroke-opacity="0.35" stroke-width="2"/>' : '')
@@ -163,27 +217,56 @@ function render(relics, nonce, index) {
     + 'display:flex;gap:10px;align-items:center}'
     + '.hint{font-size:11px;color:var(--vscode-descriptionForeground)}'
     + '.warn{font-size:11px;color:var(--vscode-editorWarning-foreground,#e0af68);'
-    + 'padding:4px 10px}.wrap{flex:1;overflow:auto}'
-    + 'svg{display:block;width:100%;height:100%}'
-    + '.part{cursor:grab}.part.sel circle,.part.sel rect{stroke-width:12}';
+    + 'padding:4px 10px}.wrap{flex:1;overflow:hidden}'
+    + 'svg{display:block;width:100%;height:100%;cursor:grab}'
+    + 'svg.panning{cursor:grabbing}'
+    + '.part{cursor:move}.part.sel circle,.part.sel rect{stroke-width:12}'
+    + 'button{background:var(--vscode-button-secondaryBackground,#444);'
+    + 'color:var(--vscode-button-secondaryForeground,#fff);border:none;border-radius:4px;'
+    + 'padding:2px 9px;cursor:pointer;font-size:12px}';
 
   const script = "const vscode=acquireVsCodeApi();"
-    + "const svg=document.getElementById('plan');let drag=null;"
+    + "const svg=document.getElementById('plan');"
+    + "const BASE={x:" + base.x + ",y:" + base.y + ",w:" + base.w + ",h:" + base.h + "};"
+    + "let vb={x:" + vb.x + ",y:" + vb.y + ",w:" + vb.w + ",h:" + vb.h + "};"
+    + "let drag=null,pan=null;"
+    + "function apply(){svg.setAttribute('viewBox',vb.x+' '+vb.y+' '+vb.w+' '+vb.h);}"
+    // Report the view up so a redraw (which happens on every keystroke in the document)
+    // can restore it instead of snapping back to the whole relic.
+    + "function report(){vscode.postMessage({type:'view',x:vb.x,y:vb.y,w:vb.w,h:vb.h});}"
     + "function pt(e){const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;"
     + "return p.matrixTransform(svg.getScreenCTM().inverse());}"
-    + "svg.addEventListener('mousedown',function(e){"
-    + "const g=e.target.closest('.part');if(!g)return;const p=pt(e);"
-    + "drag={key:g.dataset.key,g:g,x0:p.x,z0:p.y,dx:0,dz:0,moved:false};"
+    + "svg.addEventListener('mousedown',function(e){const g=e.target.closest('.part');"
+    + "const p=pt(e);"
+    + "if(g){drag={key:g.dataset.key,g:g,x0:p.x,z0:p.y,dx:0,dz:0,moved:false};"
     + "document.querySelectorAll('.part.sel').forEach(function(n){n.classList.remove('sel');});"
-    + "g.classList.add('sel');});"
-    + "window.addEventListener('mousemove',function(e){if(!drag)return;const p=pt(e);"
-    + "drag.dx=p.x-drag.x0;drag.dz=p.y-drag.z0;"
+    + "g.classList.add('sel');}"
+    // Dragging empty space pans; dragging a part moves it. One gesture, two meanings,
+    // decided by what is under the cursor.
+    + "else{pan={x0:e.clientX,y0:e.clientY,vx:vb.x,vy:vb.y};svg.classList.add('panning');}});"
+    + "window.addEventListener('mousemove',function(e){"
+    + "if(pan){const k=vb.w/svg.clientWidth;"
+    + "vb.x=pan.vx-(e.clientX-pan.x0)*k;vb.y=pan.vy-(e.clientY-pan.y0)*k;apply();return;}"
+    + "if(!drag)return;const p=pt(e);drag.dx=p.x-drag.x0;drag.dz=p.y-drag.z0;"
     + "if(Math.abs(drag.dx)+Math.abs(drag.dz)>1)drag.moved=true;"
     + "drag.g.setAttribute('transform','translate('+drag.dx+','+drag.dz+')');});"
-    + "window.addEventListener('mouseup',function(){if(!drag)return;"
+    + "window.addEventListener('mouseup',function(){"
+    + "if(pan){pan=null;svg.classList.remove('panning');report();return;}"
+    + "if(!drag)return;"
     // A click to SELECT must never touch the file - only a real move writes.
     + "if(drag.moved)vscode.postMessage({type:'move',key:drag.key,dx:drag.dx,dz:drag.dz});"
     + "drag.g.removeAttribute('transform');drag=null;});"
+    // Zoom about the cursor, so the thing under the pointer stays under it.
+    + "svg.addEventListener('wheel',function(e){e.preventDefault();"
+    + "const p=pt(e);const k=e.deltaY>0?1.15:1/1.15;"
+    + "vb.x=p.x-(p.x-vb.x)*k;vb.y=p.y-(p.y-vb.y)*k;vb.w*=k;vb.h*=k;apply();report();},"
+    + "{passive:false});"
+    // Double-click clears zoom and pan, the same gesture the game's radar uses.
+    + "svg.addEventListener('dblclick',function(){vb={x:BASE.x,y:BASE.y,w:BASE.w,h:BASE.h};"
+    + "apply();report();});"
+    + "const fit=document.getElementById('fit');"
+    + "if(fit)fit.addEventListener('click',function(){"
+    + "vb={x:BASE.x,y:BASE.y,w:BASE.w,h:BASE.h};apply();report();});"
     + "const pick=document.getElementById('pick');"
     + "if(pick)pick.addEventListener('change',function(){"
     + "vscode.postMessage({type:'pick',index:Number(pick.value)});});";
@@ -192,11 +275,14 @@ function render(relics, nonce, index) {
     + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
     + 'style-src \'unsafe-inline\'; script-src \'nonce-' + nonce + '\';">'
     + '<style>' + style + '</style></head><body>'
-    + '<header>' + picker + '<span class="hint">drag a chamber to move it &middot; '
-    + 'the file updates as you drop</span></header>' + warn
-    + '<div class="wrap"><svg id="plan" viewBox="' + minX + ' ' + minZ + ' ' + w + ' ' + h
-    + '" preserveAspectRatio="xMidYMid meet"><g>' + svg + '</g></svg></div>'
+    + '<header>' + picker + '<button id="fit">Fit</button>'
+    + '<span class="hint">drag a chamber to move it &middot; drag the background to pan '
+    + '&middot; wheel to zoom &middot; double-click to fit &middot; grid 1k, bold 10k'
+    + '</span></header>' + warn
+    + '<div class="wrap"><svg id="plan" viewBox="' + vb.x + ' ' + vb.y + ' ' + vb.w + ' '
+    + vb.h + '" preserveAspectRatio="xMidYMid meet">' + grid + '<g>' + svg + '</g></svg></div>'
     + '<script nonce="' + nonce + '">' + script + '</script></body></html>';
 }
 
-module.exports = { render, extent, stackRows };
+module.exports = { render, extent, stackRows, gridLines, bounds,
+                   GRID_MINOR, GRID_MAJOR };
