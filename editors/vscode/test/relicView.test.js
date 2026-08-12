@@ -237,6 +237,20 @@ check('...with its z un-flipped on the way out',
   html.indexOf('0-(vb.y+vb.h/2)') >= 0);
 
 
+
+// ------------------------------------------------------------ live preview
+check('the toolbar offers Preview', markup.indexOf('id="prev"') >= 0);
+check('Preview posts to the extension, not straight to a socket',
+  html.indexOf("type:'preview'") >= 0);
+
+// ------------------------------------------------------------------- undo
+// There is deliberately NO undo machinery here. Every edit goes through
+// vscode.workspace.applyEdit, so it lands on the document's own undo stack and Ctrl+Z
+// works - a second undo system would fight the first and lose.
+check('the view posts intents and never edits text itself',
+  html.indexOf('applyEdit') < 0 && html.indexOf('workspace') < 0);
+
+
 console.log('');
 if (failures) { console.log(failures + ' failure(s)'); process.exit(1); }
 console.log('all relic view tests passed');

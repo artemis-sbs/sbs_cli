@@ -4703,6 +4703,20 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
         (text: string, part: RelicPart) => RelicModel.setPart(text, part, msg.patch));
       return;
     }
+    if (msg && msg.type === 'preview') {
+      // Ask a running `sbs debug` session to rebuild the relic from the file. The
+      // mission owns what that means (a //shared/signal/relic_reload route); this only
+      // rings the bell, so the editor needs no knowledge of how a relic is built.
+      const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+      try {
+        await postDebugCommand(port, { action: 'signal', name: 'relic_reload' });
+        vscode.window.setStatusBarMessage('Relic: reload sent to the running session', 3000);
+      } catch (e) {
+        vscode.window.showWarningMessage(
+          `Artemis AMD: no running session on port ${port} (start one with \`sbs debug\`).`);
+      }
+      return;
+    }
     if (msg && msg.type === 'link') {
       await applyRelicStructure(doc, index, (text: string, rel: any) => {
         const from = [...rel.chambers, ...rel.boxes]
