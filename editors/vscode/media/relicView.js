@@ -241,7 +241,7 @@ function render(relics, nonce, index, view) {
     + '.warn{font-size:11px;color:var(--vscode-editorWarning-foreground,#e0af68);'
     + 'padding:4px 10px}.wrap{flex:1;overflow:hidden}'
     + 'svg{display:block;width:100%;height:100%;cursor:grab}'
-    + 'svg.panning{cursor:grabbing}'
+    + 'svg.panning{cursor:grabbing}svg.linking{cursor:crosshair}'
     + '.part{cursor:move}.part.sel circle,.part.sel rect{stroke-width:12}'
     + '.insp{position:absolute;right:14px;top:56px;z-index:5;padding:8px 10px;'
     + 'background:var(--vscode-editorWidget-background,#252526);border-radius:6px;'
@@ -264,7 +264,7 @@ function render(relics, nonce, index, view) {
     + "const svg=document.getElementById('plan');"
     + "const BASE={x:" + base.x + ",y:" + base.y + ",w:" + base.w + ",h:" + base.h + "};"
     + "let vb={x:" + vb.x + ",y:" + vb.y + ",w:" + vb.w + ",h:" + vb.h + "};"
-    + "let drag=null,pan=null;"
+    + "let drag=null,pan=null,link=null;"
     + "function apply(){svg.setAttribute('viewBox',vb.x+' '+vb.y+' '+vb.w+' '+vb.h);}"
     // Report the view up so a redraw (which happens on every keystroke in the document)
     // can restore it instead of snapping back to the whole relic.
@@ -273,6 +273,9 @@ function render(relics, nonce, index, view) {
     + "return p.matrixTransform(svg.getScreenCTM().inverse());}"
     + "svg.addEventListener('mousedown',function(e){const g=e.target.closest('.part');"
     + "const p=pt(e);"
+    // SHIFT turns a drag from "move this" into "connect these" - the same gesture, and
+    // the modifier is what the hint in the header names.
+    + "if(g&&e.shiftKey){link={from:g.dataset.key,g:g};svg.classList.add('linking');return;}"
     + "if(g){drag={key:g.dataset.key,g:g,x0:p.x,z0:p.y,dx:0,dz:0,moved:false};"
     + "document.querySelectorAll('.part.sel').forEach(function(n){n.classList.remove('sel');});"
     + "g.classList.add('sel');show(g);}"
@@ -286,7 +289,13 @@ function render(relics, nonce, index, view) {
     + "if(!drag)return;const p=pt(e);drag.dx=p.x-drag.x0;drag.dz=p.y-drag.z0;"
     + "if(Math.abs(drag.dx)+Math.abs(drag.dz)>1)drag.moved=true;"
     + "drag.g.setAttribute('transform','translate('+drag.dx+','+drag.dz+')');});"
-    + "window.addEventListener('mouseup',function(){"
+    + "window.addEventListener('mouseup',function(e){"
+    + "if(link){const t=e.target.closest&&e.target.closest('.part');"
+    + "svg.classList.remove('linking');"
+    // Only chambers and boxes can be joined; a solid is subtracted space, not a room.
+    + "if(t&&t.dataset.key!==link.from&&t.dataset.kind!=='solid')"
+    + "vscode.postMessage({type:'link',from:link.from,to:t.dataset.key});"
+    + "link=null;return;}"
     + "if(pan){pan=null;svg.classList.remove('panning');report();return;}"
     + "if(!drag)return;"
     // A click to SELECT must never touch the file - only a real move writes.
@@ -327,6 +336,18 @@ function render(relics, nonce, index, view) {
     + "function(){if(!sel)return;const v=Number(this.value);if(!isFinite(v))return;"
     + "const patch={};patch[k]=v;"
     + "vscode.postMessage({type:'field',key:sel.dataset.key,patch:patch});});}"
+    // Delete removes the selected part; the button and the key do the same thing, because
+    // a plan is a picture and not everyone reaches for a keyboard in one.
+    + "function del(){if(sel)vscode.postMessage({type:'remove',key:sel.dataset.key});}"
+    + "document.getElementById('del').addEventListener('click',del);"
+    + "window.addEventListener('keydown',function(e){"
+    + "if(e.target.tagName==='INPUT')return;"        // typing a number is not a delete
+    + "if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();del();}});"
+    // A new chamber lands at the middle of what you are looking at, which is the only
+    // place the author has told us they care about.
+    + "document.getElementById('add').addEventListener('click',function(){"
+    + "vscode.postMessage({type:'add',x:Math.round(vb.x+vb.w/2),"
+    + "z:Math.round(0-(vb.y+vb.h/2))});});"
     + "const pick=document.getElementById('pick');"
     + "if(pick)pick.addEventListener('change',function(){"
     + "vscode.postMessage({type:'pick',index:Number(pick.value)});});";
@@ -336,8 +357,11 @@ function render(relics, nonce, index, view) {
     + 'style-src \'unsafe-inline\'; script-src \'nonce-' + nonce + '\';">'
     + '<style>' + style + '</style></head><body>'
     + '<header>' + picker + '<button id="fit">Fit</button>'
+    + '<button id="add">Add chamber</button>'
+    + '<button id="del">Delete</button>'
     + '<span class="hint">drag a chamber to move it &middot; drag the background to pan '
-    + '&middot; wheel to zoom &middot; double-click to fit &middot; grid 1k, bold 10k'
+    + '&middot; wheel to zoom &middot; SHIFT-drag between chambers to connect '
+    + '&middot; grid 1k, bold 10k'
     + '</span></header>' + warn
     + '<div id="insp" class="insp hidden">'
     + '<div class="ititle"><span id="iname"></span> <span id="ikind" class="ikind"></span></div>'

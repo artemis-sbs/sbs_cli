@@ -4703,6 +4703,34 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
         (text: string, part: RelicPart) => RelicModel.setPart(text, part, msg.patch));
       return;
     }
+    if (msg && msg.type === 'link') {
+      await applyRelicStructure(doc, index, (text: string, rel: any) => {
+        const from = [...rel.chambers, ...rel.boxes]
+          .find((p: RelicPart) => p.key === msg.from);
+        return from ? RelicModel.addPassage(text, from, msg.to, 200) : text;
+      });
+      return;
+    }
+    if (msg && msg.type === 'remove') {
+      await applyRelicStructure(doc, index, (text: string, rel: any) => {
+        const part = [...rel.chambers, ...rel.boxes, ...rel.solids]
+          .find((p: RelicPart) => p.key === msg.key);
+        return part ? RelicModel.removePart(text, rel, part) : text;
+      });
+      return;
+    }
+    if (msg && msg.type === 'add') {
+      await applyRelicStructure(doc, index, (text: string, rel: any) => {
+        // A key the file does not already use, so a second Add never collides.
+        const taken = new Set([...rel.chambers, ...rel.boxes, ...rel.solids]
+          .map((p: RelicPart) => p.key));
+        let n = taken.size + 1;
+        while (taken.has('chamber' + n)) { n++; }
+        return RelicModel.addChamber(text, rel, 'chamber' + n,
+          msg.x, 0, msg.z, 600, 'chamber ' + n);
+      });
+      return;
+    }
     if (msg && msg.type === 'pick') {
       index = Number(msg.index) || 0;
       lastView = undefined;            // a different relic deserves its own framing
@@ -4714,6 +4742,30 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       (text: string, p: RelicPart) => RelicModel.movePart(text, p,
         Math.round(p.x + msg.dx), Math.round(p.z + msg.dz)));
   }, undefined);
+
+  // Structural edits - add, delete, connect - change more than one line, so they replace
+  // the whole document rather than a single line. Everything positional still goes
+  // through applyRelicEdit's one-line path, which is what keeps a drag a single undo
+  // step; a structural change is genuinely a bigger edit and should read as one.
+  async function applyRelicStructure(
+    d: vscode.TextDocument, idx: number,
+    edit: (text: string, rel: any) => string,
+  ): Promise<void> {
+    const model = RelicModel.parse(d.getText());
+    const rel = model.relics[idx];
+    if (!rel) { return; }
+    const text = d.getText();
+    const next = edit(text, rel);
+    if (next === text) { return; }
+    const whole = new vscode.Range(
+      d.positionAt(0), d.positionAt(text.length));
+    const we = new vscode.WorkspaceEdit();
+    we.replace(d.uri, whole, next);
+    writing = true;
+    await vscode.workspace.applyEdit(we);
+    writing = false;
+    draw();
+  }
 
   // ONE write path for every gesture - a drag or a typed field. Looks the part up from
   // the CURRENT text (the document may have moved under us since the panel drew), applies

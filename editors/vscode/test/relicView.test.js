@@ -218,6 +218,25 @@ check('the form posts a patch, not a whole record',
   html.indexOf("type:'field'") >= 0 && html.indexOf('patch:patch') >= 0);
 
 
+
+// ------------------------------------------------------ add, delete, connect
+check('the toolbar offers add and delete',
+  markup.indexOf('id="add"') >= 0 && markup.indexOf('id="del"') >= 0);
+check('SHIFT-drag is what connects, and the header says so',
+  html.indexOf('e.shiftKey') >= 0 && markup.indexOf('SHIFT-drag') >= 0);
+check('a link posts from and to', html.indexOf("type:'link'") >= 0);
+check('a solid cannot be a passage endpoint - it is not a room',
+  html.indexOf("t.dataset.kind!=='solid'") >= 0);
+check('Delete and Backspace both remove the selection',
+  html.indexOf("e.key==='Delete'") >= 0 && html.indexOf("e.key==='Backspace'") >= 0);
+check('...but not while typing a number into the form',
+  html.indexOf("e.target.tagName==='INPUT'") >= 0);
+check('a new chamber lands in the middle of the current view',
+  html.indexOf('vb.x+vb.w/2') >= 0);
+check('...with its z un-flipped on the way out',
+  html.indexOf('0-(vb.y+vb.h/2)') >= 0);
+
+
 console.log('');
 if (failures) { console.log(failures + ' failure(s)'); process.exit(1); }
 console.log('all relic view tests passed');

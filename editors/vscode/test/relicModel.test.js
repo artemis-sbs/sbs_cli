@@ -233,6 +233,61 @@ check('setPart TRANSLATES a capsule rather than moving one end',
   && (capMoved2.by - capMoved2.ay) === (cap0.by - cap0.ay));
 
 
+
+// -------------------------------------------- structural edits: add and remove
+// Everything above rewrites ONE line. These insert and remove lines, which is a bigger
+// promise: the surrounding document still must not move.
+const STRUCT = ['### [O](oss)', '---', 'Loc: 0,0,0', '---', '',
+  '### [hub](hub)', '---', 'Relic: oss', 'Chamber: 0, 0, 0, 900',
+  'Passage to: gallery 300', '---', '',
+  '### [gallery](gallery)', '---', 'Relic: oss', 'Chamber: 3000, 0, 0, 700', '---', '',
+  'Prose about the gallery.'].join(NL);
+const S = (t) => R.parse(t).relics[0];
+const sHub = S(STRUCT).chambers.find((c) => c.key === 'hub');
+const sGal = S(STRUCT).chambers.find((c) => c.key === 'gallery');
+
+check('a passage appends to an existing list',
+  R.addPassage(STRUCT, sHub, 'gallery2', 250).indexOf('gallery 300, gallery2 250') >= 0);
+const ins = R.addPassage(STRUCT, sGal, 'hub', 180);
+check('a chamber with no passages gets the line inserted',
+  ins.indexOf('Passage to: hub 180') >= 0
+  && ins.split(NL).length === STRUCT.split(NL).length + 1);
+check('the inserted line lands inside the right fence',
+  S(ins).passages.filter((p) => p.from === 'gallery').length === 1);
+check('a duplicate passage is refused', R.addPassage(STRUCT, sHub, 'gallery', 300) === STRUCT);
+check('a chamber cannot be joined to itself',
+  R.addPassage(STRUCT, sHub, 'hub', 300) === STRUCT);
+
+const two = R.addPassage(STRUCT, sHub, 'vault', 250);
+const back = R.removePassage(two, S(two).chambers.find((c) => c.key === 'hub'), 'vault');
+check('removing one passage keeps the others', back === STRUCT);
+const gone = R.removePassage(STRUCT, sHub, 'gallery');
+check('removing the last passage removes the whole line',
+  gone.indexOf('Passage to:') < 0
+  && gone.split(NL).length === STRUCT.split(NL).length - 1);
+check('removing a passage that is not there changes nothing',
+  R.removePassage(STRUCT, sHub, 'nosuch') === STRUCT);
+
+const added = R.addChamber(STRUCT, S(STRUCT), 'crypt', -2000, -500, 0, 650, 'the crypt');
+const crypt = S(added).chambers.find((c) => c.key === 'crypt');
+check('an added chamber parses back with its numbers',
+  crypt && crypt.x === -2000 && crypt.y === -500 && crypt.r === 650);
+check('it is written in the shape a person would write it',
+  added.indexOf('### [the crypt](crypt)') >= 0 && added.indexOf('Relic: oss') >= 0);
+check('adding a chamber leaves the prose alone',
+  added.indexOf('Prose about the gallery.') >= 0);
+
+const del = R.removePart(STRUCT, S(STRUCT), sGal);
+check('deleting a chamber removes its record',
+  del.indexOf('### [gallery](gallery)') < 0);
+check('...and every passage that named it', S(del).passages.length === 0);
+check('...and leaves the other chamber intact',
+  S(del).chambers.length === 1 && S(del).chambers[0].key === 'hub');
+// The one thing a click must never destroy.
+check('...but does NOT delete hand-written prose',
+  del.indexOf('Prose about the gallery.') >= 0);
+
+
 console.log('');
 if (failures) { console.log(failures + ' failure(s)'); process.exit(1); }
 console.log('all relic model tests passed');

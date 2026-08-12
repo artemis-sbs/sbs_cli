@@ -66,7 +66,13 @@ function parse(text) {
       records.push(cur);
       continue;
     }
-    if (FENCE.test(line)) { inFence = !inFence; continue; }
+    if (FENCE.test(line)) {
+      inFence = !inFence;
+      // The closing fence is the last line the record owns. Anything after it is prose,
+      // which belongs to the record too but is not ours to rewrite.
+      if (!inFence && cur) cur.fenceEnd = i;
+      continue;
+    }
     if (!inFence || !cur) continue;
     if (/^\s/.test(line)) continue;          // indented lines are inside a nested block
     const f = FIELD.exec(line);
@@ -88,6 +94,7 @@ function parse(text) {
           r.fields['chamber'] || r.fields['box'] || r.fields['solid'])) continue;
     const relic = {
       key: r.key, name: r.name, headingLine: r.headingLine, fields: r.fields,
+      fenceEnd: r.fenceEnd,
       chambers: [], boxes: [], solids: [], passages: [], orphans: [],
       loc: r.fields['loc'] ? numbers(r.fields['loc'].value).slice(0, 3) : [0, 0, 0],
     };
@@ -98,19 +105,20 @@ function parse(text) {
     const owner = byKey.get(String(p.fields['relic'].value).trim());
     const part = {
       key: p.key, name: p.name, headingLine: p.headingLine, fields: p.fields,
+      fenceEnd: p.fenceEnd,
     };
     if (!owner) { if (relics[0]) relics[0].orphans.push(part); continue; }
     if (p.fields['chamber']) {
       const n = numbers(p.fields['chamber'].value);
       owner.chambers.push(Object.assign(part, {
         kind: 'chamber', x: n[0], y: n[1], z: n[2], r: n[3],
-        line: p.fields['chamber'].line,
+        line: p.fields['chamber'].line, fenceEnd: p.fenceEnd,
       }));
     } else if (p.fields['box']) {
       const n = numbers(p.fields['box'].value);
       owner.boxes.push(Object.assign(part, {
         kind: 'box', x: n[0], y: n[1], z: n[2], hx: n[3], hy: n[4], hz: n[5],
-        line: p.fields['box'].line,
+        line: p.fields['box'].line, fenceEnd: p.fenceEnd,
       }));
     } else if (p.fields['solid']) {
       const n = numbers(p.fields['solid'].value);
@@ -125,6 +133,7 @@ function parse(text) {
       // cx="undefined" and no solid appeared at all.
       const solid = Object.assign(part, {
         kind: 'solid', shape, nums: n, line: p.fields['solid'].line,
+        fenceEnd: p.fenceEnd,
       });
       if (shape === 'capsule') {
         solid.ax = n[0]; solid.ay = n[1]; solid.az = n[2];
@@ -273,7 +282,125 @@ function setHeight(text, part, y) {
   return text;
 }
 
+/**
+ * Join two chambers with a passage.
+ *
+ * Appends to the source's existing `Passage to:` if it has one, otherwise inserts the
+ * line just after its shape field. This is the first edit that ADDS a line rather than
+ * rewriting one - still surgical, because it touches exactly one line either way and
+ * inserts inside the fence the field belongs to.
+ *
+ * Refuses a duplicate and refuses to join a chamber to itself; both would compile into a
+ * relic that is subtly wrong rather than obviously broken.
+ */
+function addPassage(text, from, toKey, radius) {
+  if (!from || !toKey || from.key === toKey) return text;
+  const lines = String(text).split(/\r?\n/);
+  const existing = from.fields && from.fields['passage to'];
+  const r = Number.isFinite(Number(radius)) ? Number(radius) : 200;
+  if (existing) {
+    const already = words(existing.value).indexOf(toKey) >= 0;
+    if (already) return text;
+    const m = FIELD.exec(lines[existing.line]);
+    if (!m) return text;
+    lines[existing.line] = m[1] + ':' + (m[2].trim() ? ' ' + m[2].trim() + ',' : '')
+      + ' ' + toKey + ' ' + fmt(r);
+    return lines.join('\n');
+  }
+  if (!Number.isFinite(from.line)) return text;
+  lines.splice(from.line + 1, 0, 'Passage to: ' + toKey + ' ' + fmt(r));
+  return lines.join('\n');
+}
+
+/** Drop one passage from a source chamber, removing the line if it was the only one. */
+function removePassage(text, from, toKey) {
+  const existing = from && from.fields && from.fields['passage to'];
+  if (!existing) return text;
+  const lines = String(text).split(/\r?\n/);
+  const kept = String(existing.value).split(',')
+    .filter((g) => words(g)[0] !== toKey)
+    .map((g) => g.trim())
+    .filter((g) => g !== '');
+  if (kept.length === String(existing.value).split(',').filter((g) => g.trim()).length) {
+    return text;                       // nothing matched - do not touch the file
+  }
+  const m = FIELD.exec(lines[existing.line]);
+  if (!m) return text;
+  if (!kept.length) {
+    lines.splice(existing.line, 1);    // an empty `Passage to:` is noise, not data
+  } else {
+    lines[existing.line] = m[1] + ': ' + kept.join(', ');
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Add a chamber to a relic, as a new record after its last part.
+ *
+ * Written in the shape an author would write by hand - heading, fence, `Relic:`, the
+ * shape field - so the file does not develop a machine-written dialect alongside a human
+ * one. Nothing else in the document moves.
+ */
+function addChamber(text, relic, key, x, y, z, r, name) {
+  if (!relic || !key) return text;
+  const lines = String(text).split(/\r?\n/);
+  const parts = [].concat(relic.chambers, relic.boxes, relic.solids);
+  let at = relic.fenceEnd;
+  for (const p of parts) {
+    if (Number.isFinite(p.fenceEnd) && p.fenceEnd > at) at = p.fenceEnd;
+  }
+  if (!Number.isFinite(at)) return text;
+  const block = ['', '### [' + (name || key) + '](' + key + ')', '---',
+    'Relic: ' + relic.key,
+    'Chamber: ' + [x, y, z, r].map(fmt).join(', '), '---'];
+  lines.splice(at + 1, 0, ...block);
+  return lines.join('\n');
+}
+
+/**
+ * Remove a part's whole record, and every passage that named it.
+ *
+ * The passages matter more than the record: leaving them behind produces a corridor to
+ * nothing, which the linter reports as `relic-dangling-passage` and which reads on the
+ * plan as a bug rather than a deletion.
+ *
+ * DELIBERATE LIMIT: the record's PROSE is not removed. Prose lives after the closing
+ * fence and is the one thing here a person actually wrote by hand, so it is never
+ * destroyed on a click - an orphaned paragraph is easy to see and delete, and impossible
+ * to get back if this guessed wrong.
+ */
+function removePart(text, relic, part) {
+  if (!part || !Number.isFinite(part.headingLine) || !Number.isFinite(part.fenceEnd)) {
+    return text;
+  }
+  let out = text;
+  for (const other of [].concat(relic.chambers, relic.boxes)) {
+    if (other.key === part.key) continue;
+    out = removePassage(out, R_reparse(out, relic.key, other.key) || other, part.key);
+  }
+  const lines = out.split(/\r?\n/);
+  // Re-find the record: removing passages above it may have shifted its lines.
+  const fresh = R_reparse(out, relic.key, part.key);
+  const head = fresh ? fresh.headingLine : part.headingLine;
+  const tail = fresh ? fresh.fenceEnd : part.fenceEnd;
+  if (!Number.isFinite(head) || !Number.isFinite(tail) || tail < head) return out;
+  let from = head;
+  while (from > 0 && lines[from - 1].trim() === '') from--;   // take the blank line too
+  lines.splice(from, tail - from + 1);
+  return lines.join('\n');
+}
+
+/** Find a part again after the text has shifted under us. */
+function R_reparse(text, relicKey, partKey) {
+  const m = parse(text);
+  const rel = m.relics.find((r) => r.key === relicKey);
+  if (!rel) return null;
+  return [].concat(rel.chambers, rel.boxes, rel.solids)
+    .find((p) => p.key === partKey) || null;
+}
+
 module.exports = {
   parse, writeField, movePart: moveePart, resizePart, setHeight, setPart,
+  addPassage, removePassage, addChamber, removePart,
   numbers, words, fmt,
 };
