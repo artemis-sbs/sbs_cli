@@ -29,6 +29,26 @@ function project(p, cam) {
   return { x: xr, y: -up, depth };
 }
 
+/** Screen point back to a world point on the horizontal plane at height `y`.
+ *
+ *  The inverse of `project` with one degree of freedom pinned - which is the only way to
+ *  invert it at all, since a screen point is a whole line in the world. Pinning HEIGHT is
+ *  the useful choice: it is what "put a new chamber where I am looking" means, and it
+ *  keeps the answer on the same floor as whatever the view is pivoting around.
+ *
+ *  Looking along the horizon (pitch 0) the horizontal plane is edge-on and the answer is
+ *  a whole line, so it falls back to the plane through the origin instead of returning a
+ *  number it cannot justify.
+ */
+function unproject(sx, sy, cam, y) {
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const up = -sy;
+  const zr = Math.abs(sp) < 1e-6 ? 0 : (up - (y || 0) * cp) / sp;
+  const cy = Math.cos(cam.yaw), sy2 = Math.sin(cam.yaw);
+  // The inverse of the yaw rotation in `project`.
+  return { x: sx * cy - zr * sy2, y: y || 0, z: sx * sy2 + zr * cy };
+}
+
 /** Straight down - the plan view's own angle, which is what makes the two agree. */
 function topDown() { return { yaw: 0, pitch: Math.PI / 2 }; }
 
@@ -109,12 +129,100 @@ function extent(items) {
   return { x: min.x, y: min.y, w: Math.max(1, max.x - min.x), h: Math.max(1, max.y - min.y) };
 }
 
+// Grid spacing, matching the game's own 2D view: a minor line every 1000 units and a
+// major every 10000, so a chamber radius can be counted off the picture rather than read
+// off a label.
+const GRID_MINOR = 1000;
+const GRID_MAJOR = 10000;
+
+/** The ground plane as projected grid lines.
+ *
+ *  Drawn in the WORLD at y=0 rather than across the screen, so it tilts with the view and
+ *  reads as a floor the relic stands on - which is also what tells you, at a glance, which
+ *  way is up. Looking straight down it becomes the plan view's own grid again.
+ *
+ *  Thinned out the same way the plan's is: past a few hundred lines a grid stops being a
+ *  ruler and becomes a grey wash.
+ */
+function groundGrid(rel, cam, span) {
+  const lines = [];
+  const reach = Math.max(2000, span || 12000);
+  const step = (reach / GRID_MINOR) > 240 ? GRID_MAJOR : GRID_MINOR;
+  const n = Math.ceil(reach / step);
+  const end = n * step;
+  for (let i = -n; i <= n; i++) {
+    const v = i * step;
+    const major = (v % GRID_MAJOR) === 0;
+    for (const along of [0, 1]) {
+      const a = along ? { x: -end, y: 0, z: v } : { x: v, y: 0, z: -end };
+      const b = along ? { x: end, y: 0, z: v } : { x: v, y: 0, z: end };
+      const pa = project(a, cam), pb = project(b, cam);
+      lines.push({ a: pa, b: pb, major });
+    }
+  }
+  return lines;
+}
+
 /** Depth shading: nearer is brighter, so a shell of same-coloured circles still reads as
  *  a solid whose far side is behind its near side. */
 function shade(depth, lo, hi) {
   const t = hi > lo ? (depth - lo) / (hi - lo) : 0.5;   // 0 near .. 1 far
   const k = Math.max(0, Math.min(1, 1 - t));
   return 0.3 + 0.55 * k;
+}
+
+/** The ground grid as SVG. `w` is the current view width, used to keep the line weight
+ *  constant on screen however far you zoom. */
+function gridSvg(rel, cam, span, w) {
+  const sw = (w || 12000) / 900;
+  let out = '<g id="grid3" pointer-events="none">';
+  for (const l of groundGrid(rel, cam, span)) {
+    out += '<line x1="' + l.a.x.toFixed(1) + '" y1="' + l.a.y.toFixed(1)
+      + '" x2="' + l.b.x.toFixed(1) + '" y2="' + l.b.y.toFixed(1)
+      + '" stroke="var(--vscode-panel-border,#8883)" stroke-opacity="'
+      + (l.major ? 0.55 : 0.22) + '" stroke-width="' + (sw * (l.major ? 1.8 : 1)).toFixed(1)
+      + '"/>';
+  }
+  return out + '</g>';
+}
+
+/** Label placement in SCREEN space, fanned so names do not sit on top of each other.
+ *
+ *  The plan view fans by world row; here it has to be by projected position, because two
+ *  chambers far apart in the world can land on the same pixel from one angle and not from
+ *  another. Same idea, different space: sort down the screen, and push any label that
+ *  would land within `gap` of the previous one further down.
+ */
+function labelRows(items, gap) {
+  const g = gap || 1;
+  const named = items.filter((it) => it.kind === 'chamber' || it.kind === 'box')
+    .map((it) => ({ key: it.key, label: it.label, x: it.at.x, y: it.at.y, r: it.r || 0 }))
+    .sort((a, b) => a.y - b.y);
+  let last = -Infinity;
+  for (const n of named) {
+    const want = n.y - (n.r ? n.r * 0.35 : 0);
+    n.ly = want < last + g ? last + g : want;
+    last = n.ly;
+  }
+  return named;
+}
+
+/** Those labels as SVG, with a leader line when one had to be pushed off its part. */
+function labelSvg(items, size) {
+  const s = size || 300;
+  let out = '<g id="lab3" pointer-events="none">';
+  for (const n of labelRows(items, s * 1.15)) {
+    if (Math.abs(n.ly - n.y) > s * 0.4) {
+      out += '<line x1="' + n.x.toFixed(1) + '" y1="' + n.y.toFixed(1) + '" x2="'
+        + n.x.toFixed(1) + '" y2="' + n.ly.toFixed(1)
+        + '" stroke="var(--vscode-descriptionForeground,#888)" stroke-opacity="0.5"'
+        + ' stroke-width="' + (s * 0.05) + '"/>';
+    }
+    out += '<text x="' + n.x.toFixed(1) + '" y="' + n.ly.toFixed(1) + '" text-anchor="middle"'
+      + ' font-size="' + s + '" fill="var(--vscode-foreground,#ddd)"'
+      + ' font-family="var(--vscode-font-family)">' + esc(n.label) + '</text>';
+  }
+  return out + '</g>';
 }
 
 /** The scene as an SVG body (no wrapper) - the caller owns the viewBox. */
@@ -184,11 +292,13 @@ function holdPivot(vb, before, after) {
  *  the tests exercise IS the code the page runs.
  */
 function clientBundle() {
-  return [esc, project, boxCorners, scene, extent, shade, body, holdPivot]
+  return [esc, project, unproject, boxCorners, scene, extent, shade, body, holdPivot,
+          groundGrid, gridSvg, labelRows, labelSvg]
     .map(function (f) { return f.toString(); }).join('\n')
     + '\nconst BOX_EDGES = ' + JSON.stringify(BOX_EDGES) + ';\n';
 }
 
-module.exports = { project, scene, body, extent, boxCorners, shade, clientBundle,
+module.exports = { project, unproject, scene, body, extent, boxCorners, shade, clientBundle,
+                   groundGrid, gridSvg, labelRows, labelSvg, GRID_MINOR, GRID_MAJOR,
                    holdPivot,
                    topDown, defaultCamera, BOX_EDGES };

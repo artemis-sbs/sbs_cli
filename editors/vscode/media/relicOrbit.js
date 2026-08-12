@@ -53,7 +53,7 @@ function script(rel, cam, vb, sel) {
     + 'let cam={yaw:' + cam.yaw + ',pitch:' + cam.pitch + '};'
     + 'let vb={x:' + vb.x + ',y:' + vb.y + ',w:' + vb.w + ',h:' + vb.h + '};'
     + 'let sel=' + JSON.stringify(sel || null) + ';'
-    + 'let orbit=null,pan=null,move=null,size=null;'
+    + 'let orbit=null,pan=null,move=null,size=null,link=null;'
     // Every movable part by key. Passages are NOT here on purpose: a passage has no
     // position of its own - it is defined by the two chambers it joins, so moving one
     // would have to mean moving them, which the plan view already does better.
@@ -89,6 +89,20 @@ function script(rel, cam, vb, sel) {
     + 'function pt(e){const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;'
     + 'return p.matrixTransform(svg.getScreenCTM().inverse());}'
     + 'svg.addEventListener("mousedown",function(e){'
+    // MIDDLE BUTTON NAVIGATES, Blender's convention: middle drags orbit, SHIFT-middle
+    // pans, the wheel zooms. It is worth copying for more than familiarity - it leaves
+    // the LEFT button entirely to the work (select, move, size, connect), which is the
+    // only way those can all coexist without a modifier each.
+    //
+    // preventDefault stops the browser's middle-click autoscroll, which would otherwise
+    // hijack the very gesture we are binding.
+    + 'if(e.button===1){e.preventDefault();'
+    + 'if(e.shiftKey){pan={x0:e.clientX,y0:e.clientY,vx:vb.x,vy:vb.y};'
+    + 'svg.classList.add("panning");}'
+    + 'else{orbit={x0:e.clientX,y0:e.clientY,yaw:cam.yaw,pitch:cam.pitch,'
+    + 'p:pivot(),s:null,moved:true};orbit.s=project(orbit.p,cam);'
+    + 'svg.classList.add("orbiting");}return;}'
+    + 'if(e.button!==0)return;'
     // An axis handle first: it sits on top of the part it belongs to, and grabbing the
     // part instead would make the gizmo unusable at any angle where they overlap.
     // A SIZE handle first, then a MOVE handle, then the part. They overlap at some
@@ -108,7 +122,11 @@ function script(rel, cam, vb, sel) {
     + 'move={axis:h.axis,h:h,x0:q.x,y0:q.y,ox:p.x,oy:p.y,oz:p.z,L:gizL(),p:p,moved:false};'
     + 'e.preventDefault();return;}}'
     + 'const g2=e.target.closest("[data-key]");'
-    + 'if(g2&&!e.shiftKey){sel=g2.dataset.key;draw();e.preventDefault();return;}'
+    // SHIFT turns a drag from "select this" into "connect these" - the same gesture and
+    // the same modifier the plan view uses, so the reflex carries over unchanged.
+    + 'if(g2&&e.shiftKey){link={from:g2.dataset.key};svg.classList.add("linking");'
+    + 'e.preventDefault();return;}'
+    + 'if(g2){sel=g2.dataset.key;draw();e.preventDefault();return;}'
     + 'if(e.shiftKey){pan={x0:e.clientX,y0:e.clientY,vx:vb.x,vy:vb.y};'
     + 'svg.classList.add("panning");}'
     // Starting an orbit KEEPS the selection. You orbit in order to look at the selected
@@ -126,13 +144,14 @@ function script(rel, cam, vb, sel) {
     // dragging with no button held, which is felt as the mouse being captured. That is not
     // hypothetical: finishing a gizmo drag REWRITES the document, and the edit can move
     // focus away from the webview, so the release lands somewhere that is not us.
-    + 'function endGesture(){orbit=null;pan=null;move=null;size=null;'
+    + 'function endGesture(){orbit=null;pan=null;move=null;size=null;link=null;'
+    + 'svg.classList.remove("linking");'
     + 'svg.classList.remove("orbiting");svg.classList.remove("panning");}'
     // The backstop: a mouse moving with NO BUTTON DOWN cannot be a drag, whatever we
     // think we are in the middle of. Cheap, and it recovers on the very next movement
     // rather than needing a click to clear.
     + 'window.addEventListener("mousemove",function(e){'
-    + 'if(!e.buttons&&(move||orbit||pan||size)){endGesture();return;}'
+    + 'if(!e.buttons&&(move||orbit||pan||size||link)){endGesture();return;}'
     + 'if(size){const q=pt(e);'
     // A radius is measured from the CENTRE, not along an axis - the circle is the sphere
     // exactly, from every angle, so distance is the whole calculation. A half-extent is
@@ -166,7 +185,7 @@ function script(rel, cam, vb, sel) {
     + 'const a=project(orbit.p,cam);'
     + 'vb=holdPivot(vb,orbit.s,a);orbit.s=a;apply();'
     + 'draw();});'
-    + 'window.addEventListener("mouseup",function(){'
+    + 'window.addEventListener("mouseup",function(ev){'
     // try/finally, because the state MUST come back even if the post throws. Clearing it
     // last was how one failed message could capture the mouse for good.
     + 'try{'
@@ -179,6 +198,11 @@ function script(rel, cam, vb, sel) {
     // A press on empty space that never turned into a drag is a CLICK, and a click on
     // nothing means deselect. Told apart here rather than at mousedown, because at
     // mousedown the two are still the same event.
+    + 'if(link){const t=ev&&ev.target&&ev.target.closest?ev.target.closest("[data-key]"):null;'
+    // Only chambers and boxes can be joined; a solid is subtracted space, not a room. The
+    // page cannot tell them apart from the element alone, so it asks the scene data.
+    + 'if(t&&t.dataset.key!==link.from&&!REL.solids.some(function(s){return s.key===t.dataset.key;}))'
+    + 'vscode.postMessage({type:"link",from:link.from,to:t.dataset.key});}'
     + 'if(orbit&&!orbit.moved&&sel){sel=null;draw();}'
     + 'if(orbit||pan)report();'
     + '}finally{endGesture();}});'
@@ -208,6 +232,49 @@ function script(rel, cam, vb, sel) {
     + 'window.addEventListener("message",function(e){'
     + 'const m=e.data||{};if(m.type!=="view")return;'
     + 'const v=NAV_VIEWS[m.name];if(!v)return;cam={yaw:v.yaw,pitch:v.pitch};draw();report();});'
+    + 'const ab=document.getElementById("add");'
+    // A new chamber lands at the middle of the view, on the floor the view is pivoting
+    // around - "where I am looking" needs a height as well as a place, and the pivot's
+    // is the only one the author has expressed an opinion about.
+    + 'if(ab)ab.addEventListener("click",function(){'
+    + 'const w=unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y));'
+    + 'vscode.postMessage({type:"add",x:Math.round(w.x),y:Math.round(w.y),'
+    + 'z:Math.round(w.z)});});'
+    + 'const db=document.getElementById("del");'
+    + 'if(db)db.addEventListener("click",function(){'
+    + 'if(sel)vscode.postMessage({type:"remove",key:sel});});'
+    + 'window.addEventListener("keydown",function(e){'
+    + 'if(e.target&&e.target.tagName==="INPUT")return;'
+    + 'if((e.key==="Delete"||e.key==="Backspace")&&sel){e.preventDefault();'
+    + 'vscode.postMessage({type:"remove",key:sel});}});'
+    // RIGHT CLICK OPENS A MENU. The left button is busy with select/move/size/connect and
+    // the middle navigates, so the right is the only one left - and it is the one that
+    // can carry "here": the click point unprojects to an exact spot on the floor, which
+    // is a better Add than a toolbar button that can only mean "the middle of the view".
+    + 'const ctx=document.getElementById("ctx");'
+    + 'function hideCtx(){if(ctx)ctx.classList.add("hidden");}'
+    + 'function item(label,fn){const d=document.createElement("div");d.textContent=label;'
+    + 'd.addEventListener("click",function(){hideCtx();fn();});ctx.appendChild(d);}'
+    + 'svg.addEventListener("contextmenu",function(e){if(!ctx)return;e.preventDefault();'
+    + 'const g2=e.target.closest("[data-key]");'
+    + 'const q=pt(e);const w=unproject(q.x,q.y,cam,Math.round(pivot().y));'
+    + 'ctx.innerHTML="";'
+    + 'if(g2){const k=g2.dataset.key;'
+    + 'item("Select "+k,function(){sel=k;draw();});'
+    + 'item("Frame it",function(){sel=k;const p=partOf(k);'
+    + 'if(p){const s0=project(p,cam);const r=(p.r||p.hx||600)*4;'
+    + 'vb={x:s0.x-r,y:s0.y-r,w:r*2,h:r*2};apply();draw();report();}});'
+    + 'item("Delete "+k,function(){vscode.postMessage({type:"remove",key:k});});'
+    + 'ctx.appendChild(document.createElement("hr"));}'
+    + 'item("Add chamber here",function(){vscode.postMessage({type:"add",'
+    + 'x:Math.round(w.x),y:Math.round(w.y),z:Math.round(w.z)});});'
+    + 'item("Frame all",fit);'
+    + 'const b=svg.getBoundingClientRect();'
+    + 'ctx.style.left=(e.clientX-b.left)+"px";ctx.style.top=(e.clientY-b.top)+"px";'
+    + 'ctx.classList.remove("hidden");});'
+    + 'window.addEventListener("mousedown",function(e){'
+    + 'if(ctx&&!ctx.contains(e.target))hideCtx();},true);'
+    + 'window.addEventListener("keydown",function(e){if(e.key==="Escape")hideCtx();});'
     + 'document.querySelectorAll(".vw").forEach(function(b){'
     + 'b.addEventListener("click",function(){const v=NAV_VIEWS[b.dataset.view];'
     + 'if(v){cam={yaw:v.yaw,pitch:v.pitch};draw();report();}});});'

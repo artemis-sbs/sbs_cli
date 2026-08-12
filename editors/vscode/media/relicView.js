@@ -295,6 +295,15 @@ function render(relics, nonce, index, view, live, mode, cam, sel3) {
     + '.p3{cursor:pointer}.sel3{stroke:#e0af68!important;stroke-width:14}'
     + '.gz{cursor:move}.sz{cursor:nwse-resize}'
     + '.wrap{position:relative}'
+    + '.ctx{position:absolute;z-index:6;min-width:150px;padding:4px 0;'
+    + 'background:var(--vscode-menu-background,#252526);'
+    + 'color:var(--vscode-menu-foreground,#ccc);'
+    + 'border:1px solid var(--vscode-menu-border,#454545);border-radius:5px;'
+    + 'box-shadow:0 4px 16px #0008;font-size:12px}'
+    + '.ctx div{padding:4px 12px;cursor:pointer;white-space:nowrap}'
+    + '.ctx div:hover{background:var(--vscode-menu-selectionBackground,#04395e);'
+    + 'color:var(--vscode-menu-selectionForeground,#fff)}'
+    + '.ctx hr{border:0;border-top:1px solid var(--vscode-menu-border,#454545);margin:4px 0}'
     + '#navg{position:absolute;top:8px;right:8px;width:78px;height:78px;'
     + 'opacity:.9;z-index:4}'
     + '.part{cursor:move}.part.sel circle,.part.sel rect{stroke-width:12}'
@@ -467,8 +476,8 @@ function render(relics, nonce, index, view, live, mode, cam, sel3) {
     + '<button id="live"' + (live ? ' class="on"' : '')
     + ' title="Preview automatically after every edit, instead of pressing Preview">Live</button>'
     + '<span class="hint">' + (mode === '3d'
-      ? 'click a part to select &middot; drag an axis to move it &middot; drag to orbit '
-        + '&middot; SHIFT-drag to pan &middot; wheel to zoom &middot; ESC to deselect'
+      ? 'click to select &middot; drag a handle to move or size &middot; '
+        + 'MIDDLE-drag to orbit &middot; SHIFT-middle to pan &middot; wheel to zoom'
       : 'drag a chamber to move it &middot; drag the background to pan '
         + '&middot; wheel to zoom &middot; SHIFT-drag between chambers to connect '
         + '&middot; grid 1k, bold 10k')
@@ -487,6 +496,7 @@ function render(relics, nonce, index, view, live, mode, cam, sel3) {
       ? ('<div class="wrap"><svg id="scene3" viewBox="' + v3.x + ' ' + v3.y + ' '
          + v3.w + ' ' + v3.h + '" preserveAspectRatio="xMidYMid meet">'
          + '<g id="scene3g">' + V3.body(rel, cam3) + '</g></svg>'
+         + '<div id="ctx" class="ctx hidden"></div>'
          + '<svg id="navg" viewBox="0 0 100 100">' + Nav.navSvg(cam3, V3.project, 100)
          + '</svg></div>'
          + '<script nonce="' + nonce + '">' + Orbit.script(rel, cam3, v3, sel3) + '</script>')

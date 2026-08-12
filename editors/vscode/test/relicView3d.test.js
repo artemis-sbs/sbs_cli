@@ -176,7 +176,7 @@ check('a passage is not movable - it has no position of its own',
 // land somewhere else sometimes.
 check('one place ends a gesture', sel.indexOf('function endGesture()') >= 0);
 check('a mouse moving with no button held cancels the drag',
-  sel.indexOf('!e.buttons&&(move||orbit||pan||size)') >= 0);
+  sel.indexOf('!e.buttons&&(move||orbit||pan||size||link)') >= 0);
 check('the state comes back even if the write post throws',
   sel.indexOf('}finally{endGesture();}') >= 0);
 check('losing focus mid-drag ends it rather than waiting for a release',
@@ -276,6 +276,71 @@ check('a size is never written as zero - lint rejects it and the volume refuses 
   sel.indexOf('v=Math.max(1,Math.round(v))') >= 0);
 check('a stuck size drag is cleared with everything else',
   sel.indexOf('move||orbit||pan||size') >= 0);
+
+// --- Blender's mouse convention ---------------------------------------------
+// Middle drags orbit, SHIFT-middle pans, the wheel zooms. Worth copying for more than
+// familiarity: it leaves the LEFT button entirely to the work - select, move, size,
+// connect - which is the only way those coexist without a modifier each.
+check('the middle button navigates', sel.indexOf('e.button===1') >= 0);
+check('...and SHIFT-middle pans', /button===1[\s\S]{0,120}shiftKey\)\{pan=/.test(sel));
+// Without this the browser's middle-click autoscroll hijacks the very gesture we bind.
+check('middle-click autoscroll is prevented', /button===1\)\{e.preventDefault/.test(sel));
+check('the left button is left to the work', sel.indexOf('if(e.button!==0)return;') >= 0);
+
+// --- the plan's own verbs, now in 3D ----------------------------------------
+check('the ground grid is drawn in the WORLD, so it tilts with the view',
+  V3.groundGrid(rel, cam, 12000).length > 0
+  && V3.gridSvg(rel, cam, 12000, 12000).indexOf('<line') >= 0);
+check('...at the same 1k/10k spacing the game uses',
+  V3.GRID_MINOR === 1000 && V3.GRID_MAJOR === 10000);
+// Past a few hundred lines a grid stops being a ruler and becomes a grey wash.
+check('a huge span thins to major lines only',
+  V3.groundGrid(rel, cam, 400000).length < V3.groundGrid(rel, cam, 12000).length * 4);
+// The plan fans by world row; here it must be by PROJECTED position, because two chambers
+// far apart in the world can land on the same pixel from one angle and not another.
+const rows = V3.labelRows(V3.scene(rel, cam), 400);
+check('labels fan in screen space so they never collide',
+  rows.every((n, i, a) => i === 0 || n.ly - a[i - 1].ly >= 399.9));
+check('...with a leader line when one is pushed off its part',
+  V3.labelSvg(V3.scene(rel, cam), 350).indexOf('<line') >= 0);
+check('SHIFT-drag between parts connects them, same modifier as the plan',
+  sel.indexOf('link={from:g2.dataset.key}') >= 0 && sel.indexOf('type:"link"') >= 0);
+check('...but never to a solid, which is subtracted space rather than a room',
+  sel.indexOf('REL.solids.some') >= 0);
+check('Add and Delete are here too',
+  sel.indexOf('type:"add"') >= 0 && sel.indexOf('type:"remove"') >= 0);
+// "Where I am looking" needs a height as well as a place, and the pivot's is the only one
+// the author has expressed an opinion about.
+check('a new chamber lands where you are looking, on the pivot floor',
+  sel.indexOf('unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y))') >= 0);
+
+// --- the right-click menu ---------------------------------------------------
+check('right-click opens a menu', sel.indexOf('addEventListener("contextmenu"') >= 0);
+// The one thing a toolbar button cannot say: HERE. The click point unprojects to a spot.
+check('...whose Add means HERE, not the middle of the view',
+  sel.indexOf('unproject(q.x,q.y,cam') >= 0 && sel.indexOf('Add chamber here') >= 0);
+check('...and can frame or delete what was clicked',
+  sel.indexOf('Frame it') >= 0 && sel.indexOf('Delete "+k') >= 0);
+check('a click elsewhere closes it', sel.indexOf('!ctx.contains(e.target)') >= 0);
+
+// unproject is what all of that rests on: a screen point is a whole LINE in the world,
+// so it only has an answer once a height is pinned.
+[{ yaw: 0.6, pitch: 0.5 }, { yaw: 0, pitch: Math.PI / 2 }, { yaw: 2.1, pitch: 0.9 }].forEach((c, i) => {
+  const P = { x: 3000, y: 0, z: -2500 };
+  const s2 = V3.project(P, c);
+  const b2 = V3.unproject(s2.x, s2.y, c, 0);
+  check('unproject round-trips a ground point at angle ' + i,
+    near(b2.x, P.x, 1e-6) && near(b2.z, P.z, 1e-6));
+});
+check('...and on a raised floor too', (() => {
+  const P = { x: 1000, y: 1500, z: 500 }, c = { yaw: 0.6, pitch: 0.5 };
+  const s2 = V3.project(P, c), b2 = V3.unproject(s2.x, s2.y, c, 1500);
+  return near(b2.x, P.x, 1e-6) && near(b2.z, P.z, 1e-6);
+})());
+// Along the horizon the horizontal plane is edge-on and the answer is a whole line, so it
+// must fall back rather than divide by zero.
+check('an edge-on floor falls back instead of returning nonsense',
+  isFinite(V3.unproject(10, 20, { yaw: 0, pitch: 0 }, 0).z));
 
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.
