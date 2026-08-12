@@ -99,6 +99,12 @@
         "icon": "$(broadcast)"
       },
       {
+        "command": "amd.reloadRelicInSession",
+        "title": "Reload Relic in Running Session",
+        "category": "Artemis AMD",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "amd.newFile",
         "title": "New Content File",
         "category": "Artemis AMD"
@@ -151,6 +157,10 @@
         },
         {
           "command": "amd.previewInSession",
+          "when": "editorLangId == amd"
+        },
+        {
+          "command": "amd.reloadRelicInSession",
           "when": "editorLangId == amd"
         },
         {
@@ -390,7 +400,8 @@
     "test:fence": "node test/fenceModel.test.js",
     "package": "vsce package",
     "test:relic": "node test/relicModel.test.js",
-    "test:view": "node test/relicView.test.js"
+    "test:view": "node test/relicView.test.js",
+    "test:debug": "node test/debugCommand.test.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

@@ -974,19 +974,39 @@ async function showPreview(): Promise<void> {
   previewPanel.reveal(vscode.ViewColumn.Beside, true);
 }
 
-// POST a debug command to a running `sbs debug` mock session (its stdlib server
-// exposes POST /debug/command). Node's http (no extra dep); resolves on 2xx.
-function postDebugCommand(port: number, body: unknown): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const data = Buffer.from(JSON.stringify(body), 'utf8');
-    const req = http.request(
-      { host: '127.0.0.1', port, path: '/debug/command', method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }, timeout: 2000 },
-      (res) => { res.resume(); (res.statusCode && res.statusCode < 300) ? resolve() : reject(new Error(`HTTP ${res.statusCode}`)); });
-    req.on('timeout', () => req.destroy(new Error('timeout')));
-    req.on('error', reject);
-    req.write(data); req.end();
-  });
+// POST a debug command to a running `sbs debug` mock session (its stdlib server exposes
+// POST /debug/command). Lives in media/debugCommand.js with no `vscode` import so it can
+// be tested against a throwaway http server - which matters here, because this is where a
+// failed command used to become a silent success: the old version discarded the response
+// body, so `{"error": "no story is running yet"}` resolved and the status bar said the
+// preview had worked. Pass `{wait: true}` to get the runner's own answer back.
+const DebugCommand = require(path.join(__dirname, '..', 'media', 'debugCommand.js'));
+function postDebugCommand(port: number, body: unknown,
+                          opts?: { wait?: boolean; timeoutMs?: number }): Promise<any> {
+  return DebugCommand.postDebugCommand(port, body, opts);
+}
+
+// "Reload Relic in Running Session" — rebuild the relic authored in the active file from
+// disk, in a running session. The same thing the relic plan's Preview button does, minus
+// the panel: the rebuild is a debug action the LIBRARY answers, so it needs no route, no
+// signal, and no code in the mission being edited.
+async function reloadRelicInSession(): Promise<void> {
+  const doc = vscode.window.activeTextEditor?.document;
+  if (!doc) { return; }
+  if (doc.isDirty) { await doc.save(); }     // the session rebuilds from the file on disk
+  const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+  try {
+    const reply = await postDebugCommand(
+      port, { action: 'relic_reload', file: doc.uri.fsPath }, { wait: true });
+    vscode.window.setStatusBarMessage(
+      'Relic: ' + DebugCommand.describeReply(reply, 'reload sent'), 4000);
+  } catch (e) {
+    const why = (e as Error)?.message || String(e);
+    vscode.window.showWarningMessage(
+      /timeout|ECONNREFUSED|socket/i.test(why)
+        ? `Artemis AMD: no running session on port ${port} (start one with \`sbs debug\`).`
+        : `Artemis AMD: ${why}`);
+  }
 }
 
 // "Preview in Running Session" — push the node at the cursor into a live `sbs debug`
@@ -4602,6 +4622,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.reloadRelicInSession', reloadRelicInSession));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
 
   // Reverse sync: when an Inspector's .amd changes elsewhere, mirror it back into
@@ -4707,22 +4728,34 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   const sendPreview = async (quiet: boolean) => {
     if (doc.isDirty) { await doc.save(); }
     const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+    // The relic KEY and the file, so a mission with two relics rebuilds the one on
+    // screen. Both are selectors and both are optional - a session with a single relic
+    // reloads it either way.
+    const rel = RelicModel.parse(doc.getText()).relics[index];
     try {
-      await postDebugCommand(port, { action: 'signal', name: 'relic_reload' });
+      const reply = await postDebugCommand(port, {
+        action: 'relic_reload',
+        key: rel ? rel.key : undefined,
+        file: doc.uri.fsPath,
+      }, { wait: true });
       warnedNoSession = false;
       vscode.window.setStatusBarMessage(
-        quiet ? 'Relic: rebuilt in the running session' : 'Relic: reload sent to the running session',
-        3000);
+        'Relic: ' + DebugCommand.describeReply(reply, 'reload sent to the running session'),
+        4000);
     } catch (e) {
+      const why = (e as Error)?.message || String(e);
       if (quiet) {
         if (!warnedNoSession) {
           warnedNoSession = true;
-          vscode.window.setStatusBarMessage('Relic: live preview has no session to talk to', 4000);
+          vscode.window.setStatusBarMessage('Relic: live preview - ' + why, 5000);
         }
         return;
       }
+      // The runner's own words when it answered, ours only when nothing answered at all.
       vscode.window.showWarningMessage(
-        `Artemis AMD: no running session on port ${port} (start one with \`sbs debug\`).`);
+        /timeout|ECONNREFUSED|socket/i.test(why)
+          ? `Artemis AMD: no running session on port ${port} (start one with \`sbs debug\`).`
+          : `Artemis AMD: ${why}`);
     }
   };
 
