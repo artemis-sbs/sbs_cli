@@ -118,5 +118,62 @@ check('...and says which gestures it actually has', /drag to orbit/.test(three))
 check('the two views never render together',
   (plan.indexOf('id="scene3"') < 0) && (three.indexOf('id="plan"') < 0));
 
+// --- the move gizmo ---------------------------------------------------------
+// A bare drag in a 3D view is ambiguous: the same mouse movement could mean any of a
+// plane of world positions. Constraining each drag to ONE axis makes it answerable.
+const G = require('../media/relicGizmo.js');
+const cam = V3.defaultCamera();
+const hs = G.handles({ x: 0, y: 0, z: 0 }, cam, 1000, V3.project);
+check('three axes', hs.length === 3 && hs.map((h) => h.axis).join('') === 'xyz');
+check('all three are draggable from a three-quarter view', hs.every((h) => h.draggable));
+
+// The failure people report as "it jumped": an axis pointing at the camera collapses to
+// a point on screen, so a pixel of mouse movement becomes thousands of units.
+const down = G.handles({ x: 0, y: 0, z: 0 }, V3.topDown(), 1000, V3.project);
+const yDown = down.find((h) => h.axis === 'y');
+check('looking straight down, the height axis is edge-on', yDown.len < 1);
+check('...and refuses to be dragged rather than obeying wildly', !yDown.draggable);
+check('...while the other two still work',
+  down.filter((h) => h.axis !== 'y').every((h) => h.draggable));
+check('an edge-on handle says why in its tooltip',
+  G.gizmoSvg({ x: 0, y: 0, z: 0 }, V3.topDown(), 1000, V3.project).indexOf('edge-on') >= 0);
+
+// The projection of a mouse movement onto the axis, which IS the move.
+const hx = hs.find((h) => h.axis === 'x');
+check('dragging exactly along an axis moves exactly that far',
+  near(G.along(hx, hx.dx, hx.dy), 1, 0.0001));
+check('dragging across it does not move at all',
+  near(G.along(hx, -hx.dy, hx.dx), 0, 0.0001));
+check('dragging back moves back', near(G.along(hx, -hx.dx, -hx.dy), -1, 0.0001));
+check('a collapsed axis yields no movement rather than infinity',
+  G.along({ dx: 0, dy: 0 }, 100, 100) === 0);
+
+// --- selecting and writing --------------------------------------------------
+const sel = Orbit.script(rel, cam, { x: 0, y: 0, w: 100, h: 100 }, 'hub');
+check('a part is selectable', sel.indexOf('data-key') >= 0 || sel.indexOf('sel=') >= 0);
+check('a solid is selectable too',
+  V3.body(rel, cam).indexOf('class="p3" data-key="core"') >= 0
+  || Orbit.sceneData(rel).solids.every((s) => s.key !== undefined));
+check('ESC deselects', sel.indexOf('Escape') >= 0);
+// One write path: the gizmo posts the SAME message the plan view and the inspector post,
+// so all three land on setPart and rewrite exactly one line.
+check('a finished drag writes through the shared field message',
+  sel.indexOf('type:"field"') >= 0 && sel.indexOf('patch:{x:') >= 0);
+check('...carrying all three axes, since 3D can move any of them',
+  /patch:\{x:[^}]*y:[^}]*z:/.test(sel));
+check('a click that did not move writes nothing',
+  sel.indexOf('move&&move.moved') >= 0);
+check('the selection is reported so a redraw does not drop the gizmo',
+  sel.indexOf('type:"sel3d"') >= 0);
+check('a passage is not movable - it has no position of its own',
+  sel.indexOf('REL.chambers.concat(REL.boxes,REL.solids)') >= 0);
+
+// The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
+// page already binds to its element) blanks the view with nothing in the log.
+check('the page script parses', (() => {
+  try { new Function(sel.replace('acquireVsCodeApi()', '({postMessage:function(){}})')); return true; }
+  catch (e) { return false; }
+})());
+
 console.log('\n' + (fail ? fail + ' FAILED' : 'all relicView3d tests passed') + '\n');
 process.exit(fail ? 1 : 0);

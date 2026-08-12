@@ -125,7 +125,7 @@ function bounds(rel) {
  * redraw happens on every keystroke in the document, so losing it would make the plan
  * unusable while editing.
  */
-function render(relics, nonce, index, view, live, mode, cam) {
+function render(relics, nonce, index, view, live, mode, cam, sel3) {
   const rel = relics[index];
   if (!rel) {
     return '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);'
@@ -291,6 +291,8 @@ function render(relics, nonce, index, view, live, mode, cam) {
     + 'svg.panning{cursor:grabbing}svg.linking{cursor:crosshair}'
     + 'svg#scene3{cursor:move}svg#scene3.orbiting{cursor:grabbing}'
     + 'svg#scene3.panning{cursor:grabbing}'
+    + '.p3{cursor:pointer}.sel3{stroke:#e0af68!important;stroke-width:14}'
+    + '.gz{cursor:move}'
     + '.part{cursor:move}.part.sel circle,.part.sel rect{stroke-width:12}'
     + '.insp{position:absolute;right:14px;top:56px;z-index:5;padding:8px 10px;'
     + 'background:var(--vscode-editorWidget-background,#252526);border-radius:6px;'
@@ -438,8 +440,8 @@ function render(relics, nonce, index, view, live, mode, cam) {
     + '<button id="live"' + (live ? ' class="on"' : '')
     + ' title="Preview automatically after every edit, instead of pressing Preview">Live</button>'
     + '<span class="hint">' + (mode === '3d'
-      ? 'drag to orbit &middot; SHIFT-drag to pan &middot; wheel to zoom '
-        + '&middot; edit in the Plan view'
+      ? 'click a part to select &middot; drag an axis to move it &middot; drag to orbit '
+        + '&middot; SHIFT-drag to pan &middot; wheel to zoom &middot; ESC to deselect'
       : 'drag a chamber to move it &middot; drag the background to pan '
         + '&middot; wheel to zoom &middot; SHIFT-drag between chambers to connect '
         + '&middot; grid 1k, bold 10k')
@@ -458,7 +460,7 @@ function render(relics, nonce, index, view, live, mode, cam) {
       ? ('<div class="wrap"><svg id="scene3" viewBox="' + v3.x + ' ' + v3.y + ' '
          + v3.w + ' ' + v3.h + '" preserveAspectRatio="xMidYMid meet">'
          + '<g id="scene3g">' + V3.body(rel, cam3) + '</g></svg></div>'
-         + '<script nonce="' + nonce + '">' + Orbit.script(rel, cam3, v3) + '</script>')
+         + '<script nonce="' + nonce + '">' + Orbit.script(rel, cam3, v3, sel3) + '</script>')
       : ('<div class="wrap"><svg id="plan" viewBox="' + vb.x + ' ' + vb.y + ' ' + vb.w
          + ' ' + vb.h + '" preserveAspectRatio="xMidYMid meet">' + grid + '<g>' + svg
          + '</g></svg></div>'

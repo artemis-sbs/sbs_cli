@@ -4773,6 +4773,10 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   let mode: 'plan' | '3d' = 'plan';
   let lastView3d: { x: number; y: number; w: number; h: number } | undefined;
   let cam: { yaw: number; pitch: number } | undefined;
+  // What is selected in 3D. Remembered here because a drag REWRITES the document, which
+  // redraws the panel - so a selection kept only in the page would be dropped by the very
+  // edit that used it, and the gizmo would vanish after every move.
+  let sel3: string | undefined;
 
   const panel = vscode.window.createWebviewPanel(
     'amdRelic', 'Relic Plan', column, { enableScripts: true },
@@ -4782,7 +4786,7 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     if (index >= model.relics.length) { index = 0; }
     panel.webview.html = RelicView.render(
       model.relics, nonce(), index,
-      mode === '3d' ? lastView3d : lastView, relicLive, mode, cam);
+      mode === '3d' ? lastView3d : lastView, relicLive, mode, cam, sel3);
   };
   draw();
 
@@ -4845,6 +4849,10 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       lastView3d = { x: msg.x, y: msg.y, w: msg.w, h: msg.h };
       cam = { yaw: msg.yaw, pitch: msg.pitch };
       return;
+    }
+    if (msg && msg.type === 'sel3d') {
+      sel3 = msg.key || undefined;
+      return;                          // a selection is not an edit - never redraw here
     }
     if (msg && msg.type === 'mode') {
       mode = msg.mode === '3d' ? '3d' : 'plan';

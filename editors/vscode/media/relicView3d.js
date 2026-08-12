@@ -87,7 +87,7 @@ function scene(rel, cam) {
     const q = project(s, cam);
     // -1 breaks ties toward the front: a solid sits INSIDE a chamber, so at equal depth
     // it is the thing you are meant to see.
-    items.push({ kind: 'solid', at: q, depth: q.depth - 1, r: s.r || 0,
+    items.push({ kind: 'solid', at: q, depth: q.depth - 1, r: s.r || 0, key: s.key,
                  label: s.name || s.kind || 'solid' });
   }
   return items.sort((m, n) => n.depth - m.depth);
@@ -152,7 +152,8 @@ function body(rel, cam) {
       // as another room, which is the exact opposite of what it is.
       out += '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1)
         + '" r="' + (it.r || 100) + '" fill="none" stroke="#f7768e" stroke-opacity="' + a
-        + '" stroke-width="8" stroke-dasharray="40 30"><title>'
+        + '" stroke-width="8" stroke-dasharray="40 30" class="p3" data-key="' + esc(it.key)
+        + '"><title>'
         + esc(it.label) + ' (subtracted)</title></circle>';
     }
   }
