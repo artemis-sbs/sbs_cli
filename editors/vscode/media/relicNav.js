@@ -120,10 +120,17 @@ function viewFor(name) {
 
 /** The same functions, as source, for the webview - see relicView3d.clientBundle. */
 function clientBundle() {
-  return 'const NAV_BALLS = ' + JSON.stringify(BALLS) + ';\n'
-    + 'const NAV_VIEWS = ' + JSON.stringify(VIEWS) + ';\n'
-    + balls.toString().replace('BALLS', 'NAV_BALLS') + '\n'
-    + navSvg.toString() + '\n';
+  // VIEWS and OPPOSITE go out under their OWN names, because nextView's source refers
+  // to them by those names. Emitting only an aliased copy is how the whole widget went
+  // dead once: every click threw ReferenceError before it could reach the camera, and a
+  // handler that throws looks exactly like a handler that was never wired up.
+  return 'const VIEWS = ' + JSON.stringify(VIEWS) + ';\n'
+    + 'const NAV_VIEWS = VIEWS;\n'
+    + 'const BALLS = ' + JSON.stringify(BALLS) + ';\n'
+    + 'const NAV_BALLS = BALLS;\n'
+    + 'const OPPOSITE = ' + JSON.stringify(OPPOSITE) + ';\n'
+    + [balls, navSvg, nextView].map(function (f) { return f.toString(); }).join('\n')
+    + '\n';
 }
 
 module.exports = { balls, navSvg, viewFor, nextView, clientBundle,

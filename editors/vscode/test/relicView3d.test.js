@@ -376,6 +376,60 @@ check('...and the JSON still parses to what it was',
 check('U+2028 and U+2029 are escaped too',
   Orbit.embed({ n: 'a b c' }).indexOf(' ') < 0);
 
+// --- three things reported from use ------------------------------------------
+// "The camera navigator does not work any more."
+// nextView's SOURCE refers to VIEWS and OPPOSITE by those names, so emitting only an
+// aliased copy left every click throwing ReferenceError before it reached the camera -
+// and a handler that throws looks exactly like one that was never wired up.
+const navPage = new Function(N.clientBundle()
+  + '; return {nextView:nextView,navSvg:navSvg,balls:balls};')();
+check('the page can actually run nextView',
+  navPage.nextView('top', N.viewFor('top')) === 'bottom');
+check('...and it agrees with the module',
+  navPage.nextView('front', N.viewFor('front')) === N.nextView('front', N.viewFor('front')));
+check('...and so does the widget it draws',
+  navPage.navSvg(cam, V3.project, 100) === N.navSvg(cam, V3.project, 100));
+
+// "Middle button down zooms in so I cannot orbit or pan."
+// The browser arms its autoscroll on the middle press. Refusing it on the scene's own
+// mousedown is too late and too narrow - the press can land on a child, and by the time
+// it bubbles the scroll mode is armed, which then reads every drag as a scroll.
+check('the middle press is refused at the DOCUMENT, in the capture phase',
+  /document.addEventListener\("mousedown",function\(e\)\{if\(e.button===1\)e.preventDefault\(\);\},true\)/
+    .test(sel.replace(/'\s*\+\s*'/g, '')));
+check('...and auxclick with it, which fires after the release',
+  sel.indexOf('auxclick') >= 0);
+
+// "The names do not move when you change the camera."
+// The labels are part of the PICTURE. Rendering them once, server-side, left the names
+// sitting where the chambers used to be.
+check('a redraw redraws the labels', sel.indexOf('lb.innerHTML=labelSvg(scene(REL,cam)') >= 0);
+check('...and the ground grid, which turns with the view too',
+  sel.indexOf('gr.outerHTML=gridSvg(REL,cam') >= 0);
+check('...and the navigation widget, which shows where the camera IS',
+  sel.indexOf('nv.innerHTML=navSvg(cam,project,100)') >= 0);
+// Every piece of the picture is a function of the camera, so every piece has to be
+// recomputed when it changes. This is the list.
+check('nothing in the picture is drawn only once',
+  ['scene3g', 'grid3', 'lab3g', 'navg'].every((id) => sel.indexOf(id) >= 0));
+
+// Every bundle, RUN. A clientBundle that omits something its own functions reference is
+// not a missing feature - it is a ReferenceError at the moment of use, and the symptom is
+// a control that appears to have been forgotten rather than one that is broken. Whole
+// widget, one omitted name.
+[['relicView3d', V3.clientBundle(), 'body(REL,CAM)'],
+ ['relicGizmo', G.clientBundle(), 'gizmoSvg({x:0,y:0,z:0,r:100},CAM,100,PROJECT)'],
+ ['relicNav', N.clientBundle(), 'navSvg(CAM,PROJECT,100)+nextView("top",CAM)'],
+].forEach(([name, src, call]) => {
+  check(name + ' evaluates and runs standalone in the page', (() => {
+    try {
+      new Function('REL', 'CAM', 'PROJECT', src + '; return ' + call + ';')(
+        rel, cam, V3.project);
+      return true;
+    } catch (e) { return false; }
+  })());
+});
+
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.
 check('the page script parses', (() => {

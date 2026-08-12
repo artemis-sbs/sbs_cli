@@ -90,6 +90,13 @@ function script(rel, cam, vb, sel) {
     + 'function draw(){const p=partOf(sel);'
     + 'g.innerHTML=body(REL,cam)+(p?gizmoSvg(p,cam,gizL(),project)'
     + '+sizeSvg(p,cam,project,gizL()):"");'
+    + 'const gr=document.getElementById("grid3");'
+    + 'if(gr)gr.outerHTML=gridSvg(REL,cam,Math.max(vb.w,vb.h),vb.w);'
+    // The labels are part of the PICTURE, so they have to be redrawn with it. Rendering
+    // them once server-side left the names sitting where the chambers used to be, which
+    // reads as the scene sliding out from under its own labels.
+    + 'const lb=document.getElementById("lab3g");'
+    + 'if(lb)lb.innerHTML=labelSvg(scene(REL,cam),Math.max(vb.w,vb.h)/42);'
     + 'const nv=document.getElementById("navg");'
     + 'if(nv)nv.innerHTML=navSvg(cam,project,100);'
     + 'if(p){const n=g.querySelector(\'[data-key="\'+CSS.escape(p.key)+\'"]\');'
@@ -103,6 +110,15 @@ function script(rel, cam, vb, sel) {
     + 'vb={x:e.x-p,y:e.y-p,w:e.w+p*2,h:e.h+p*2};apply();draw();report();}'
     + 'function pt(e){const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;'
     + 'return p.matrixTransform(svg.getScreenCTM().inverse());}'
+    // MIDDLE-CLICK AUTOSCROLL has to be refused at the DOCUMENT, in the capture phase.
+    // Preventing it on the scene's own mousedown is both too late and too narrow: the
+    // press can land on a child element, and by the time it bubbles the browser has
+    // already armed its scroll mode - which then reads every drag as a scroll and every
+    // scroll as a zoom, so orbit and pan simply never start.
+    + 'document.addEventListener("mousedown",function(e){'
+    + 'if(e.button===1)e.preventDefault();},true);'
+    + 'document.addEventListener("auxclick",function(e){'
+    + 'if(e.button===1)e.preventDefault();},true);'
     + 'svg.addEventListener("mousedown",function(e){'
     // MIDDLE BUTTON NAVIGATES, Blender's convention: middle drags orbit, SHIFT-middle
     // pans, the wheel zooms. It is worth copying for more than familiarity - it leaves
