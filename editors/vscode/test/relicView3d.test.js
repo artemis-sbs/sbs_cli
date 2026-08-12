@@ -383,6 +383,14 @@ check('...and a typed number writes through the same field message',
 check('...never as zero, which lint rejects and the volume refuses',
   sel.indexOf('Math.max(1,Math.round(v))') >= 0);
 check('half-extent fields appear only for a box', sel.indexOf('"lhx","lhy","lhz"') >= 0);
+// A rename rewrites the HEADING rather than a fence field, so it travels as its own
+// message - but it is still exactly one line and one undo step.
+check('a rename posts its own message', sel.indexOf('type:"name"') >= 0);
+// Refilling the box you are typing in would fight the cursor on every keystroke.
+check('...and the field you are typing in is not overwritten under you',
+  sel.indexOf('document.activeElement!==nm') >= 0);
+check('the key is shown beside it, so a rename cannot be mistaken for one',
+  sel.indexOf('passages use it') >= 0);
 
 // --- embedding the scene safely ---------------------------------------------
 // The relic file is data from wherever the mission came from. JSON.stringify does not

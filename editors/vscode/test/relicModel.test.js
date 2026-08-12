@@ -290,4 +290,39 @@ check('...but does NOT delete hand-written prose',
 
 console.log('');
 if (failures) { console.log(failures + ' failure(s)'); process.exit(1); }
+// Split without a regex literal: this file has been rewritten by tooling that mangles
+// escapes inside them, and a broken regex here is a syntax error that takes the whole
+// suite down rather than failing one check.
+function splitLines(s) {
+  return String(s).split(String.fromCharCode(13)).join('').split(String.fromCharCode(10));
+}
+
+// --- renaming ---------------------------------------------------------------
+// The display text is the one thing about a part an author says in WORDS, and until now
+// the editor could change every number and not the name.
+{
+  const rel = R.parse(DOC).relics[0];
+  const hub = rel.chambers[0];
+  const out = R.setName(DOC, hub, 'The Great Hub');
+  const before = DOC.split(NL), after = splitLines(out);
+  const changed = before.map((l, i2) => (l !== after[i2] ? i2 : -1)).filter((i2) => i2 >= 0);
+  check('a rename rewrites exactly one line', changed.length === 1);
+  check('...the heading', after[changed[0]].indexOf('[The Great Hub]') >= 0);
+  const re = R.parse(out).relics[0];
+  check('...and the new name parses back', re.chambers[0].name === 'The Great Hub');
+  // Passages name their ends by KEY, so renaming one here would silently orphan every
+  // corridor that reached it. A rename in an editor must not be able to disconnect a relic.
+  check('the key is untouched', re.chambers[0].key === hub.key);
+  check('...so every passage survives', re.passages.length === rel.passages.length);
+  // `]` would end the link text early and `[` opens one.
+  check('brackets are stripped rather than breaking the heading',
+    R.parse(R.setName(DOC, hub, 'a[b]c')).relics[0].chambers[0].name === 'abc');
+  check('a newline cannot split the heading in two',
+    splitLines(R.setName(DOC, hub, 'a' + NL + 'b')).length === before.length);
+  check('an empty name is allowed - it is a heading, not a key',
+    R.parse(R.setName(DOC, hub, '')).relics[0].chambers[0].name === '');
+  check('a part with no heading line is left alone',
+    R.setName(DOC, { key: 'x' }, 'zz') === DOC);
+}
+
 console.log('all relic model tests passed');

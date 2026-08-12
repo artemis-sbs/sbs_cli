@@ -130,7 +130,9 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     + '#navg{position:absolute;top:8px;right:8px;width:78px;height:78px;'
     + 'opacity:.9;z-index:4}'
     + '.part{cursor:move}.part.sel circle,.part.sel rect{stroke-width:12}'
-    + '.insp{position:absolute;right:14px;top:56px;z-index:5;padding:8px 10px;'
+    // BOTTOM right, not top: the navigation gizmo lives in the top corner and the
+    // properties panel was sitting on top of it.
+    + '.insp{position:absolute;right:14px;bottom:14px;z-index:5;padding:8px 10px;'
     + 'background:var(--vscode-editorWidget-background,#252526);border-radius:6px;'
     + 'border:1px solid var(--vscode-panel-border,#8883);box-shadow:0 3px 14px #0007;'
     + 'display:flex;flex-direction:column;gap:4px;font-size:12px;min-width:150px}'
@@ -142,6 +144,7 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     + '.ititle{font-weight:600;margin-bottom:2px}'
     + '.ikind{opacity:.6;font-weight:400}'
     + '.insp label{display:flex;justify-content:space-between;align-items:center;gap:8px}'
+    + '.insp label.wide{width:100%}.insp label.wide input{width:150px}'
     + '.insp input{width:82px;background:var(--vscode-input-background,#3c3c3c);'
     + 'color:var(--vscode-input-foreground,#ccc);border:1px solid '
     + 'var(--vscode-input-border,#5555);border-radius:3px;padding:1px 4px}'
@@ -173,7 +176,12 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     + '&middot; MIDDLE-drag to orbit &middot; SHIFT-middle to pan &middot; wheel to zoom'
     + '</span></header>' + warn
     + '<div id="insp" class="insp hidden">'
-    + '<div class="ititle"><span id="iname"></span> <span id="ikind" class="ikind"></span></div>'
+    + '<div class="ititle"><span id="ikind" class="ikind"></span></div>'
+    // The display text, which is the one thing about a part an author says in WORDS.
+    // The key beside it is deliberately read-only: passages name their ends by key,
+    // so renaming one here would silently orphan every corridor reaching it.
+    + '<label class="wide">name <input id="fname" type="text"></label>'
+    + '<div class="ihint" id="ikey"></div>'
     + '<label>x <input id="fx" type="number" step="10"></label>'
     + '<label>y <input id="fy" type="number" step="10"></label>'
     + '<label>z <input id="fz" type="number" step="10"></label>'

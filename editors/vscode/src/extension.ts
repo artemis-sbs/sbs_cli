@@ -4851,6 +4851,13 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       sel3 = msg.key || undefined;
       return;                          // a selection is not an edit - never redraw here
     }
+    if (msg && msg.type === 'name') {
+      // A rename rewrites the `### [display](key)` heading, not a fence field - but it is
+      // still exactly one line, so it is still one undo step.
+      await applyRelicEdit(doc, index, msg.key,
+        (text: string, part: RelicPart) => RelicModel.setName(text, part, msg.name));
+      return;
+    }
     if (msg && msg.type === 'field') {
       // A typed field - the same one-line write a drag makes.
       await applyRelicEdit(doc, index, msg.key,

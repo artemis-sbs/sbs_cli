@@ -130,6 +130,15 @@ check('the hidden rule is general, not a list of the elements using it today',
   check(what + ' starts hidden', markup.indexOf(m) >= 0);
 });
 
+// The properties panel sits BOTTOM right. It used to be top right, on top of the
+// navigation gizmo, which lives in the corner it needs.
+check('the properties panel does not sit on the navigation gizmo',
+  markup.indexOf('bottom:14px') >= 0 && markup.indexOf('top:56px') < 0);
+// The display text is the one thing about a part an author says in words.
+check('a part can be renamed from the panel', markup.indexOf('id="fname"') >= 0);
+check('...and the key is shown but not editable',
+  markup.indexOf('id="ikey"') >= 0 && markup.indexOf('id="fkey"') < 0);
+
 // ------------------------------------------------------------------ warnings
 const ORPHAN = DOC + NL + NL
   + ['### [stray](stray)', '---', 'Relic: nosuch', 'Chamber: 0,0,0,100', '---'].join(NL);

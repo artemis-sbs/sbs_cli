@@ -183,6 +183,30 @@ function writeField(text, lineNo, values, prefix) {
   return lines.join('\n');
 }
 
+/** Rewrite a part's DISPLAY TEXT - the `### [display](key)` heading.
+ *
+ *  The display text is the only thing about a part an author can say in words, and until
+ *  now the editor could change every number and not the name. It rewrites one line, like
+ *  every other edit here.
+ *
+ *  The KEY is deliberately untouched. Passages name their ends by key, so renaming one
+ *  would silently orphan every corridor that reached it - a rename in an editor should
+ *  not be able to disconnect a relic.
+ */
+function setName(text, part, name) {
+  const lines = String(text).split(/\r?\n/);
+  const i = part && part.headingLine;
+  if (i === undefined || i === null || i < 0 || i >= lines.length) { return text; }
+  const m = /^(\s*#{1,6}\s*)\[[^\]]*\](\([^)]*\).*)$/.exec(lines[i]);
+  if (!m) { return text; }
+  // `]` would end the link text early and `[` opens one; a display name carrying either
+  // is not a rename, it is a broken heading.
+  const clean = String(name === undefined || name === null ? '' : name)
+    .replace(/[\[\]]/g, '').replace(/[\r\n]/g, ' ').trim();
+  lines[i] = m[1] + '[' + clean + ']' + m[2];
+  return lines.join('\n');
+}
+
 /** Numbers as an author would write them: no trailing `.0`, no exponent noise. */
 function fmt(n) {
   if (!Number.isFinite(n)) return '0';
@@ -400,6 +424,7 @@ function R_reparse(text, relicKey, partKey) {
 }
 
 module.exports = {
+  setName,
   parse, writeField, movePart: moveePart, resizePart, setHeight, setPart,
   addPassage, removePassage, addChamber, removePart,
   numbers, words, fmt,
