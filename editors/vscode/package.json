@@ -401,7 +401,8 @@
     "package": "vsce package",
     "test:relic": "node test/relicModel.test.js",
     "test:view": "node test/relicView.test.js",
-    "test:debug": "node test/debugCommand.test.js"
+    "test:debug": "node test/debugCommand.test.js",
+    "test:3d": "node test/relicView3d.test.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

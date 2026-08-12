@@ -25,6 +25,9 @@
 
 'use strict';
 
+const V3 = require('./relicView3d.js');
+const Orbit = require('./relicOrbit.js');
+
 /** World z -> SVG y. The radar draws +Z up; SVG grows down. */
 function sy(z) { return 0 - z; }
 
@@ -122,7 +125,7 @@ function bounds(rel) {
  * redraw happens on every keystroke in the document, so losing it would make the plan
  * unusable while editing.
  */
-function render(relics, nonce, index, view, live) {
+function render(relics, nonce, index, view, live, mode, cam) {
   const rel = relics[index];
   if (!rel) {
     return '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);'
@@ -134,6 +137,16 @@ function render(relics, nonce, index, view, live) {
   const base = bounds(rel);
   const vb = (view && isFinite(view.w) && view.w > 0) ? view : base;
   const fs = Math.max(base.w, base.h) / 42;
+
+  // The 3D camera and its framing. `view` is shared between the two modes on purpose:
+  // each reports its own viewBox and the panel hands back whichever was last seen, so
+  // switching Plan/3D does not throw away where you were looking.
+  const cam3 = cam || V3.defaultCamera();
+  const e3 = V3.extent(V3.scene(rel, cam3));
+  const pad3 = Math.max(e3.w, e3.h) * 0.08;
+  const v3 = (view && isFinite(view.w) && view.w > 0)
+    ? view
+    : { x: e3.x - pad3, y: e3.y - pad3, w: e3.w + pad3 * 2, h: e3.h + pad3 * 2 };
 
   // ---- reference grid ------------------------------------------------------
   // Drawn over the relic's own bounds rather than the current view, so panning moves the
@@ -276,6 +289,8 @@ function render(relics, nonce, index, view, live) {
     + 'padding:4px 10px}.wrap{flex:1;overflow:hidden}'
     + 'svg{display:block;width:100%;height:100%;cursor:grab}'
     + 'svg.panning{cursor:grabbing}svg.linking{cursor:crosshair}'
+    + 'svg#scene3{cursor:move}svg#scene3.orbiting{cursor:grabbing}'
+    + 'svg#scene3.panning{cursor:grabbing}'
     + '.part{cursor:move}.part.sel circle,.part.sel rect{stroke-width:12}'
     + '.insp{position:absolute;right:14px;top:56px;z-index:5;padding:8px 10px;'
     + 'background:var(--vscode-editorWidget-background,#252526);border-radius:6px;'
@@ -393,6 +408,11 @@ function render(relics, nonce, index, view, live) {
     // explicitly. The keybinding is kept too, so the reflex still works.
     + "document.getElementById('undo').addEventListener('click',function(){"
     + "vscode.postMessage({type:'undo'});});"
+    + "const b2=document.getElementById('m2d'),b3=document.getElementById('m3d');"
+    + "if(b2)b2.addEventListener('click',function(){"
+    + "vscode.postMessage({type:'mode',mode:'plan'});});"
+    + "if(b3)b3.addEventListener('click',function(){"
+    + "vscode.postMessage({type:'mode',mode:'3d'});});"
     + "window.addEventListener('keydown',function(e){"
     + "if(e.target.tagName==='INPUT')return;"
     + "if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();"
@@ -406,15 +426,23 @@ function render(relics, nonce, index, view, live) {
     + 'style-src \'unsafe-inline\'; script-src \'nonce-' + nonce + '\';">'
     + '<style>' + style + '</style></head><body>'
     + '<header>' + picker + '<button id="fit">Fit</button>'
-    + '<button id="add">Add chamber</button>'
-    + '<button id="del">Delete</button>'
+    + '<button id="m2d"' + (mode === '3d' ? '' : ' class="on"')
+    + ' title="Top-down plan: drag to move a chamber, edit its numbers">Plan</button>'
+    + '<button id="m3d"' + (mode === '3d' ? ' class="on"' : '')
+    + ' title="Orbit the relic. Needs nothing running - a relic can sit 80k out or not '
+    + 'exist until a quest spawns it, so booting the mission is no way to look at it">3D</button>'
+    + (mode === '3d' ? '' : '<button id="add">Add chamber</button>')
+    + (mode === '3d' ? '' : '<button id="del">Delete</button>')
     + '<button id="undo" title="Undo the last edit to the .amd file (CTRL-Z in a webview does not reach it)">Undo</button>'
     + '<button id="prev" title="Rebuild this relic in a running sbs debug session">Preview</button>'
     + '<button id="live"' + (live ? ' class="on"' : '')
     + ' title="Preview automatically after every edit, instead of pressing Preview">Live</button>'
-    + '<span class="hint">drag a chamber to move it &middot; drag the background to pan '
-    + '&middot; wheel to zoom &middot; SHIFT-drag between chambers to connect '
-    + '&middot; grid 1k, bold 10k'
+    + '<span class="hint">' + (mode === '3d'
+      ? 'drag to orbit &middot; SHIFT-drag to pan &middot; wheel to zoom '
+        + '&middot; edit in the Plan view'
+      : 'drag a chamber to move it &middot; drag the background to pan '
+        + '&middot; wheel to zoom &middot; SHIFT-drag between chambers to connect '
+        + '&middot; grid 1k, bold 10k')
     + '</span></header>' + warn
     + '<div id="insp" class="insp hidden">'
     + '<div class="ititle"><span id="iname"></span> <span id="ikind" class="ikind"></span></div>'
@@ -426,9 +454,16 @@ function render(relics, nonce, index, view, live) {
     + '<label id="lhy" class="hidden">hy <input id="fhy" type="number" step="10" min="1"></label>'
     + '<label id="lhz" class="hidden">hz <input id="fhz" type="number" step="10" min="1"></label>'
     + '<div class="ihint">y is height - the plan cannot show it</div></div>'
-    + '<div class="wrap"><svg id="plan" viewBox="'  + vb.x + ' ' + vb.y + ' ' + vb.w + ' '
-    + vb.h + '" preserveAspectRatio="xMidYMid meet">' + grid + '<g>' + svg + '</g></svg></div>'
-    + '<script nonce="' + nonce + '">' + script + '</script></body></html>';
+    + (mode === '3d'
+      ? ('<div class="wrap"><svg id="scene3" viewBox="' + v3.x + ' ' + v3.y + ' '
+         + v3.w + ' ' + v3.h + '" preserveAspectRatio="xMidYMid meet">'
+         + '<g id="scene3g">' + V3.body(rel, cam3) + '</g></svg></div>'
+         + '<script nonce="' + nonce + '">' + Orbit.script(rel, cam3, v3) + '</script>')
+      : ('<div class="wrap"><svg id="plan" viewBox="' + vb.x + ' ' + vb.y + ' ' + vb.w
+         + ' ' + vb.h + '" preserveAspectRatio="xMidYMid meet">' + grid + '<g>' + svg
+         + '</g></svg></div>'
+         + '<script nonce="' + nonce + '">' + script + '</script>'))
+    + '</body></html>';
 }
 
 module.exports = { render, extent, stackRows, gridLines, bounds, sy, span,
