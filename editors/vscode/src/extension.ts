@@ -4703,10 +4703,29 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
         (text: string, part: RelicPart) => RelicModel.setPart(text, part, msg.patch));
       return;
     }
+    if (msg && msg.type === 'undo') {
+      // A webview has no undo stack of its own, so CTRL-Z inside the panel never reaches
+      // the document our WorkspaceEdits landed on. Run undo against the document itself:
+      // show it (undo acts on the ACTIVE editor), undo, then hand focus back to the plan
+      // so the author stays where they were working.
+      try {
+        await vscode.window.showTextDocument(doc, { preserveFocus: false, preview: false });
+        await vscode.commands.executeCommand('undo');
+      } finally {
+        panel.reveal(panel.viewColumn, false);
+      }
+      return;
+    }
     if (msg && msg.type === 'preview') {
       // Ask a running `sbs debug` session to rebuild the relic from the file. The
       // mission owns what that means (a //shared/signal/relic_reload route); this only
       // rings the bell, so the editor needs no knowledge of how a relic is built.
+      //
+      // SAVE FIRST. applyEdit leaves the document dirty, and the mission rebuilds from
+      // the file on DISK - so previewing an unsaved edit reloaded the old file and the
+      // plan looked like it had been ignored. This was half of "the edits did not come
+      // through"; the other half was the runner dropping the signal entirely.
+      if (doc.isDirty) { await doc.save(); }
       const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
       try {
         await postDebugCommand(port, { action: 'signal', name: 'relic_reload' });

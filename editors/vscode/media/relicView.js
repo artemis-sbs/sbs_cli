@@ -350,6 +350,15 @@ function render(relics, nonce, index, view) {
     + "z:Math.round(0-(vb.y+vb.h/2))});});"
     + "document.getElementById('prev').addEventListener('click',function(){"
     + "vscode.postMessage({type:'preview'});});"
+    // Ctrl-Z inside a webview goes to the WEBVIEW, which has no undo stack - it never
+    // reaches the document our edits actually landed on. So the panel offers undo
+    // explicitly. The keybinding is kept too, so the reflex still works.
+    + "document.getElementById('undo').addEventListener('click',function(){"
+    + "vscode.postMessage({type:'undo'});});"
+    + "window.addEventListener('keydown',function(e){"
+    + "if(e.target.tagName==='INPUT')return;"
+    + "if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();"
+    + "vscode.postMessage({type:'undo'});}});"
     + "const pick=document.getElementById('pick');"
     + "if(pick)pick.addEventListener('change',function(){"
     + "vscode.postMessage({type:'pick',index:Number(pick.value)});});";
@@ -361,6 +370,7 @@ function render(relics, nonce, index, view) {
     + '<header>' + picker + '<button id="fit">Fit</button>'
     + '<button id="add">Add chamber</button>'
     + '<button id="del">Delete</button>'
+    + '<button id="undo" title="Undo the last edit to the .amd file (CTRL-Z in a webview does not reach it)">Undo</button>'
     + '<button id="prev" title="Rebuild this relic in a running sbs debug session">Preview</button>'
     + '<span class="hint">drag a chamber to move it &middot; drag the background to pan '
     + '&middot; wheel to zoom &middot; SHIFT-drag between chambers to connect '

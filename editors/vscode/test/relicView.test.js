@@ -244,11 +244,20 @@ check('Preview posts to the extension, not straight to a socket',
   html.indexOf("type:'preview'") >= 0);
 
 // ------------------------------------------------------------------- undo
-// There is deliberately NO undo machinery here. Every edit goes through
-// vscode.workspace.applyEdit, so it lands on the document's own undo stack and Ctrl+Z
-// works - a second undo system would fight the first and lose.
+// Every edit goes through vscode.workspace.applyEdit, so it lands on the DOCUMENT's own
+// undo stack - a second undo system here would fight that one and lose. What the panel
+// does own is the way IN: a webview has no undo stack, so CTRL-Z pressed over the plan
+// is swallowed by the webview and never reaches the document. The panel therefore posts
+// an intent, exactly like every other gesture, and the extension runs undo on the doc.
 check('the view posts intents and never edits text itself',
   html.indexOf('applyEdit') < 0 && html.indexOf('workspace') < 0);
+check('the toolbar offers Undo', markup.indexOf('id="undo"') >= 0);
+check('Undo is posted as an intent, not handled in the webview',
+  html.indexOf("type:'undo'") >= 0);
+check('CTRL-Z over the plan is captured rather than swallowed',
+  html.indexOf("e.ctrlKey||e.metaKey") >= 0 && html.indexOf("e.key==='z'") >= 0);
+check('typing a number is never mistaken for undo',
+  html.indexOf("if(e.target.tagName==='INPUT')return;") >= 0);
 
 
 console.log('');
