@@ -253,6 +253,38 @@ check('the view posts intents and never edits text itself',
   html.indexOf('applyEdit') < 0 && html.indexOf('workspace') < 0);
 check('the toolbar offers Undo', markup.indexOf('id="undo"') >= 0);
 
+// --------------------------------------------- over-long passages
+// `render-distance-objects` is 5000: stand in one chamber and a chamber further than
+// that is not drawn, so the corridor between them goes dark at the far end. That reads
+// as a rendering bug rather than a layout one, and this is where the author is dragging.
+// Deliberately NOT a lint rule - `sbs lint` stays out of size judgements, and the number
+// is a setting rather than a correctness claim.
+const FAR = ['### [O](o)', '---', 'Loc: 0,0,0', '---', '',
+  '### [a](a)', '---', 'Relic: o', 'Chamber: 0, 0, 0, 500',
+  'Passage to: b 200', '---', '',
+  '### [b](b)', '---', 'Relic: o', 'Chamber: 9000, 0, 0, 500', '---'].join('\n');
+const farHtml = V.render(R.parse(FAR).relics, 'N', 0);
+check('a passage past the render distance is drawn amber',
+  farHtml.indexOf('stroke="#e0af68"') >= 0);
+check('...and dashed, so it reads as a warning without color alone',
+  farHtml.indexOf('stroke-dasharray') >= 0);
+check('...and named in the header with its length',
+  farHtml.indexOf('passage(s) longer than the 5000u render distance') >= 0
+  && farHtml.indexOf('a - b (9000u)') >= 0);
+check('a passage within it stays blue and unremarked',
+  html.indexOf('stroke="#7aa2f7"') >= 0
+  && html.indexOf('passage(s) longer than') < 0);
+
+// The plan is top-down, so a mostly-VERTICAL passage looks short on it. Measuring the
+// drawn geometry would call a 9000u climb a 0u corridor.
+const TALL = ['### [O](o)', '---', 'Loc: 0,0,0', '---', '',
+  '### [a](a)', '---', 'Relic: o', 'Chamber: 0, 0, 0, 500',
+  'Passage to: b 200', '---', '',
+  '### [b](b)', '---', 'Relic: o', 'Chamber: 0, 9000, 0, 500', '---'].join('\n');
+check('length is measured in 3D, not off the plan',
+  V.render(R.parse(TALL).relics, 'N', 0).indexOf('stroke="#e0af68"') >= 0);
+check('span() is 3D', Math.round(V.span({x:0,y:3,z:4},{x:0,y:0,z:0})) === 5);
+
 // ------------------------------------------------------- live preview
 // Pressing Preview after every drag is the friction the toggle removes. The view owns
 // none of it: it reports the intent and renders whatever state it is handed back, so

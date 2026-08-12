@@ -45,6 +45,19 @@ function extent(p) {
 const GRID_MINOR = 1000;
 const GRID_MAJOR = 10000;
 
+// The engine's `render-distance-objects`. A relic wider than this stops drawing its own
+// far side, which is why the demo layout keeps neighbouring chambers well inside it.
+// Measured against the ENGINE, not chosen: it is a setting, so it is named here once
+// rather than sprinkled through the drawing code.
+const RENDER_DISTANCE = 5000;
+
+/** 3D distance between two parts. A passage that reads short on a top-down plan can be
+ *  almost entirely vertical, so the plan's own geometry is the wrong thing to measure. */
+function span(a, b) {
+  const dx = a.x - b.x, dy = (a.y || 0) - (b.y || 0), dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
 /** Grid lines for a span, thinned out so a huge relic does not become solid ink. */
 function gridLines(min, max, step) {
   const out = [];
@@ -159,13 +172,24 @@ function render(relics, nonce, index, view, live) {
   let svg = '';
 
   // Passages first, so a chamber is never hidden behind a corridor.
+  const tooFar = [];
   for (const p of rel.passages) {
     const a = byKey.get(p.from);
     const b = byKey.get(p.to);
     if (!a || !b) continue;         // dangling: the linter reports it, the plan omits it
+    // A corridor longer than the engine's render distance goes dark at the far end:
+    // stand in one chamber and the other simply is not drawn. Measured in 3D, because
+    // a passage that looks short on a top-down plan can be mostly vertical.
+    const far = span(a, b) > RENDER_DISTANCE;
+    if (far) { tooFar.push(p.from + ' - ' + p.to + ' (' + Math.round(span(a, b)) + 'u)'); }
     svg += '<line x1="' + a.x + '" y1="' + sy(a.z) + '" x2="' + b.x + '" y2="' + sy(b.z)
-      + '" stroke="#7aa2f7" stroke-width="' + ((p.radius == null ? 200 : p.radius) * 2)
-      + '" stroke-opacity="0.30" stroke-linecap="round"/>';
+      + '" stroke="' + (far ? '#e0af68' : '#7aa2f7') + '" stroke-width="'
+      + ((p.radius == null ? 200 : p.radius) * 2)
+      + '" stroke-opacity="0.30" stroke-linecap="round"'
+      + (far ? ' stroke-dasharray="600 400"' : '')
+      + '><title>' + esc(p.from + ' - ' + p.to) + ': ' + Math.round(span(a, b)) + 'u'
+      + (far ? ' - past the ' + RENDER_DISTANCE + 'u render distance, so the far end '
+             + 'stops drawing' : '') + '</title></line>';
   }
   for (const c of rel.chambers) {
     const st = rows.get(c.key) || { row: 0, of: 1 };
@@ -228,9 +252,17 @@ function render(relics, nonce, index, view, live) {
         + (i === index ? ' selected' : '') + '>' + esc(r.name || r.key) + '</option>')
         .join('') + '</select>'
     : '<b>' + esc(rel.name || rel.key) + '</b>';
-  const warn = rel.orphans.length
+  const warn = (rel.orphans.length
     ? '<div class="warn">' + rel.orphans.length
-      + ' part(s) name a relic that does not exist &mdash; they are not built.</div>' : '';
+      + ' part(s) name a relic that does not exist &mdash; they are not built.</div>' : '')
+    + (tooFar.length
+    // Not a lint rule: `sbs lint` deliberately stays out of size judgements, and the
+    // number is a SETTING (render-distance-objects), not a correctness claim. But this
+    // is where the author is dragging, and a corridor that goes dark at the far end
+    // looks like a rendering bug rather than a layout one, so say it here.
+    ? '<div class="warn">' + tooFar.length + ' passage(s) longer than the '
+      + RENDER_DISTANCE + 'u render distance &mdash; the far end stops drawing: '
+      + esc(tooFar.join(', ')) + '</div>' : '');
 
   const style = 'body{margin:0;font-family:var(--vscode-font-family);'
     + 'color:var(--vscode-foreground);background:var(--vscode-editor-background);'
@@ -399,5 +431,5 @@ function render(relics, nonce, index, view, live) {
     + '<script nonce="' + nonce + '">' + script + '</script></body></html>';
 }
 
-module.exports = { render, extent, stackRows, gridLines, bounds, sy,
-                   GRID_MINOR, GRID_MAJOR };
+module.exports = { render, extent, stackRows, gridLines, bounds, sy, span,
+                   GRID_MINOR, GRID_MAJOR, RENDER_DISTANCE };

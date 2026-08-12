@@ -23,7 +23,10 @@ import os
 import re
 import shutil
 
-RE_ID = re.compile(r"\s*\{#([A-Za-z0-9_.:-]+)\}\s*$")
+# `{: #id}` is what the emitter writes now (a bare `{#` is a Jinja comment opener,
+# and mkdocs runs pages through the macros plugin first). The colon stays OPTIONAL
+# here so this still reads pages generated before that change.
+RE_ID = re.compile(r"\s*\{:?\s*#([A-Za-z0-9_.:-]+)\}\s*$")
 
 
 class RendererUnavailable(Exception):
@@ -136,7 +139,7 @@ def _index_entries(page, rel, text):
     out = []
     lines = text.splitlines()
     for i, line in enumerate(lines):
-        m = re.match(r"^#{1,6} (?P<title>.*?)\s*\{#(?P<anchor>[^}]+)\}\s*$", line)
+        m = re.match(r"^#{1,6} (?P<title>.*?)\s*\{:?\s*#(?P<anchor>[^}]+)\}\s*$", line)
         if m is None:
             continue
         snippet = ""
