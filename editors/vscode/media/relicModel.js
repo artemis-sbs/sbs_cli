@@ -365,7 +365,7 @@ function removePassage(text, from, toKey) {
  * shape field - so the file does not develop a machine-written dialect alongside a human
  * one. Nothing else in the document moves.
  */
-function addChamber(text, relic, key, x, y, z, r, name) {
+function addPart(text, relic, key, field, values, name) {
   if (!relic || !key) return text;
   const lines = String(text).split(/\r?\n/);
   const parts = [].concat(relic.chambers, relic.boxes, relic.solids);
@@ -376,9 +376,27 @@ function addChamber(text, relic, key, x, y, z, r, name) {
   if (!Number.isFinite(at)) return text;
   const block = ['', '### [' + (name || key) + '](' + key + ')', '---',
     'Relic: ' + relic.key,
-    'Chamber: ' + [x, y, z, r].map(fmt).join(', '), '---'];
+    field + ': ' + values.map(fmt).join(', '), '---'];
   lines.splice(at + 1, 0, ...block);
   return lines.join('\n');
+}
+
+/** A new chamber: a sphere, centre and radius. */
+function addChamber(text, relic, key, x, y, z, r, name) {
+  return addPart(text, relic, key, 'Chamber', [x, y, z, r], name);
+}
+
+/** A new box: centre and HALF-extents.
+ *
+ *  A box is navigable space like a chamber, not decoration - the difference is that it
+ *  has flat walls and corners, which no sphere can express. It is axis-aligned, so a
+ *  hall that runs diagonally still wants a chamber run or a passage.
+ *
+ *  Boxes are how a rectilinear map gets built: two that OVERLAP are one connected space,
+ *  so a grid of them needs no passages at all.
+ */
+function addBox(text, relic, key, x, y, z, hx, hy, hz, name) {
+  return addPart(text, relic, key, 'Box', [x, y, z, hx, hy, hz], name);
 }
 
 /**
@@ -424,7 +442,7 @@ function R_reparse(text, relicKey, partKey) {
 }
 
 module.exports = {
-  setName,
+  setName, addBox, addPart,
   parse, writeField, movePart: moveePart, resizePart, setHeight, setPart,
   addPassage, removePassage, addChamber, removePart,
   numbers, words, fmt,

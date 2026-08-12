@@ -325,4 +325,28 @@ function splitLines(s) {
     R.setName(DOC, { key: 'x' }, 'zz') === DOC);
 }
 
+// --- adding a box -----------------------------------------------------------
+// A box is navigable space like a chamber, not decoration - the difference is flat walls
+// and corners, which no sphere can express. It is also how a rectilinear map gets built:
+// two boxes that OVERLAP are one connected space, so a grid of them needs no passages.
+{
+  const rel = R.parse(DOC).relics[0];
+  const out = R.addBox(DOC, rel, 'newhall', 6000, 0, 6000, 800, 300, 800, 'new hall');
+  const re = R.parse(out).relics[0];
+  const b = re.boxes.find((x) => x.key === 'newhall');
+  check('a box can be added', !!b);
+  check('...with half-extents, not a full size',
+    b.hx === 800 && b.hy === 300 && b.hz === 800);
+  check('...at the position asked for', b.x === 6000 && b.y === 0 && b.z === 6000);
+  check('...carrying its display name', b.name === 'new hall');
+  check('the existing parts are untouched',
+    re.chambers.length === rel.chambers.length && re.solids.length === rel.solids.length);
+  check('...and the box that was already there survives',
+    re.boxes.length === rel.boxes.length + 1);
+  check('adding a chamber still works',
+    R.parse(R.addChamber(DOC, rel, 'nc', 1, 2, 3, 500, 'nc')).relics[0].chambers.length
+    === rel.chambers.length + 1);
+  check('both go through one writer', typeof R.addPart === 'function');
+}
+
 console.log('all relic model tests passed');

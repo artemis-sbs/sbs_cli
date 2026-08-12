@@ -4919,6 +4919,19 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       });
       return;
     }
+    if (msg && msg.type === 'addbox') {
+      await applyRelicStructure(doc, index, (text: string, rel: any) => {
+        const taken = new Set([...rel.chambers, ...rel.boxes, ...rel.solids]
+          .map((p: RelicPart) => p.key));
+        let n = taken.size + 1;
+        while (taken.has('box' + n)) { n++; }
+        // Half-extents, so this is 1200 x 600 x 1200 - a room rather than a slab, and big
+        // enough to overlap a neighbour placed beside it, which is how boxes connect.
+        return RelicModel.addBox(text, rel, 'box' + n,
+          msg.x, msg.y, msg.z, 600, 300, 600, 'box ' + n);
+      });
+      return;
+    }
     if (msg && msg.type === 'pick') {
       index = Number(msg.index) || 0;
       lastView = undefined;            // a different relic deserves its own framing

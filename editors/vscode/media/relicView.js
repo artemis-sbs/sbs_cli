@@ -159,7 +159,11 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     + 'style-src \'unsafe-inline\'; script-src \'nonce-' + nonce + '\';">'
     + '<style>' + style + '</style></head><body>'
     + '<header>' + picker + '<button id="fit">Fit</button>'
-    + '<button id="add">Add chamber</button>'
+    + '<button id="add" title="A sphere - a worn hollow">Add chamber</button>'
+    // A box is navigable space too, not decoration. It earns its own button because
+    // it is the shape a rectilinear map is built from - overlapping boxes union into
+    // one connected space, so a grid of them needs no passages at all.
+    + '<button id="addbox" title="An axis-aligned room - flat walls and real corners">Add box</button>'
     + '<button id="del">Delete</button>'
     // Named for what they SHOW, with the axis spelled out - Cosmos is Y-up and
     // Blender is Z-up, so anyone arriving from there will otherwise reach for

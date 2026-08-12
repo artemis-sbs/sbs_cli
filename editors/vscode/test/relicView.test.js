@@ -81,6 +81,7 @@ check('and the three view presets', (markup.match(/class="vw"/g) || []).length =
 const script = html.slice(html.indexOf('<script'), html.lastIndexOf('</scr' + 'ipt>'));
 [['fit', "getElementById(\"fit\")"],
  ['add', "getElementById(\"add\")"],
+ ['addbox', 'getElementById("addbox")'],
  ['del', "getElementById(\"del\")"],
  ['undo', 'type:"undo"'],
  ['preview', 'type:"preview"'],
