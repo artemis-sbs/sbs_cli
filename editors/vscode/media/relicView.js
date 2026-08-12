@@ -109,7 +109,7 @@ function bounds(rel) {
  * redraw happens on every keystroke in the document, so losing it would make the plan
  * unusable while editing.
  */
-function render(relics, nonce, index, view) {
+function render(relics, nonce, index, view, live) {
   const rel = relics[index];
   if (!rel) {
     return '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);'
@@ -237,6 +237,8 @@ function render(relics, nonce, index, view) {
     + 'display:flex;flex-direction:column;height:100vh}'
     + 'header{padding:8px 10px;border-bottom:1px solid var(--vscode-panel-border,#8883);'
     + 'display:flex;gap:10px;align-items:center}'
+    + 'button.on{background:var(--vscode-button-background,#0e639c);'
+    + 'color:var(--vscode-button-foreground,#fff);outline:1px solid var(--vscode-focusBorder,#007fd4)}'
     + '.hint{font-size:11px;color:var(--vscode-descriptionForeground)}'
     + '.warn{font-size:11px;color:var(--vscode-editorWarning-foreground,#e0af68);'
     + 'padding:4px 10px}.wrap{flex:1;overflow:hidden}'
@@ -350,6 +352,10 @@ function render(relics, nonce, index, view) {
     + "z:Math.round(0-(vb.y+vb.h/2))});});"
     + "document.getElementById('prev').addEventListener('click',function(){"
     + "vscode.postMessage({type:'preview'});});"
+    + "const lv=document.getElementById('live');"
+    + "lv.addEventListener('click',function(){"
+    + "const on=!lv.classList.contains('on');lv.classList.toggle('on',on);"
+    + "vscode.postMessage({type:'live',on:on});});"
     // Ctrl-Z inside a webview goes to the WEBVIEW, which has no undo stack - it never
     // reaches the document our edits actually landed on. So the panel offers undo
     // explicitly. The keybinding is kept too, so the reflex still works.
@@ -372,6 +378,8 @@ function render(relics, nonce, index, view) {
     + '<button id="del">Delete</button>'
     + '<button id="undo" title="Undo the last edit to the .amd file (CTRL-Z in a webview does not reach it)">Undo</button>'
     + '<button id="prev" title="Rebuild this relic in a running sbs debug session">Preview</button>'
+    + '<button id="live"' + (live ? ' class="on"' : '')
+    + ' title="Preview automatically after every edit, instead of pressing Preview">Live</button>'
     + '<span class="hint">drag a chamber to move it &middot; drag the background to pan '
     + '&middot; wheel to zoom &middot; SHIFT-drag between chambers to connect '
     + '&middot; grid 1k, bold 10k'

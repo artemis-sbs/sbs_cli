@@ -252,6 +252,18 @@ check('Preview posts to the extension, not straight to a socket',
 check('the view posts intents and never edits text itself',
   html.indexOf('applyEdit') < 0 && html.indexOf('workspace') < 0);
 check('the toolbar offers Undo', markup.indexOf('id="undo"') >= 0);
+
+// ------------------------------------------------------- live preview
+// Pressing Preview after every drag is the friction the toggle removes. The view owns
+// none of it: it reports the intent and renders whatever state it is handed back, so
+// the flag survives a redraw instead of silently disarming on the next keystroke.
+check('the toolbar offers a Live toggle', markup.indexOf('id="live"') >= 0);
+check('Live is posted as an intent like every other gesture',
+  html.indexOf("type:'live'") >= 0);
+check('Live renders unpressed by default',
+  markup.indexOf('id="live" class="on"') < 0);
+check('...and pressed when the extension says it is armed',
+  V.render(R.parse(DOC).relics, 'n', 0, undefined, true).indexOf('id="live" class="on"') >= 0);
 check('Undo is posted as an intent, not handled in the webview',
   html.indexOf("type:'undo'") >= 0);
 check('CTRL-Z over the plan is captured rather than swallowed',

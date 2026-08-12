@@ -4671,6 +4671,10 @@ interface RelicRec {
   orphans: { key: string; name: string }[];
 }
 
+// Live preview is a MODE, not a per-panel setting: closing the plan and opening it
+// again should not quietly stop previewing.
+let relicLive = false;
+
 async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
   if (!uri) { return; }
@@ -4688,9 +4692,50 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   const draw = () => {
     const model = RelicModel.parse(doc.getText());
     if (index >= model.relics.length) { index = 0; }
-    panel.webview.html = RelicView.render(model.relics, nonce(), index, lastView);
+    panel.webview.html = RelicView.render(model.relics, nonce(), index, lastView, relicLive);
   };
   draw();
+
+  // ONE way to preview, whether a hand pressed the button or an edit armed it.
+  //
+  // SAVE FIRST. applyEdit leaves the document dirty and the mission rebuilds from the
+  // file on DISK, so previewing an unsaved edit reloads the old file and looks ignored.
+  //
+  // `quiet` is for the automatic path: a debounced preview that fires while no session
+  // is running must not open a dialog on every drag. It says so once, then stops.
+  let warnedNoSession = false;
+  const sendPreview = async (quiet: boolean) => {
+    if (doc.isDirty) { await doc.save(); }
+    const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+    try {
+      await postDebugCommand(port, { action: 'signal', name: 'relic_reload' });
+      warnedNoSession = false;
+      vscode.window.setStatusBarMessage(
+        quiet ? 'Relic: rebuilt in the running session' : 'Relic: reload sent to the running session',
+        3000);
+    } catch (e) {
+      if (quiet) {
+        if (!warnedNoSession) {
+          warnedNoSession = true;
+          vscode.window.setStatusBarMessage('Relic: live preview has no session to talk to', 4000);
+        }
+        return;
+      }
+      vscode.window.showWarningMessage(
+        `Artemis AMD: no running session on port ${port} (start one with \`sbs debug\`).`);
+    }
+  };
+
+  // Debounced, because a drag can land several edits in a moment and each preview tears
+  // the relic down and re-sows every prop. One rebuild after the hand stops is what the
+  // author is asking for; six while it moves is not.
+  let liveTimer: NodeJS.Timeout | undefined;
+  const previewSoon = () => {
+    if (!relicLive) { return; }
+    if (liveTimer) { clearTimeout(liveTimer); }
+    liveTimer = setTimeout(() => { liveTimer = undefined; void sendPreview(true); }, 400);
+  };
+  panel.onDidDispose(() => { if (liveTimer) { clearTimeout(liveTimer); } });
 
   panel.webview.onDidReceiveMessage(async (msg: any) => {
     if (msg && msg.type === 'view') {
@@ -4716,24 +4761,18 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       }
       return;
     }
+    if (msg && msg.type === 'live') {
+      // Module-scoped, so reopening the plan does not silently disarm live preview -
+      // an author who turned it on wants it on.
+      relicLive = !!msg.on;
+      if (relicLive) { void sendPreview(true); }
+      return;
+    }
     if (msg && msg.type === 'preview') {
       // Ask a running `sbs debug` session to rebuild the relic from the file. The
       // mission owns what that means (a //shared/signal/relic_reload route); this only
       // rings the bell, so the editor needs no knowledge of how a relic is built.
-      //
-      // SAVE FIRST. applyEdit leaves the document dirty, and the mission rebuilds from
-      // the file on DISK - so previewing an unsaved edit reloaded the old file and the
-      // plan looked like it had been ignored. This was half of "the edits did not come
-      // through"; the other half was the runner dropping the signal entirely.
-      if (doc.isDirty) { await doc.save(); }
-      const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
-      try {
-        await postDebugCommand(port, { action: 'signal', name: 'relic_reload' });
-        vscode.window.setStatusBarMessage('Relic: reload sent to the running session', 3000);
-      } catch (e) {
-        vscode.window.showWarningMessage(
-          `Artemis AMD: no running session on port ${port} (start one with \`sbs debug\`).`);
-      }
+      await sendPreview(false);
       return;
     }
     if (msg && msg.type === 'link') {
@@ -4798,6 +4837,7 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     await vscode.workspace.applyEdit(we);
     writing = false;
     draw();
+    previewSoon();
   }
 
   // ONE write path for every gesture - a drag or a typed field. Looks the part up from
@@ -4827,6 +4867,7 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     await vscode.workspace.applyEdit(we);
     writing = false;
     draw();
+    previewSoon();
   }
 
   const sub = vscode.workspace.onDidChangeTextDocument((e) => {
