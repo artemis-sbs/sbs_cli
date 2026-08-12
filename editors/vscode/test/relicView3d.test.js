@@ -102,21 +102,16 @@ check('no external anything for the CSP to block',
 
 // --- the panel around it ----------------------------------------------------
 const V = require('../media/relicView.js');
-const plan = V.render([rel], 'N', 0);
-const three = V.render([rel], 'N', 0, undefined, false, '3d');
-check('the toolbar offers both views',
-  plan.indexOf('id="m2d"') >= 0 && plan.indexOf('id="m3d"') >= 0);
-check('the mode is posted as an intent, like every other gesture',
-  plan.indexOf("type:'mode'") >= 0);
-check('3d marks itself as the one you are in', three.indexOf('id="m3d" class="on"') >= 0);
-check('plan is the default', plan.indexOf('id="m2d" class="on"') >= 0);
-// Add and Delete edit the document and need a selection, which the 3D view has no way to
-// make. A button that quietly does nothing is worse than no button.
-check('3d hides the editing buttons',
-  three.indexOf('id="add"') < 0 && three.indexOf('id="del"') < 0);
-check('...and says which gestures it actually has', /drag to orbit/.test(three));
-check('the two views never render together',
-  (plan.indexOf('id="scene3"') < 0) && (three.indexOf('id="plan"') < 0));
+const page = V.render([rel], 'N', 0);
+// There is ONE view. The toggle that used to sit here was a camera angle wearing a
+// button, and the second renderer behind it had already drifted from this one.
+check('one scene, no toggle',
+  page.indexOf('id="scene3"') >= 0 && page.indexOf('id="plan"') < 0
+  && page.indexOf('id="m3d"') < 0);
+check('the plan verbs are all here',
+  ['id="grid3"', 'id="lab3g"', 'id="insp"', 'id="add"', 'id="del"', 'id="navg"']
+    .every((t) => page.indexOf(t) >= 0));
+check('...and it says which gestures it has', /MIDDLE-drag to orbit/.test(page));
 
 // --- the move gizmo ---------------------------------------------------------
 // A bare drag in a 3D view is ambiguous: the same mouse movement could mean any of a
@@ -184,12 +179,9 @@ check('losing focus mid-drag ends it rather than waiting for a release',
 check('so does the pointer being cancelled', sel.indexOf('pointercancel') >= 0);
 
 // The plan view has the same shape and had the same hole.
-const planScript = V.render([rel], 'N', 0);
-check('the plan view ends a gesture the same way',
-  planScript.indexOf('function endGesture()') >= 0
-  && planScript.indexOf('!e.buttons&&(drag||pan||link)') >= 0);
-check('...and clears in a finally there too',
-  planScript.indexOf('finally{endGesture();}') >= 0);
+// The same teardown covers every gesture the one view has.
+check('a stuck link is cleared with the rest',
+  sel.indexOf('move||orbit||pan||size||link') >= 0);
 
 // --- orbiting around what you are looking at --------------------------------
 // Reported from use: orbiting lost the selection, and turned about the world origin -
@@ -248,9 +240,9 @@ check('the balls sort back to front', (() => {
   return b.every((x, i, a) => i === 0 || a[i - 1].depth >= x.depth);
 })());
 check('the widget is drawn in its own screen space, not the scene',
-  three.indexOf('id="navg"') >= 0 && three.indexOf('viewBox="0 0 100 100"') >= 0);
-check('the toolbar names the three views', (three.match(/class="vw"/g) || []).length === 3);
-check('...and says which axis each one is', /Look down the Y axis/.test(three));
+  page.indexOf('id="navg"') >= 0 && page.indexOf('viewBox="0 0 100 100"') >= 0);
+check('the toolbar names the three views', (page.match(/class="vw"/g) || []).length === 3);
+check('...and says which axis each one is', /Look down the Y axis/.test(page));
 
 // --- the size gizmo ---------------------------------------------------------
 const chamber = G.sizeHandles({ x: 0, y: 0, z: 0, r: 900 }, cam, V3.project);
@@ -341,6 +333,48 @@ check('...and on a raised floor too', (() => {
 // must fall back rather than divide by zero.
 check('an edge-on floor falls back instead of returning nonsense',
   isFinite(V3.unproject(10, 20, { yaw: 0, pitch: 0 }, 0).z));
+
+// --- the navigation gizmo, continued ----------------------------------------
+// Clicking the axis already facing you flips to the far side, which is what Blender does
+// and what the widget's own picture demands: looking down an axis puts BOTH of its balls
+// on the same pixel, so the near one is the only thing you can hit. Without the flip, that
+// ball is the one control on the widget that does nothing.
+check('clicking the axis you are looking down flips to the other side',
+  N.nextView('top', N.viewFor('top')) === 'bottom'
+  && N.nextView('bottom', N.viewFor('bottom')) === 'top');
+check('...for every axis',
+  N.nextView('front', N.viewFor('front')) === 'back'
+  && N.nextView('right', N.viewFor('right')) === 'left');
+check('clicking a DIFFERENT axis just goes there',
+  N.nextView('front', N.viewFor('top')) === 'front');
+check('mid-orbit, nothing is being looked down, so nothing flips',
+  N.nextView('top', { yaw: 0.6, pitch: 0.5 }) === 'top');
+check('every view has an opposite',
+  Object.keys(N.VIEWS).every((k) => N.OPPOSITE[k] && N.VIEWS[N.OPPOSITE[k]]));
+check('the page uses the flip rather than the raw name',
+  sel.indexOf('NAV_VIEWS[nextView(b.dataset.view,cam)]') >= 0);
+
+// --- the inspector ----------------------------------------------------------
+// Dragging is not a substitute for typing: an author who wants a radius of exactly 900
+// should not have to land it with a mouse.
+check('the inspector fills from the selection', sel.indexOf('function showInsp()') >= 0);
+check('...and a typed number writes through the same field message',
+  sel.indexOf('vscode.postMessage({type:"field",key:p.key,patch:pa})') >= 0);
+check('...never as zero, which lint rejects and the volume refuses',
+  sel.indexOf('Math.max(1,Math.round(v))') >= 0);
+check('half-extent fields appear only for a box', sel.indexOf('"lhx","lhy","lhz"') >= 0);
+
+// --- embedding the scene safely ---------------------------------------------
+// The relic file is data from wherever the mission came from. JSON.stringify does not
+// escape `<`, so a chamber named `x</script><b>` ends the script element and starts
+// writing markup - an injection, not a typo.
+const evil = 'x</' + 'script><b>';
+check('a name cannot close the script tag', Orbit.embed({ n: evil }).indexOf('<') < 0);
+check('...and the JSON still parses to what it was',
+  JSON.parse(Orbit.embed({ n: evil })).n === evil);
+// Line terminators to JavaScript, but not to JSON.
+check('U+2028 and U+2029 are escaped too',
+  Orbit.embed({ n: 'a b c' }).indexOf(' ') < 0);
 
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.

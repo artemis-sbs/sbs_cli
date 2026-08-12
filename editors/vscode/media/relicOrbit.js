@@ -37,6 +37,21 @@ function sceneData(rel) {
   };
 }
 
+/** JSON safe to embed INSIDE a <script> tag.
+ *
+ *  JSON.stringify does not escape `<`, and a chamber named `x</script><b>` therefore ends
+ *  the script element and starts writing markup - the relic file is data from wherever the
+ *  mission came from, so that is an injection, not a typo. Escaping the angle bracket as
+ *  a unicode escape keeps the JSON identical to the parser and inert to the HTML one.
+ *  U+2028/9 are line terminators to JavaScript but not to JSON, so they go too.
+ */
+function embed(value) {
+  return JSON.stringify(value)
+    .split('<').join('\\u003c')
+    .split('\u2028').join('\\u2028')
+    .split('\u2029').join('\\u2029');
+}
+
 /**
  * @param {object} rel  the parsed relic
  * @param {object} cam  {yaw, pitch}
@@ -47,12 +62,12 @@ function sceneData(rel) {
 function script(rel, cam, vb, sel) {
   return V3.clientBundle() + Gizmo.clientBundle() + Nav.clientBundle()
     + 'const vscode=acquireVsCodeApi();'
-    + 'const REL=' + JSON.stringify(sceneData(rel)) + ';'
+    + 'const REL=' + embed(sceneData(rel)) + ';'
     + 'const svg=document.getElementById("scene3");'
     + 'const g=document.getElementById("scene3g");'
     + 'let cam={yaw:' + cam.yaw + ',pitch:' + cam.pitch + '};'
     + 'let vb={x:' + vb.x + ',y:' + vb.y + ',w:' + vb.w + ',h:' + vb.h + '};'
-    + 'let sel=' + JSON.stringify(sel || null) + ';'
+    + 'let sel=' + embed(sel || null) + ';'
     + 'let orbit=null,pan=null,move=null,size=null,link=null;'
     // Every movable part by key. Passages are NOT here on purpose: a passage has no
     // position of its own - it is defined by the two chambers it joins, so moving one
@@ -79,7 +94,7 @@ function script(rel, cam, vb, sel) {
     + 'if(nv)nv.innerHTML=navSvg(cam,project,100);'
     + 'if(p){const n=g.querySelector(\'[data-key="\'+CSS.escape(p.key)+\'"]\');'
     + 'if(n)n.classList.add("sel3");}'
-    + 'vscode.postMessage({type:"sel3d",key:sel});}'
+    + 'showInsp();vscode.postMessage({type:"sel3d",key:sel});}'
     // Report the angle AND the framing: a redraw fires on every keystroke in the document,
     // and snapping back to a default angle mid-edit is worse than not remembering at all.
     + 'function report(){vscode.postMessage({type:"view3d",x:vb.x,y:vb.y,w:vb.w,h:vb.h,'
@@ -227,11 +242,38 @@ function script(rel, cam, vb, sel) {
     + 'const nvg=document.getElementById("navg");'
     + 'if(nvg)nvg.addEventListener("click",function(e){'
     + 'const b=e.target.closest(".nav");if(!b)return;'
-    + 'const v=NAV_VIEWS[b.dataset.view];if(!v)return;'
+    // Clicking the axis already facing you flips to the far side - see relicNav.
+    + 'const v=NAV_VIEWS[nextView(b.dataset.view,cam)];if(!v)return;'
     + 'cam={yaw:v.yaw,pitch:v.pitch};draw();report();});'
     + 'window.addEventListener("message",function(e){'
     + 'const m=e.data||{};if(m.type!=="view")return;'
     + 'const v=NAV_VIEWS[m.name];if(!v)return;cam={yaw:v.yaw,pitch:v.pitch};draw();report();});'
+    // THE INSPECTOR. Dragging is not a substitute for typing: an author who wants a
+    // radius of exactly 900 should not have to land it with a mouse. Same form the plan
+    // view used, same `field` message out, so a typed number and a dragged one are the
+    // same one-line write.
+    + 'const IN={x:"fx",y:"fy",z:"fz",r:"fr",hx:"fhx",hy:"fhy",hz:"fhz"};'
+    + 'function el(id){return document.getElementById(id);}'
+    + 'function showInsp(){const p=partOf(sel);const ins=el("insp");if(!ins)return;'
+    + 'if(!p){ins.classList.add("hidden");return;}'
+    + 'ins.classList.remove("hidden");'
+    + 'el("iname").textContent=p.name||p.key;'
+    + 'const isBox=p.hx!==undefined;'
+    + 'const isSolid=REL.solids.some(function(s){return s.key===p.key;});'
+    + 'el("ikind").textContent=isBox?"box":(isSolid?"solid":"chamber");'
+    + 'Object.keys(IN).forEach(function(k){const n=el(IN[k]);if(!n)return;'
+    + 'n.value=(p[k]===undefined||p[k]===null)?"":p[k];});'
+    + 'const lr=el("lr");if(lr)lr.classList.toggle("hidden",p.r===undefined);'
+    + '["lhx","lhy","lhz"].forEach(function(id){const n=el(id);'
+    + 'if(n)n.classList.toggle("hidden",!isBox);});}'
+    + 'Object.keys(IN).forEach(function(k){const n=el(IN[k]);if(!n)return;'
+    + 'n.addEventListener("change",function(){const p=partOf(sel);if(!p)return;'
+    + 'const v=Number(n.value);if(!isFinite(v))return;'
+    // A size of zero builds a chamber enclosing nothing, which lint reports and the
+    // volume refuses - so the form will not send one either.
+    + 'const val=(k==="x"||k==="y"||k==="z")?Math.round(v):Math.max(1,Math.round(v));'
+    + 'p[k]=val;const pa={};pa[k]=val;'
+    + 'vscode.postMessage({type:"field",key:p.key,patch:pa});draw();});});'
     + 'const ab=document.getElementById("add");'
     // A new chamber lands at the middle of the view, on the floor the view is pivoting
     // around - "where I am looking" needs a height as well as a place, and the pivot's
@@ -282,4 +324,4 @@ function script(rel, cam, vb, sel) {
     + 'apply();draw();';
 }
 
-module.exports = { script, sceneData };
+module.exports = { script, sceneData, embed };

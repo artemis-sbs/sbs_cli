@@ -90,8 +90,10 @@ function scene(rel, cam) {
     const a = by.get(p.from), b = by.get(p.to);
     if (!a || !b) { continue; }        // dangling: lint reports it, the view omits it
     const pa = project(a, cam), pb = project(b, cam);
+    const far = span(a, b) > RENDER_DISTANCE;
     items.push({ kind: 'passage', a: pa, b: pb, r: p.radius == null ? 200 : p.radius,
-                 depth: (pa.depth + pb.depth) / 2, label: p.from + ' - ' + p.to });
+                 depth: (pa.depth + pb.depth) / 2, far, len: Math.round(span(a, b)),
+                 label: p.from + ' - ' + p.to });
   }
   for (const c of (rel.chambers || [])) {
     const q = project(c, cam);
@@ -134,6 +136,18 @@ function extent(items) {
 // off a label.
 const GRID_MINOR = 1000;
 const GRID_MAJOR = 10000;
+
+// The engine's `render-distance-objects`. A corridor longer than this goes dark at the far
+// end - stand in one chamber and the other simply is not drawn - which reads as a
+// rendering bug rather than a layout one. Deliberately NOT a lint rule: it is a setting,
+// not a correctness claim, so the feedback belongs where the dragging happens.
+const RENDER_DISTANCE = 5000;
+
+/** 3D distance between two parts. */
+function span(a, b) {
+  const dx = a.x - b.x, dy = (a.y || 0) - (b.y || 0), dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
 
 /** The ground plane as projected grid lines.
  *
@@ -236,9 +250,12 @@ function body(rel, cam) {
     if (it.kind === 'passage') {
       out += '<line x1="' + it.a.x.toFixed(1) + '" y1="' + it.a.y.toFixed(1)
         + '" x2="' + it.b.x.toFixed(1) + '" y2="' + it.b.y.toFixed(1)
-        + '" stroke="#7aa2f7" stroke-width="' + (it.r * 2)
+        + '" stroke="' + (it.far ? '#e0af68' : '#7aa2f7') + '" stroke-width="' + (it.r * 2)
         + '" stroke-opacity="' + (Number(a) * 0.5).toFixed(3)
-        + '" stroke-linecap="round"><title>' + esc(it.label) + '</title></line>';
+        + '" stroke-linecap="round"' + (it.far ? ' stroke-dasharray="600 400"' : '')
+        + '><title>' + esc(it.label) + ': ' + it.len + 'u'
+        + (it.far ? ' - past the ' + RENDER_DISTANCE + 'u render distance, so the far end '
+                  + 'stops drawing' : '') + '</title></line>';
     } else if (it.kind === 'chamber') {
       out += '<circle class="p3" cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1)
         + '" r="' + it.r + '" fill="#7aa2f7" fill-opacity="' + (Number(a) * 0.4).toFixed(3)
@@ -292,13 +309,21 @@ function holdPivot(vb, before, after) {
  *  the tests exercise IS the code the page runs.
  */
 function clientBundle() {
-  return [esc, project, unproject, boxCorners, scene, extent, shade, body, holdPivot,
-          groundGrid, gridSvg, labelRows, labelSvg]
+  // Everything `body` reaches for, transitively. A function left out of this list is
+  // not a missing feature in the page - it is a ReferenceError that blanks the view,
+  // which is how `span` and RENDER_DISTANCE were caught the moment scene() started
+  // using them.
+  return 'const RENDER_DISTANCE = ' + RENDER_DISTANCE + ';\n'
+    + 'const GRID_MINOR = ' + GRID_MINOR + ';\n'
+    + 'const GRID_MAJOR = ' + GRID_MAJOR + ';\n'
+    + [esc, project, unproject, span, boxCorners, scene, extent, shade, body, holdPivot,
+       groundGrid, gridSvg, labelRows, labelSvg]
     .map(function (f) { return f.toString(); }).join('\n')
     + '\nconst BOX_EDGES = ' + JSON.stringify(BOX_EDGES) + ';\n';
 }
 
 module.exports = { project, unproject, scene, body, extent, boxCorners, shade, clientBundle,
+                   span, RENDER_DISTANCE,
                    groundGrid, gridSvg, labelRows, labelSvg, GRID_MINOR, GRID_MAJOR,
                    holdPivot,
                    topDown, defaultCamera, BOX_EDGES };

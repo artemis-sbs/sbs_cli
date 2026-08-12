@@ -93,6 +93,25 @@ function navSvg(cam, project, size) {
   return out;
 }
 
+const OPPOSITE = {
+  top: 'bottom', bottom: 'top', front: 'back', back: 'front', right: 'left', left: 'right',
+};
+
+/** The view a click on `name` should actually go to, given where the camera is now.
+ *
+ *  Clicking the axis you are ALREADY looking down flips to the far side, which is what
+ *  Blender does and what the widget's own picture demands: looking down an axis puts both
+ *  of its balls on the same pixel, so the near one is the only thing you can hit. Without
+ *  the flip that ball is the one control on the widget that does nothing.
+ */
+function nextView(name, cam) {
+  const v = VIEWS[name];
+  if (!v || !cam) { return name; }
+  const near = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) < 1e-3;
+  const here = near(cam.yaw, v.yaw) && near(cam.pitch, v.pitch);
+  return here ? (OPPOSITE[name] || name) : name;
+}
+
 /** The camera for a named view, or undefined. */
 function viewFor(name) {
   const v = VIEWS[name];
@@ -107,4 +126,5 @@ function clientBundle() {
     + navSvg.toString() + '\n';
 }
 
-module.exports = { balls, navSvg, viewFor, clientBundle, VIEWS, BALLS };
+module.exports = { balls, navSvg, viewFor, nextView, clientBundle,
+                   VIEWS, BALLS, OPPOSITE };

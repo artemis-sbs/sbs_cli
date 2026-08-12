@@ -4768,10 +4768,8 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   // The panel redraws on every document change, so without remembering the viewBox a
   // single keystroke would throw away the author's zoom and pan.
   let lastView: { x: number; y: number; w: number; h: number } | undefined;
-  // Plan or 3D, and where the 3D camera is pointing. Both are remembered per PANEL rather
-  // than globally: two relic files open side by side are two different things to look at.
-  let mode: 'plan' | '3d' = 'plan';
-  let lastView3d: { x: number; y: number; w: number; h: number } | undefined;
+  // Where the camera is pointing, remembered per PANEL rather than globally: two relic
+  // files open side by side are two different things to look at.
   let cam: { yaw: number; pitch: number } | undefined;
   // What is selected in 3D. Remembered here because a drag REWRITES the document, which
   // redraws the panel - so a selection kept only in the page would be dropped by the very
@@ -4785,8 +4783,7 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     const model = RelicModel.parse(doc.getText());
     if (index >= model.relics.length) { index = 0; }
     panel.webview.html = RelicView.render(
-      model.relics, nonce(), index,
-      mode === '3d' ? lastView3d : lastView, relicLive, mode, cam, sel3);
+      model.relics, nonce(), index, lastView, relicLive, cam, sel3);
   };
   draw();
 
@@ -4846,18 +4843,13 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       // Orbit and framing together: a redraw fires on every keystroke in the document,
       // and snapping back to a default angle mid-edit would be worse than not having
       // remembered the zoom at all.
-      lastView3d = { x: msg.x, y: msg.y, w: msg.w, h: msg.h };
+      lastView = { x: msg.x, y: msg.y, w: msg.w, h: msg.h };
       cam = { yaw: msg.yaw, pitch: msg.pitch };
       return;
     }
     if (msg && msg.type === 'sel3d') {
       sel3 = msg.key || undefined;
       return;                          // a selection is not an edit - never redraw here
-    }
-    if (msg && msg.type === 'mode') {
-      mode = msg.mode === '3d' ? '3d' : 'plan';
-      draw();
-      return;
     }
     if (msg && msg.type === 'field') {
       // A typed field - the same one-line write a drag makes.
