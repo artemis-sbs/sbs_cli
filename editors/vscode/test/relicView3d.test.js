@@ -314,6 +314,26 @@ check('...whose Add means HERE, not the middle of the view',
 check('...and can frame or delete what was clicked',
   sel.indexOf('Frame it') >= 0 && sel.indexOf('Delete "+k') >= 0);
 check('a click elsewhere closes it', sel.indexOf('!ctx.contains(e.target)') >= 0);
+// ...in the CAPTURE phase, so a press the scene handles still dismisses it first.
+check('...before whatever was clicked gets the press',
+  /!ctx.contains\(e.target\)\)hideCtx\(\);\},true\)/.test(sel.replace(/'\s*\+\s*'/g, '')));
+
+// --- a wheel during a drag is never a zoom -----------------------------------
+// Reported: middle-drag orbited in one direction, then went wonky and zoomed the moment
+// the direction changed. Whatever produced the wheel event - a browser that armed
+// autoscroll before we refused it, a tilt wheel, a trackpad - the author has a button held
+// and is orbiting, and zooming underneath that is never what was meant.
+check('a wheel is ignored while a gesture is in progress',
+  sel.indexOf('if(orbit||pan||move||size||link)return;') >= 0);
+// A viewBox with a NaN in it is IGNORED by the browser, which shows as the view snapping
+// to some other framing - indistinguishable from a zoom, and untraceable to the sum that
+// produced it.
+check('a non-finite viewBox is never written',
+  sel.indexOf('!isFinite(vb.x)') >= 0 && sel.indexOf('vb.w<=0') >= 0);
+// outerHTML on an SVG element parses its string as HTML, so the new nodes land in the
+// HTML namespace and never render - the grid simply disappears after the first redraw.
+check('the grid redraws into a stable wrapper, not through outerHTML',
+  sel.indexOf('getElementById("grid3g")') >= 0 && sel.indexOf('outerHTML') < 0);
 
 // unproject is what all of that rests on: a screen point is a whole LINE in the world,
 // so it only has an answer once a height is pinned.
@@ -405,7 +425,7 @@ check('...and auxclick with it, which fires after the release',
 // sitting where the chambers used to be.
 check('a redraw redraws the labels', sel.indexOf('lb.innerHTML=labelSvg(scene(REL,cam)') >= 0);
 check('...and the ground grid, which turns with the view too',
-  sel.indexOf('gr.outerHTML=gridSvg(REL,cam') >= 0);
+  sel.indexOf('gr.innerHTML=gridSvg(REL,cam') >= 0);
 check('...and the navigation widget, which shows where the camera IS',
   sel.indexOf('nv.innerHTML=navSvg(cam,project,100)') >= 0);
 // Every piece of the picture is a function of the camera, so every piece has to be

@@ -132,7 +132,11 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     + 'background:var(--vscode-editorWidget-background,#252526);border-radius:6px;'
     + 'border:1px solid var(--vscode-panel-border,#8883);box-shadow:0 3px 14px #0007;'
     + 'display:flex;flex-direction:column;gap:4px;font-size:12px;min-width:150px}'
-    + '.insp.hidden,label.hidden{display:none}'
+    // A PLAIN `.hidden`, not a list of the elements that happen to use it today. The
+    // rule used to be `.insp.hidden,label.hidden`, so when the context menu arrived wearing
+    // the same class it was never hidden by it - the menu came up and stayed up, and the
+    // bug was in a selector nobody thought to re-read.
+    + '.hidden{display:none}'
     + '.ititle{font-weight:600;margin-bottom:2px}'
     + '.ikind{opacity:.6;font-weight:400}'
     + '.insp label{display:flex;justify-content:space-between;align-items:center;gap:8px}'
@@ -178,7 +182,7 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     + '<div class="ihint">drag a handle, or type an exact number here</div></div>'
     + '<div class="wrap"><svg id="scene3" viewBox="' + v3.x + ' ' + v3.y + ' '
     + v3.w + ' ' + v3.h + '" preserveAspectRatio="xMidYMid meet">'
-    + V3.gridSvg(rel, cam3, Math.max(v3.w, v3.h), v3.w)
+    + '<g id="grid3g">' + V3.gridSvg(rel, cam3, Math.max(v3.w, v3.h), v3.w) + '</g>'
     + '<g id="scene3g">' + V3.body(rel, cam3) + '</g>'
     + '<g id="lab3g">' + V3.labelSvg(V3.scene(rel, cam3), Math.max(v3.w, v3.h) / 42) + '</g>'
     + '</svg>'

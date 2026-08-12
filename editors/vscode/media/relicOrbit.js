@@ -86,12 +86,21 @@ function script(rel, cam, vb, sel) {
     + 'if(!all.length)return{x:0,y:0,z:0};'
     + 'let x=0,y=0,z=0;all.forEach(function(q){x+=q.x;y+=q.y;z+=q.z;});'
     + 'return{x:x/all.length,y:y/all.length,z:z/all.length};}'
-    + 'function apply(){svg.setAttribute("viewBox",vb.x+" "+vb.y+" "+vb.w+" "+vb.h);}'
+    // A viewBox with a NaN in it is IGNORED by the browser, which shows as the view
+    // snapping to some other framing - indistinguishable from a zoom, and impossible to
+    // trace back to the arithmetic that produced it. Refuse it at the one place it is
+    // written.
+    + 'function apply(){if(!isFinite(vb.x)||!isFinite(vb.y)||!isFinite(vb.w)||!isFinite(vb.h)'
+    + '||vb.w<=0||vb.h<=0)return;'
+    + 'svg.setAttribute("viewBox",vb.x+" "+vb.y+" "+vb.w+" "+vb.h);}'
     + 'function draw(){const p=partOf(sel);'
     + 'g.innerHTML=body(REL,cam)+(p?gizmoSvg(p,cam,gizL(),project)'
     + '+sizeSvg(p,cam,project,gizL()):"");'
-    + 'const gr=document.getElementById("grid3");'
-    + 'if(gr)gr.outerHTML=gridSvg(REL,cam,Math.max(vb.w,vb.h),vb.w);'
+    // innerHTML into a STABLE wrapper. `outerHTML` on an SVG element parses its string as
+    // HTML, so the new nodes land in the HTML namespace and never render - the grid simply
+    // disappears after the first redraw.
+    + 'const gr=document.getElementById("grid3g");'
+    + 'if(gr)gr.innerHTML=gridSvg(REL,cam,Math.max(vb.w,vb.h),vb.w);'
     // The labels are part of the PICTURE, so they have to be redrawn with it. Rendering
     // them once server-side left the names sitting where the chambers used to be, which
     // reads as the scene sliding out from under its own labels.
@@ -247,7 +256,12 @@ function script(rel, cam, vb, sel) {
     + 'window.addEventListener("keydown",function(e){if(e.key==="Escape")endGesture();});'
     // Zoom about the cursor: the point under the pointer stays put, so you zoom into the
     // chamber you are looking at rather than into the middle of the relic.
+    // A WHEEL DURING A DRAG IS NEVER A ZOOM. Whatever produced it - a browser that armed
+    // autoscroll before we refused it, a tilt wheel, a trackpad - the author has a button
+    // held and is orbiting. Zooming underneath that is what made a middle-drag "go wonky
+    // and zoom in" the moment the direction changed.
     + 'svg.addEventListener("wheel",function(e){e.preventDefault();'
+    + 'if(orbit||pan||move||size||link)return;'
     + 'const w=pt(e);const f=e.deltaY>0?1.12:1/1.12;'
     + 'vb={x:w.x-(w.x-vb.x)*f,y:w.y-(w.y-vb.y)*f,w:vb.w*f,h:vb.h*f};apply();'
     + 'if(sel)draw();report();},{passive:false});'

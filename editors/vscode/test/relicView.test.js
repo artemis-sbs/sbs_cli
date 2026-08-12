@@ -84,6 +84,17 @@ check('a file with no relic says so rather than rendering an empty frame',
 check('an out-of-range index falls back rather than throwing',
   V.render(relics, 'N', 99).indexOf('<!DOCTYPE html>') === 0);
 
+// Everything that starts hidden must be hidden by the SAME rule. The rule used to name
+// the two elements that happened to use the class - so when the context menu arrived
+// wearing it, `hidden` did nothing to it: the menu came up on right-click and stayed up,
+// and the bug was in a selector nobody thought to re-read.
+check('the hidden rule is general, not a list of the elements using it today',
+  markup.indexOf('.hidden{display:none}') >= 0);
+[['the context menu', 'id="ctx" class="ctx hidden"'],
+ ['the inspector', 'id="insp" class="insp hidden"']].forEach(([what, m]) => {
+  check(what + ' starts hidden', markup.indexOf(m) >= 0);
+});
+
 // ------------------------------------------------------------------ warnings
 const ORPHAN = DOC + NL + NL
   + ['### [stray](stray)', '---', 'Relic: nosuch', 'Chamber: 0,0,0,100', '---'].join(NL);
