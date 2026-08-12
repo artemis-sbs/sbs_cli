@@ -23,6 +23,30 @@ function extent(p) {
   return p.r || 100;
 }
 
+
+/**
+ * Which parts share a spot on the plan, and in what order to stack their labels.
+ *
+ * A top-down plan cannot show a vertical stack: a shaft directly above a hub is the SAME
+ * DOT, and without this their names and readouts print on top of each other into mush.
+ * Returns key -> row index, ordered by height so the labels read like an elevation with
+ * the highest chamber on top.
+ */
+function stackRows(parts) {
+  const groups = new Map();
+  for (const p of parts) {
+    const k = Math.round(p.x) + ':' + Math.round(p.z);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(p);
+  }
+  const rows = new Map();
+  for (const g of groups.values()) {
+    g.sort((a, b) => (b.y || 0) - (a.y || 0));
+    g.forEach((p, i) => rows.set(p.key, { row: i, of: g.length }));
+  }
+  return rows;
+}
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -61,6 +85,7 @@ function render(relics, nonce, index) {
   const fs = Math.max(w, h) / 42;
 
   const byKey = new Map([].concat(rel.chambers, rel.boxes).map((p) => [p.key, p]));
+  const rows = stackRows([].concat(rel.chambers, rel.boxes));
   let svg = '';
 
   // Passages first, so a chamber is never hidden behind a corridor.
@@ -73,22 +98,34 @@ function render(relics, nonce, index) {
       + '" stroke-opacity="0.30" stroke-linecap="round"/>';
   }
   for (const c of rel.chambers) {
+    const st = rows.get(c.key) || { row: 0, of: 1 };
+    // One label block per part, pushed down a line for each part already at this spot.
+    const top = (0 - fs * 0.9) + st.row * fs * 2.0;
+    const stacked = st.of > 1;
     svg += '<g class="part" data-key="' + esc(c.key) + '" data-kind="chamber">'
       + '<circle cx="' + c.x + '" cy="' + c.z + '" r="' + c.r + '" fill="#7aa2f7"'
       + ' fill-opacity="0.16" stroke="#7aa2f7" stroke-width="6"/>'
-      + '<text x="' + c.x + '" y="' + c.z + '" text-anchor="middle" dy="-14" font-size="'
-      + fs + '" fill="var(--vscode-foreground)">' + esc(c.name || c.key) + '</text>'
-      + '<text x="' + c.x + '" y="' + c.z + '" text-anchor="middle" dy="' + (fs * 1.3)
-      + '" font-size="' + (fs * 0.72) + '" fill="var(--vscode-descriptionForeground)">y '
-      + c.y + '  r ' + c.r + '</text></g>';
+      + (stacked
+        // A leader line, so a fanned label is visibly tied to the dot it belongs to.
+        ? '<line x1="' + c.x + '" y1="' + c.z + '" x2="' + c.x + '" y2="' + (c.z + top)
+          + '" stroke="#7aa2f7" stroke-opacity="0.35" stroke-width="2"/>' : '')
+      + '<text x="' + c.x + '" y="' + c.z + '" text-anchor="middle" dy="' + top
+      + '" font-size="' + fs + '" fill="var(--vscode-foreground)">'
+      + esc(c.name || c.key) + '</text>'
+      + '<text x="' + c.x + '" y="' + c.z + '" text-anchor="middle" dy="'
+      + (top + fs * 0.85) + '" font-size="' + (fs * 0.66)
+      + '" fill="var(--vscode-descriptionForeground)">y ' + c.y + '  r ' + c.r
+      + '</text></g>';
   }
   for (const b of rel.boxes) {
     svg += '<g class="part" data-key="' + esc(b.key) + '" data-kind="box">'
       + '<rect x="' + (b.x - (b.hx || 0)) + '" y="' + (b.z - (b.hz || 0)) + '" width="'
       + ((b.hx || 0) * 2) + '" height="' + ((b.hz || 0) * 2)
       + '" fill="#9ece6a" fill-opacity="0.16" stroke="#9ece6a" stroke-width="6"/>'
-      + '<text x="' + b.x + '" y="' + b.z + '" text-anchor="middle" dy="-14" font-size="'
-      + fs + '" fill="var(--vscode-foreground)">' + esc(b.name || b.key) + '</text></g>';
+      + '<text x="' + b.x + '" y="' + b.z + '" text-anchor="middle" dy="'
+      + ((0 - fs * 0.9) + ((rows.get(b.key) || { row: 0 }).row * fs * 2.0))
+      + '" font-size="' + fs + '" fill="var(--vscode-foreground)">'
+      + esc(b.name || b.key) + '</text></g>';
   }
   for (const s of rel.solids) {
     // Subtracted space is drawn dashed and warm, so it reads as "not room" at a glance.
@@ -162,4 +199,4 @@ function render(relics, nonce, index) {
     + '<script nonce="' + nonce + '">' + script + '</script></body></html>';
 }
 
-module.exports = { render, extent };
+module.exports = { render, extent, stackRows };

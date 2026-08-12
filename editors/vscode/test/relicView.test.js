@@ -88,6 +88,40 @@ const ORPHAN = DOC.replace('Relic: oss' + NL + 'Chamber: 3000, 0, 0, 700',
 check('an orphaned part is reported rather than silently missing',
   V.render(R.parse(ORPHAN).relics, 'N', 0).indexOf('name a relic that does not exist') >= 0);
 
+
+// ------------------------------------------------- vertical stacks and labels
+// A top-down plan cannot show a vertical stack: a shaft directly above a hub is the SAME
+// DOT. Before this, their names and readouts printed on top of each other and came out as
+// mush - "shalft", "galtrex" - which is only visible on screen, so it survived every
+// earlier test.
+const STACK = ['### [O](o)', '---', 'Loc: 0,0,0', '---', '',
+  '### [hub](hub)', '---', 'Relic: o', 'Chamber: 0, 0, 0, 900', '---', '',
+  '### [shaft](shaft)', '---', 'Relic: o', 'Chamber: 0, 2200, 0, 600', '---', '',
+  '### [pit](pit)', '---', 'Relic: o', 'Chamber: 0, -1800, 0, 500', '---'].join(NL);
+const srel = R.parse(STACK).relics[0];
+const srows = V.stackRows(srel.chambers);
+
+check('co-located parts are detected as a stack',
+  srows.get('hub').of === 3 && srows.get('shaft').of === 3);
+check('the stack is ordered by height, tallest first',
+  srows.get('shaft').row === 0 && srows.get('hub').row === 1 && srows.get('pit').row === 2);
+
+const sh = V.render([srel], 'N', 0);
+const dys = (sh.match(/text-anchor="middle" dy="(-?[\d.]+)"/g) || [])
+  .map((t) => t.match(/dy="(-?[\d.]+)"/)[1]);
+check('every label row gets a distinct offset',
+  new Set(dys).size === dys.length);
+check('a stacked part gets a leader line back to its dot',
+  (sh.match(/stroke-opacity="0.35"/g) || []).length === 3);
+
+// A part standing on its own must NOT get a leader line - that would be visual noise on
+// every plan that has no stacking at all.
+const LONE = ['### [O](o)', '---', 'Loc: 0,0,0', '---', '',
+  '### [hub](hub)', '---', 'Relic: o', 'Chamber: 0, 0, 0, 900', '---'].join(NL);
+check('a lone chamber has no leader line',
+  V.render(R.parse(LONE).relics, 'N', 0).indexOf('stroke-opacity="0.35"') < 0);
+
+
 console.log('');
 if (failures) { console.log(failures + ' failure(s)'); process.exit(1); }
 console.log('all relic view tests passed');
