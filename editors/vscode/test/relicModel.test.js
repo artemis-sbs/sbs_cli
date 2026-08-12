@@ -7,6 +7,7 @@
 const assert = require('assert');
 const R = require('../media/relicModel.js');
 
+const NL = String.fromCharCode(10);
 let failures = 0;
 function check(name, cond) {
   if (cond) { console.log('  ok  - ' + name); }
@@ -201,6 +202,35 @@ const sphMoved = R.parse(R.movePart(SOLIDS, sphere, 7, 8)).relics[0]
   .solids.find((s) => s.shape === 'sphere');
 check('a sphere solid still moves plainly', sphMoved.x === 7 && sphMoved.z === 8);
 check('...keeping its radius', sphMoved.r === 320);
+
+
+
+// ------------------------------------------------------------- setPart
+// One verb for every edit. The alternative is a function per field, each having to know
+// how the three shapes lay their numbers out.
+const sp1 = R.parse(R.setPart(DOC, hub, { r: 1500 })).relics[0]
+  .chambers.find((c) => c.key === 'hub');
+check('setPart edits a radius and leaves position alone',
+  sp1.r === 1500 && sp1.x === 0 && sp1.y === 0);
+const sp2 = R.parse(R.setPart(DOC, hub, { y: 2200 })).relics[0]
+  .chambers.find((c) => c.key === 'hub');
+check('setPart edits height alone', sp2.y === 2200 && sp2.r === 900);
+const sp3 = R.parse(R.setPart(DOC, rel.boxes[0], { hy: 99 })).relics[0].boxes[0];
+check('setPart edits one half-extent of a box',
+  sp3.hy === 99 && sp3.hx === 900 && sp3.hz === 380);
+check('setPart still changes exactly one line',
+  DOC.split(NL).filter((l, i) => l !== R.setPart(DOC, hub, { r: 1 }).split(NL)[i]).length === 1);
+check('setPart ignores a non-numeric value rather than writing junk',
+  R.setPart(DOC, hub, { r: 'wide' }) === DOC);
+check('an empty patch is a no-op', R.setPart(DOC, hub, {}) === DOC);
+
+const capDoc = ['### [O](o)', '---', 'Loc: 0,0,0', '---', '', '### [s](s)', '---',
+  'Relic: o', 'Solid: capsule, 0, -800, 0, 0, 800, 0, 60', '---'].join(NL);
+const cap0 = R.parse(capDoc).relics[0].solids[0];
+const capMoved2 = R.parse(R.setPart(capDoc, cap0, { x: 500 })).relics[0].solids[0];
+check('setPart TRANSLATES a capsule rather than moving one end',
+  capMoved2.ax === 500 && capMoved2.bx === 500
+  && (capMoved2.by - capMoved2.ay) === (cap0.by - cap0.ay));
 
 
 console.log('');

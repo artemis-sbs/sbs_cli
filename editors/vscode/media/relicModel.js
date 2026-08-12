@@ -181,6 +181,52 @@ function fmt(n) {
   return Number.isInteger(r) ? String(r) : String(r);
 }
 
+/**
+ * Write a patch of named values onto a part, leaving the rest as they were.
+ *
+ * One verb for every edit, because the alternative is a function per field that each has
+ * to know how the three shapes lay their numbers out. The patch is merged over the part's
+ * current values and the whole row is re-emitted - still ONE line, so the write rule
+ * holds.
+ *
+ * Understood keys: x, y, z (position), r (radius, or a capsule's), hx/hy/hz (extents).
+ */
+function setPart(text, part, patch) {
+  const v = {
+    x: part.x, y: part.y, z: part.z, r: part.r,
+    hx: part.hx, hy: part.hy, hz: part.hz,
+  };
+  for (const k of Object.keys(patch || {})) {
+    if (patch[k] !== undefined && patch[k] !== null && Number.isFinite(Number(patch[k]))) {
+      v[k] = Number(patch[k]);
+    }
+  }
+  if (part.kind === 'chamber') {
+    return writeField(text, part.line, [v.x, v.y, v.z, v.r]);
+  }
+  if (part.kind === 'box') {
+    return writeField(text, part.line, [v.x, v.y, v.z, v.hx, v.hy, v.hz]);
+  }
+  if (part.kind === 'solid') {
+    if (part.shape === 'capsule') {
+      // A capsule has no single centre to write, so a position patch TRANSLATES it and
+      // its length is preserved - the same rule dragging one follows.
+      const dx = v.x - part.x;
+      const dy = v.y - part.y;
+      const dz = v.z - part.z;
+      return writeField(text, part.line, [
+        part.ax + dx, part.ay + dy, part.az + dz,
+        part.bx + dx, part.by + dy, part.bz + dz, v.r,
+      ], 'capsule');
+    }
+    if (part.shape === 'box') {
+      return writeField(text, part.line, [v.x, v.y, v.z, v.hx, v.hy, v.hz], 'box');
+    }
+    return writeField(text, part.line, [v.x, v.y, v.z, v.r], part.shape);
+  }
+  return text;
+}
+
 /** Move a chamber or box to a new XZ, keeping its height and size. */
 function moveePart(text, part, x, z) {
   if (part.kind === 'chamber') {
@@ -228,5 +274,6 @@ function setHeight(text, part, y) {
 }
 
 module.exports = {
-  parse, writeField, movePart: moveePart, resizePart, setHeight, numbers, words, fmt,
+  parse, writeField, movePart: moveePart, resizePart, setHeight, setPart,
+  numbers, words, fmt,
 };

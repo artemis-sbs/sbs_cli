@@ -33,9 +33,13 @@ const html = V.render(R.parse(DOC).relics, 'NONCE', 0);
 
 // The failure mode that actually happened: a part with no draw position rendered
 // cx="undefined" and silently vanished. Assert the absence of both spellings of broken.
+// Only the MARKUP is checked, not the inline script - which legitimately contains the
+// word `undefined` in a guard. The failure this guards against is an attribute VALUE
+// like cx="undefined", which is what made every solid invisible once.
+const markup = html.slice(0, html.indexOf('<script'));
 check('produces a document', html.indexOf('<!DOCTYPE html>') === 0);
-check('no undefined leaked into the markup', html.indexOf('undefined') < 0);
-check('no NaN leaked into the markup', html.indexOf('NaN') < 0);
+check('no undefined leaked into an attribute', markup.indexOf('undefined') < 0);
+check('no NaN leaked into an attribute', markup.indexOf('NaN') < 0);
 
 check('a chamber draws at its authored coordinates',
   html.indexOf('cx="0" cy="0" r="900"') >= 0);
@@ -190,6 +194,28 @@ const BOXNS = ['### [O](o)', '---', 'Loc: 0,0,0', '---', '',
   '### [hall](hall)', '---', 'Relic: o', 'Box: 0, 0, 1000, 500, 100, 200', '---'].join(NL);
 check('a box stays centred through the flip',
   V.render(R.parse(BOXNS).relics, 'N', 0).indexOf('y="-1200"') >= 0);
+
+
+
+// ----------------------------------------------------------- the inspector
+// Dragging is for ARRANGING; typing is for meaning it. A radius of exactly 900 or a
+// height of exactly 2200 cannot be dragged to, so the numbers need a form.
+check('the inspector exists and starts hidden',
+  markup.indexOf('id="insp"') >= 0 && markup.indexOf('insp hidden') >= 0);
+check('a chamber carries its numbers for the form to read',
+  markup.indexOf('data-x="0"') >= 0 && markup.indexOf('data-r="900"') >= 0);
+check('height is carried too - the plan cannot show it',
+  markup.indexOf('data-y=') >= 0);
+check('a box carries half-extents instead of a radius',
+  markup.indexOf('data-hx="900"') >= 0 && markup.indexOf('data-hz="380"') >= 0);
+check('a solid carries its shape, so the form can label it',
+  markup.indexOf('data-shape="sphere"') >= 0);
+check('the form commits on change, not on every keystroke',
+  html.indexOf("addEventListener('change'") >= 0);
+check('selecting opens the inspector, clicking away closes it',
+  html.indexOf('show(g)') >= 0 && html.indexOf('show(null)') >= 0);
+check('the form posts a patch, not a whole record',
+  html.indexOf("type:'field'") >= 0 && html.indexOf('patch:patch') >= 0);
 
 
 console.log('');

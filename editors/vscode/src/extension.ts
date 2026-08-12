@@ -4697,6 +4697,12 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       lastView = { x: msg.x, y: msg.y, w: msg.w, h: msg.h };
       return;                          // a view report is not an edit - never redraw here
     }
+    if (msg && msg.type === 'field') {
+      // A typed field - the same one-line write a drag makes.
+      await applyRelicEdit(doc, index, msg.key,
+        (text: string, part: RelicPart) => RelicModel.setPart(text, part, msg.patch));
+      return;
+    }
     if (msg && msg.type === 'pick') {
       index = Number(msg.index) || 0;
       lastView = undefined;            // a different relic deserves its own framing
@@ -4704,29 +4710,39 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       return;
     }
     if (!msg || msg.type !== 'move') { return; }
-    const model = RelicModel.parse(doc.getText());
-    const rel = model.relics[index];
+    await applyRelicEdit(doc, index, msg.key,
+      (text: string, p: RelicPart) => RelicModel.movePart(text, p,
+        Math.round(p.x + msg.dx), Math.round(p.z + msg.dz)));
+  }, undefined);
+
+  // ONE write path for every gesture - a drag or a typed field. Looks the part up from
+  // the CURRENT text (the document may have moved under us since the panel drew), applies
+  // the model's edit, and replaces only the single line it changed, so undo is one step
+  // and the rest of the document is never re-serialised.
+  async function applyRelicEdit(
+    d: vscode.TextDocument, idx: number, key: string,
+    edit: (text: string, part: RelicPart) => string,
+  ): Promise<void> {
+    const model = RelicModel.parse(d.getText());
+    const rel = model.relics[idx];
     if (!rel) { return; }
     const part = [...rel.chambers, ...rel.boxes, ...rel.solids]
-      .find((p: RelicPart) => p.key === msg.key);
+      .find((p: RelicPart) => p.key === key);
     if (!part) { return; }
-    const text = doc.getText();
-    const next = RelicModel.movePart(text, part,
-      Math.round(part.x + msg.dx), Math.round(part.z + msg.dz));
+    const text = d.getText();
+    const next = edit(text, part);
     if (next === text) { return; }
-    // Replace only the ONE line the model rewrote, so undo is a single step and the
-    // rest of the document is never re-serialised.
     const before = text.split(/\r?\n/);
     const after = next.split(/\r?\n/);
     const changed = before.findIndex((l, i) => l !== after[i]);
     if (changed < 0) { return; }
-    const edit = new vscode.WorkspaceEdit();
-    edit.replace(doc.uri, doc.lineAt(changed).range, after[changed]);
+    const we = new vscode.WorkspaceEdit();
+    we.replace(d.uri, d.lineAt(changed).range, after[changed]);
     writing = true;
-    await vscode.workspace.applyEdit(edit);
+    await vscode.workspace.applyEdit(we);
     writing = false;
     draw();
-  }, undefined);
+  }
 
   const sub = vscode.workspace.onDidChangeTextDocument((e) => {
     if (e.document.uri.toString() === doc.uri.toString() && !writing) { draw(); }

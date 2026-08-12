@@ -170,7 +170,9 @@ function render(relics, nonce, index, view) {
   for (const c of rel.chambers) {
     const st = rows.get(c.key) || { row: 0, of: 1 };
     const top = (0 - fs * 0.9) + st.row * fs * 2.0;
-    svg += '<g class="part" data-key="' + esc(c.key) + '" data-kind="chamber">'
+    svg += '<g class="part" data-key="' + esc(c.key) + '" data-kind="chamber"'
+      + ' data-name="' + esc(c.name || c.key) + '" data-x="' + c.x + '" data-y="'
+      + c.y + '" data-z="' + c.z + '" data-r="' + c.r + '">'
       + '<circle cx="' + c.x + '" cy="' + sy(c.z) + '" r="' + c.r + '" fill="#7aa2f7"'
       + ' fill-opacity="0.16" stroke="#7aa2f7" stroke-width="6"/>'
       + (st.of > 1
@@ -186,7 +188,10 @@ function render(relics, nonce, index, view) {
       + '</text></g>';
   }
   for (const b of rel.boxes) {
-    svg += '<g class="part" data-key="' + esc(b.key) + '" data-kind="box">'
+    svg += '<g class="part" data-key="' + esc(b.key) + '" data-kind="box"'
+      + ' data-name="' + esc(b.name || b.key) + '" data-x="' + b.x + '" data-y="'
+      + b.y + '" data-z="' + b.z + '" data-hx="' + b.hx + '" data-hy="' + b.hy
+      + '" data-hz="' + b.hz + '">'
       + '<rect x="' + (b.x - (b.hx || 0)) + '" y="' + (sy(b.z) - (b.hz || 0)) + '" width="'
       + ((b.hx || 0) * 2) + '" height="' + ((b.hz || 0) * 2)
       + '" fill="#9ece6a" fill-opacity="0.16" stroke="#9ece6a" stroke-width="6"/>'
@@ -197,7 +202,10 @@ function render(relics, nonce, index, view) {
   }
   for (const s of rel.solids) {
     // Subtracted space is drawn dashed and warm, so it reads as "not room" at a glance.
-    svg += '<g class="part" data-key="' + esc(s.key) + '" data-kind="solid">';
+    svg += '<g class="part" data-key="' + esc(s.key) + '" data-kind="solid"'
+      + ' data-name="' + esc(s.name || s.key) + '" data-shape="' + esc(s.shape)
+      + '" data-x="' + s.x + '" data-y="' + s.y + '" data-z="' + s.z
+      + '" data-r="' + (s.r || 0) + '">';
     if (s.shape === 'capsule') {
       svg += '<line x1="' + s.ax + '" y1="' + sy(s.az) + '" x2="' + s.bx + '" y2="' + sy(s.bz)
         + '" stroke="#f7768e" stroke-opacity="0.45" stroke-width="' + ((s.r || 100) * 2)
@@ -235,6 +243,19 @@ function render(relics, nonce, index, view) {
     + 'svg{display:block;width:100%;height:100%;cursor:grab}'
     + 'svg.panning{cursor:grabbing}'
     + '.part{cursor:move}.part.sel circle,.part.sel rect{stroke-width:12}'
+    + '.insp{position:absolute;right:14px;top:56px;z-index:5;padding:8px 10px;'
+    + 'background:var(--vscode-editorWidget-background,#252526);border-radius:6px;'
+    + 'border:1px solid var(--vscode-panel-border,#8883);box-shadow:0 3px 14px #0007;'
+    + 'display:flex;flex-direction:column;gap:4px;font-size:12px;min-width:150px}'
+    + '.insp.hidden,label.hidden{display:none}'
+    + '.ititle{font-weight:600;margin-bottom:2px}'
+    + '.ikind{opacity:.6;font-weight:400}'
+    + '.insp label{display:flex;justify-content:space-between;align-items:center;gap:8px}'
+    + '.insp input{width:82px;background:var(--vscode-input-background,#3c3c3c);'
+    + 'color:var(--vscode-input-foreground,#ccc);border:1px solid '
+    + 'var(--vscode-input-border,#5555);border-radius:3px;padding:1px 4px}'
+    + '.ihint{opacity:.55;font-size:10px;margin-top:2px}'
+    + 'body{position:relative}'
     + 'button{background:var(--vscode-button-secondaryBackground,#444);'
     + 'color:var(--vscode-button-secondaryForeground,#fff);border:none;border-radius:4px;'
     + 'padding:2px 9px;cursor:pointer;font-size:12px}';
@@ -254,10 +275,11 @@ function render(relics, nonce, index, view) {
     + "const p=pt(e);"
     + "if(g){drag={key:g.dataset.key,g:g,x0:p.x,z0:p.y,dx:0,dz:0,moved:false};"
     + "document.querySelectorAll('.part.sel').forEach(function(n){n.classList.remove('sel');});"
-    + "g.classList.add('sel');}"
+    + "g.classList.add('sel');show(g);}"
     // Dragging empty space pans; dragging a part moves it. One gesture, two meanings,
     // decided by what is under the cursor.
-    + "else{pan={x0:e.clientX,y0:e.clientY,vx:vb.x,vy:vb.y};svg.classList.add('panning');}});"
+    + "else{show(null);pan={x0:e.clientX,y0:e.clientY,vx:vb.x,vy:vb.y};"
+    + "svg.classList.add('panning');}});"
     + "window.addEventListener('mousemove',function(e){"
     + "if(pan){const k=vb.w/svg.clientWidth;"
     + "vb.x=pan.vx-(e.clientX-pan.x0)*k;vb.y=pan.vy-(e.clientY-pan.y0)*k;apply();return;}"
@@ -283,6 +305,28 @@ function render(relics, nonce, index, view) {
     + "const fit=document.getElementById('fit');"
     + "if(fit)fit.addEventListener('click',function(){"
     + "vb={x:BASE.x,y:BASE.y,w:BASE.w,h:BASE.h};apply();report();});"
+    // ---- the inspector: select a part, type a number, one line changes ----
+    // Numbers matter here in a way dragging cannot serve: a radius of exactly 900, a
+    // height of exactly 2200. Dragging is for arranging, typing is for meaning it.
+    + "const insp=document.getElementById('insp');"
+    + "const F={x:'fx',y:'fy',z:'fz',r:'fr',hx:'fhx',hy:'fhy',hz:'fhz'};"
+    + "let sel=null;"
+    + "function show(g){sel=g;if(!g){insp.classList.add('hidden');return;}"
+    + "insp.classList.remove('hidden');"
+    + "document.getElementById('iname').textContent=g.dataset.name||g.dataset.key;"
+    + "document.getElementById('ikind').textContent=g.dataset.shape||g.dataset.kind;"
+    + "for(const k in F){const el=document.getElementById(F[k]);"
+    + "const v=g.dataset[k];el.value=(v===undefined?'':v);}"
+    + "const box=g.dataset.kind==='box'||g.dataset.shape==='box';"
+    + "document.getElementById('lr').classList.toggle('hidden',box);"
+    + "['lhx','lhy','lhz'].forEach(function(id){"
+    + "document.getElementById(id).classList.toggle('hidden',!box);});}"
+    // Commit on change (blur or Enter), not on every keystroke - otherwise typing "1200"
+    // would write 1, then 12, then 120, and each one is an undo step.
+    + "for(const k in F){document.getElementById(F[k]).addEventListener('change',"
+    + "function(){if(!sel)return;const v=Number(this.value);if(!isFinite(v))return;"
+    + "const patch={};patch[k]=v;"
+    + "vscode.postMessage({type:'field',key:sel.dataset.key,patch:patch});});}"
     + "const pick=document.getElementById('pick');"
     + "if(pick)pick.addEventListener('change',function(){"
     + "vscode.postMessage({type:'pick',index:Number(pick.value)});});";
@@ -295,7 +339,17 @@ function render(relics, nonce, index, view) {
     + '<span class="hint">drag a chamber to move it &middot; drag the background to pan '
     + '&middot; wheel to zoom &middot; double-click to fit &middot; grid 1k, bold 10k'
     + '</span></header>' + warn
-    + '<div class="wrap"><svg id="plan" viewBox="' + vb.x + ' ' + vb.y + ' ' + vb.w + ' '
+    + '<div id="insp" class="insp hidden">'
+    + '<div class="ititle"><span id="iname"></span> <span id="ikind" class="ikind"></span></div>'
+    + '<label>x <input id="fx" type="number" step="10"></label>'
+    + '<label>y <input id="fy" type="number" step="10"></label>'
+    + '<label>z <input id="fz" type="number" step="10"></label>'
+    + '<label id="lr">r <input id="fr" type="number" step="10" min="1"></label>'
+    + '<label id="lhx" class="hidden">hx <input id="fhx" type="number" step="10" min="1"></label>'
+    + '<label id="lhy" class="hidden">hy <input id="fhy" type="number" step="10" min="1"></label>'
+    + '<label id="lhz" class="hidden">hz <input id="fhz" type="number" step="10" min="1"></label>'
+    + '<div class="ihint">y is height - the plan cannot show it</div></div>'
+    + '<div class="wrap"><svg id="plan" viewBox="'  + vb.x + ' ' + vb.y + ' ' + vb.w + ' '
     + vb.h + '" preserveAspectRatio="xMidYMid meet">' + grid + '<g>' + svg + '</g></svg></div>'
     + '<script nonce="' + nonce + '">' + script + '</script></body></html>';
 }
