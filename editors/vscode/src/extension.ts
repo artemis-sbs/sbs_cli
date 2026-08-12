@@ -986,6 +986,78 @@ function postDebugCommand(port: number, body: unknown,
   return DebugCommand.postDebugCommand(port, body, opts);
 }
 
+// Rebuild a relic in a running session, starting one if there is nothing listening.
+//
+// The GUI editor already spawns `sbs debug` for its preview (ensureMockRunning), and this
+// is the same move for relics. Two things are specific to a relic, though:
+//
+// A FRESH SESSION HAS NO RELIC. `sbs debug` opens at the map picker, so nothing has called
+// relics_build yet and the reload honestly answers "no relic has been loaded from a file".
+// That is not a failure to hide behind a generic warning - it is one instruction: pick the
+// map, then press Preview again.
+//
+// AND STARTING IS NOT FREE. Spawning a mission process is fine on a deliberate press and
+// wrong on a debounced drag, so `allowStart` is false on the Live path: an armed Live
+// toggle with no session says how to get one rather than launching one mid-gesture.
+async function relicReloadInSession(
+  doc: vscode.TextDocument, body: Record<string, unknown>, allowStart: boolean,
+): Promise<{ ok: boolean; message: string }> {
+  const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+  if (doc.isDirty) { await doc.save(); }   // the session rebuilds from the file on DISK
+  const post = () => postDebugCommand(port, body, { wait: true });
+
+  try {
+    return { ok: true, message: DebugCommand.describeReply(await post(), 'reload sent') };
+  } catch (e) {
+    const why = (e as Error)?.message || String(e);
+    const kind = DebugCommand.classifyReloadFailure(why);
+    // The session answered and said no - a key that does not exist, a radius of zero.
+    // Its own words beat anything we could add.
+    if (kind === 'refused') { return { ok: false, message: why }; }
+    // It answered, but nothing has built a relic yet: it is at the map picker. Starting
+    // another session would not help and restarting this one would lose it.
+    if (kind === 'no-relic') {
+      return { ok: false, message:
+        'a session is running but no relic is built yet - start the map that builds it' };
+    }
+    if (!allowStart) {
+      return { ok: false, message: `no session on port ${port} - press Preview to start one` };
+    }
+  }
+
+  const missionDir = missionDirForUri(doc.uri);
+  if (!missionDir) {
+    return { ok: false, message:
+      `no session on port ${port}, and no mission folder above this file to start one` };
+  }
+  const started = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification,
+      title: `Starting a session for ${path.basename(missionDir)}...` },
+    () => ensureMockRunning(missionDir, port));
+  if (!started) {
+    return { ok: false, message: `could not start a session on port ${port}` };
+  }
+  // The port is open before the story has compiled, so give the first ticks a moment.
+  for (let i = 0; i < 8; i++) {
+    try {
+      return { ok: true, message: DebugCommand.describeReply(await post(), 'reload sent') };
+    } catch (e) {
+      const why = (e as Error)?.message || String(e);
+      const kind = DebugCommand.classifyReloadFailure(why);
+      if (kind === 'refused') { return { ok: false, message: why }; }
+      if (kind === 'no-relic') {
+        // The expected end of a cold start, and not a failure: the session is up and
+        // sitting at the map picker, which is the one thing we cannot choose for them.
+        return { ok: false, message:
+          `session started for ${path.basename(missionDir)} - now pick the map that `
+          + 'builds this relic, then press Preview again' };
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  return { ok: false, message: 'session started, but it did not answer - try again in a moment' };
+}
+
 // "Reload Relic in Running Session" — rebuild the relic authored in the active file from
 // disk, in a running session. The same thing the relic plan's Preview button does, minus
 // the panel: the rebuild is a debug action the LIBRARY answers, so it needs no route, no
@@ -993,20 +1065,10 @@ function postDebugCommand(port: number, body: unknown,
 async function reloadRelicInSession(): Promise<void> {
   const doc = vscode.window.activeTextEditor?.document;
   if (!doc) { return; }
-  if (doc.isDirty) { await doc.save(); }     // the session rebuilds from the file on disk
-  const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
-  try {
-    const reply = await postDebugCommand(
-      port, { action: 'relic_reload', file: doc.uri.fsPath }, { wait: true });
-    vscode.window.setStatusBarMessage(
-      'Relic: ' + DebugCommand.describeReply(reply, 'reload sent'), 4000);
-  } catch (e) {
-    const why = (e as Error)?.message || String(e);
-    vscode.window.showWarningMessage(
-      /timeout|ECONNREFUSED|socket/i.test(why)
-        ? `Artemis AMD: no running session on port ${port} (start one with \`sbs debug\`).`
-        : `Artemis AMD: ${why}`);
-  }
+  const res = await relicReloadInSession(
+    doc, { action: 'relic_reload', file: doc.uri.fsPath }, true);
+  if (res.ok) { vscode.window.setStatusBarMessage('Relic: ' + res.message, 4000); }
+  else { vscode.window.showWarningMessage('Artemis AMD: ' + res.message); }
 }
 
 // "Preview in Running Session" — push the node at the cursor into a live `sbs debug`
@@ -4726,37 +4788,31 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   // is running must not open a dialog on every drag. It says so once, then stops.
   let warnedNoSession = false;
   const sendPreview = async (quiet: boolean) => {
-    if (doc.isDirty) { await doc.save(); }
-    const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
     // The relic KEY and the file, so a mission with two relics rebuilds the one on
     // screen. Both are selectors and both are optional - a session with a single relic
     // reloads it either way.
     const rel = RelicModel.parse(doc.getText()).relics[index];
-    try {
-      const reply = await postDebugCommand(port, {
-        action: 'relic_reload',
-        key: rel ? rel.key : undefined,
-        file: doc.uri.fsPath,
-      }, { wait: true });
+    // `quiet` is the debounced Live path, which must never spawn a mission mid-drag.
+    const res = await relicReloadInSession(doc, {
+      action: 'relic_reload',
+      key: rel ? rel.key : undefined,
+      file: doc.uri.fsPath,
+    }, !quiet);
+    if (res.ok) {
       warnedNoSession = false;
-      vscode.window.setStatusBarMessage(
-        'Relic: ' + DebugCommand.describeReply(reply, 'reload sent to the running session'),
-        4000);
-    } catch (e) {
-      const why = (e as Error)?.message || String(e);
-      if (quiet) {
-        if (!warnedNoSession) {
-          warnedNoSession = true;
-          vscode.window.setStatusBarMessage('Relic: live preview - ' + why, 5000);
-        }
-        return;
-      }
-      // The runner's own words when it answered, ours only when nothing answered at all.
-      vscode.window.showWarningMessage(
-        /timeout|ECONNREFUSED|socket/i.test(why)
-          ? `Artemis AMD: no running session on port ${port} (start one with \`sbs debug\`).`
-          : `Artemis AMD: ${why}`);
+      vscode.window.setStatusBarMessage('Relic: ' + res.message, 4000);
+      return;
     }
+    if (quiet) {
+      // Say it once. A drag can fire this every 400ms and a repeating warning is worse
+      // than the silence it replaced.
+      if (!warnedNoSession) {
+        warnedNoSession = true;
+        vscode.window.setStatusBarMessage('Relic: live preview - ' + res.message, 5000);
+      }
+      return;
+    }
+    vscode.window.showWarningMessage('Artemis AMD: ' + res.message);
   };
 
   // Debounced, because a drag can land several edits in a moment and each preview tears

@@ -65,4 +65,25 @@ function describeReply(reply, fallback) {
   return fallback;
 }
 
-module.exports = { postDebugCommand, describeReply };
+/**
+ * What kind of failure a reload hit, so the caller can give the right advice.
+ *
+ *   'no-session'  nothing answered on the port - startable
+ *   'no-relic'    a session answered, but no relic is built yet: it is sitting at the
+ *                 map picker, or on a map that does not build one. The fix is to pick
+ *                 the map, NOT to restart anything.
+ *   'refused'     the session answered and said no for its own reason - a key that does
+ *                 not exist, a radius of zero. Its words are better than ours.
+ *
+ * The middle case is the one worth separating: it is the normal state of a session that
+ * was just started, and reporting it as an error would send an author restarting a
+ * session that is working perfectly well.
+ */
+function classifyReloadFailure(message) {
+  const why = String(message || '');
+  if (/timeout|ECONNREFUSED|ECONNRESET|socket|EHOSTUNREACH/i.test(why)) { return 'no-session'; }
+  if (/no relic was loaded|has not built one/i.test(why)) { return 'no-relic'; }
+  return 'refused';
+}
+
+module.exports = { postDebugCommand, describeReply, classifyReloadFailure };

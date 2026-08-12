@@ -7,7 +7,7 @@
 
 const http = require('http');
 const assert = require('assert');
-const { postDebugCommand, describeReply } = require('../media/debugCommand.js');
+const { postDebugCommand, describeReply, classifyReloadFailure } = require('../media/debugCommand.js');
 
 let pass = 0, fail = 0;
 function check(name, ok) {
@@ -95,6 +95,20 @@ async function main() {
   check('describeReply prefers the ack', describeReply({ ack: 'rebuilt' }, 'sent') === 'rebuilt');
   check('describeReply says so when the session is still working',
     describeReply({ pending: true }, 'sent').indexOf('still working') >= 0);
+
+  // --- what KIND of failure, so the advice fits -------------------------------
+  const C = classifyReloadFailure;
+  check('nothing listening is a startable session',
+    C('connect ECONNREFUSED 127.0.0.1:8765') === 'no-session' && C('timeout') === 'no-session');
+  // The normal state of a session that has just been started: it is at the map picker.
+  // Calling this an error sends an author restarting something that works.
+  check('a session with no relic yet is not a broken session',
+    C('relic reload: no relic was loaded from a file') === 'no-relic'
+    && C("relic reload: no relic named 'ossuary' - this mission has not built one") === 'no-relic');
+  check('a wrong key is the session refusing, not a missing map',
+    C("relic reload: no relic named 'nope' (loaded: ossuary)") === 'refused');
+  check('a bad edit is the session refusing too',
+    C("relic reload failed: volume 'ossuary': solid sphere radius must be positive") === 'refused');
 
   console.log('\n' + (fail ? fail + ' FAILED' : 'all debugCommand tests passed') + '\n');
   process.exit(fail ? 1 : 0);
