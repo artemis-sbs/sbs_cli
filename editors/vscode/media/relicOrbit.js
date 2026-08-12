@@ -164,7 +164,7 @@ function script(rel, cam, vb, sel) {
     + 'const g2=e.target.closest("[data-key]");'
     // SHIFT turns a drag from "select this" into "connect these" - the same gesture and
     // the same modifier the plan view uses, so the reflex carries over unchanged.
-    + 'if(g2&&e.shiftKey){link={from:g2.dataset.key};svg.classList.add("linking");'
+    + 'if(g2&&e.shiftKey){link={from:g2.dataset.key,to:null};svg.classList.add("linking");'
     + 'e.preventDefault();return;}'
     + 'if(g2){sel=g2.dataset.key;draw();e.preventDefault();return;}'
     + 'if(e.shiftKey){pan={x0:e.clientX,y0:e.clientY,vx:vb.x,vy:vb.y};'
@@ -185,6 +185,8 @@ function script(rel, cam, vb, sel) {
     // hypothetical: finishing a gizmo drag REWRITES the document, and the edit can move
     // focus away from the webview, so the release lands somewhere that is not us.
     + 'function endGesture(){orbit=null;pan=null;move=null;size=null;link=null;'
+    + 'const ln0=document.getElementById("link3");if(ln0)ln0.innerHTML="";'
+    + 'document.querySelectorAll(".tgt").forEach(function(n){n.classList.remove("tgt");});'
     + 'svg.classList.remove("linking");'
     + 'svg.classList.remove("orbiting");svg.classList.remove("panning");}'
     // The backstop: a mouse moving with NO BUTTON DOWN cannot be a drag, whatever we
@@ -210,6 +212,26 @@ function script(rel, cam, vb, sel) {
     + 'move.p.y=Math.round(move.oy+(move.axis==="y"?d:0));'
     + 'move.p.z=Math.round(move.oz+(move.axis==="z"?d:0));'
     + 'move.moved=true;draw();return;}'
+    // A SHIFT-DRAG HAS TO SHOW ITSELF. Without a line following the cursor the gesture is
+    // invisible until it succeeds - and when it fails, indistinguishable from having done
+    // nothing at all. The band is dashed, and a valid target lights up, so both the reach
+    // and the catch are visible before the button comes up.
+    + 'if(link){const q=pt(e);const a=partOf(link.from);'
+    + 'const t=e.target.closest?e.target.closest("[data-key]"):null;'
+    + 'const k2=t?t.dataset.key:null;'
+    // A solid is subtracted space, not a room, so it can never be an end of a passage.
+    // Saying that by not lighting it up beats refusing on release.
+    + 'const good=k2&&k2!==link.from&&!REL.solids.some(function(s){return s.key===k2;});'
+    + 'link.to=good?k2:null;'
+    + 'document.querySelectorAll(".tgt").forEach(function(n){n.classList.remove("tgt");});'
+    + 'if(good&&t)t.classList.add("tgt");'
+    + 'const ln=document.getElementById("link3");'
+    + 'if(ln&&a){const s0=project(a,cam);'
+    + 'ln.innerHTML=\'<line x1=\"\'+s0.x+\'\" y1=\"\'+s0.y'
+    + '+\'\" x2=\"\'+q.x+\'\" y2=\"\'+q.y+\'\"\''
+    + '+\' stroke=\"\'+(good?"#9ece6a":"#888")+\'\" stroke-width=\"\'+(vb.w*0.006)'
+    + '+\'\" stroke-dasharray=\"\'+(vb.w*0.02)+\' \'+(vb.w*0.015)+\'\"/>\';}'
+    + 'return;}'
     + 'if(pan){const k=vb.w/svg.clientWidth;'
     + 'vb.x=pan.vx-(e.clientX-pan.x0)*k;vb.y=pan.vy-(e.clientY-pan.y0)*k;apply();return;}'
     + 'if(!orbit)return;'
@@ -238,11 +260,9 @@ function script(rel, cam, vb, sel) {
     // A press on empty space that never turned into a drag is a CLICK, and a click on
     // nothing means deselect. Told apart here rather than at mousedown, because at
     // mousedown the two are still the same event.
-    + 'if(link){const t=ev&&ev.target&&ev.target.closest?ev.target.closest("[data-key]"):null;'
-    // Only chambers and boxes can be joined; a solid is subtracted space, not a room. The
-    // page cannot tell them apart from the element alone, so it asks the scene data.
-    + 'if(t&&t.dataset.key!==link.from&&!REL.solids.some(function(s){return s.key===t.dataset.key;}))'
-    + 'vscode.postMessage({type:"link",from:link.from,to:t.dataset.key});}'
+    // `link.to` was vetted while the band was drawn and is exactly what the picture was
+    // offering, so a release cannot connect something never shown as a target.
+    + 'if(link&&link.to)vscode.postMessage({type:"link",from:link.from,to:link.to});'
     + 'if(orbit&&!orbit.moved&&sel){sel=null;draw();}'
     + 'if(orbit||pan)report();'
     + '}finally{endGesture();}});'
@@ -350,6 +370,28 @@ function script(rel, cam, vb, sel) {
     + 'document.querySelectorAll(".vw").forEach(function(b){'
     + 'b.addEventListener("click",function(){const v=NAV_VIEWS[b.dataset.view];'
     + 'if(v){cam={yaw:v.yaw,pitch:v.pitch};draw();report();}});});'
+    // THE REST OF THE TOOLBAR. These lost their wiring when the plan view's script was
+    // deleted with the plan view: the buttons kept rendering, so nothing looked wrong,
+    // and Undo, Preview, Live and the relic picker all silently stopped working. The
+    // tests asserted the buttons EXISTED, which is why they stayed green - presence is
+    // not wiring, and only one of the two is worth asserting.
+    + 'const ub=document.getElementById("undo");'
+    + 'if(ub)ub.addEventListener("click",function(){vscode.postMessage({type:"undo"});});'
+    // A webview has no undo stack of its own, so CTRL-Z over the scene is swallowed here
+    // and never reaches the document our edits landed on. Post the same intent instead.
+    + 'window.addEventListener("keydown",function(e){'
+    + 'if(e.target&&e.target.tagName==="INPUT")return;'
+    + 'if((e.ctrlKey||e.metaKey)&&e.key==="z"){e.preventDefault();'
+    + 'vscode.postMessage({type:"undo"});}});'
+    + 'const pb=document.getElementById("prev");'
+    + 'if(pb)pb.addEventListener("click",function(){vscode.postMessage({type:"preview"});});'
+    + 'const lb2=document.getElementById("live");'
+    + 'if(lb2)lb2.addEventListener("click",function(){'
+    + 'const on=!lb2.classList.contains("on");lb2.classList.toggle("on",on);'
+    + 'vscode.postMessage({type:"live",on:on});});'
+    + 'const pk=document.getElementById("pick");'
+    + 'if(pk)pk.addEventListener("change",function(){'
+    + 'vscode.postMessage({type:"pick",index:Number(pk.value)});});'
     + 'const fb=document.getElementById("fit");if(fb)fb.addEventListener("click",fit);'
     + 'apply();draw();';
 }

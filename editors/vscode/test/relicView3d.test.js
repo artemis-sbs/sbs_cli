@@ -296,7 +296,7 @@ check('labels fan in screen space so they never collide',
 check('...with a leader line when one is pushed off its part',
   V3.labelSvg(V3.scene(rel, cam), 350).indexOf('<line') >= 0);
 check('SHIFT-drag between parts connects them, same modifier as the plan',
-  sel.indexOf('link={from:g2.dataset.key}') >= 0 && sel.indexOf('type:"link"') >= 0);
+  sel.indexOf('link={from:g2.dataset.key,to:null}') >= 0 && sel.indexOf('type:"link"') >= 0);
 check('...but never to a solid, which is subtracted space rather than a room',
   sel.indexOf('REL.solids.some') >= 0);
 check('Add and Delete are here too',
@@ -449,6 +449,32 @@ check('nothing in the picture is drawn only once',
     } catch (e) { return false; }
   })());
 });
+
+// --- a shift-drag has to show itself ----------------------------------------
+// Without a line following the cursor the gesture is invisible until it succeeds - and
+// when it fails, indistinguishable from having done nothing at all.
+check('the band is drawn while linking', sel.indexOf('getElementById("link3")') >= 0);
+check('...and cleared when the gesture ends',
+  sel.indexOf('if(ln0)ln0.innerHTML=""') >= 0);
+check('a valid drop target lights up', sel.indexOf('classList.add("tgt")') >= 0);
+// A solid is subtracted space, not a room, so it can never be an end of a passage. Saying
+// that by not lighting it up beats refusing on release.
+check('a solid is never offered as a target', sel.indexOf('REL.solids.some') >= 0);
+check('nor is the part you started from', sel.indexOf('k2!==link.from') >= 0);
+// The release connects EXACTLY what the picture was offering.
+check('the release uses the target the band vetted',
+  sel.indexOf('if(link&&link.to)vscode.postMessage') >= 0);
+
+// The band's markup is built by concatenation in the page, so evaluate it the way the page
+// would rather than trust that it reads correctly.
+check('the band evaluates to a real line', (() => {
+  const i = sel.indexOf('ln.innerHTML=') + 13;
+  const expr = sel.slice(i, sel.indexOf(';}', i));
+  const out = new Function('s0', 'q', 'good', 'vb', 'return ' + expr)(
+    { x: 10, y: 20 }, { x: 90, y: 80 }, true, { w: 1000 });
+  return /^<line x1="10" y1="20" x2="90" y2="80"/.test(out)
+    && out.indexOf('stroke-dasharray') > 0;
+})());
 
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.

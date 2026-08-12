@@ -71,6 +71,41 @@ check('Add and Delete are on the toolbar',
   markup.indexOf('id="add"') >= 0 && markup.indexOf('id="del"') >= 0);
 check('and the three view presets', (markup.match(/class="vw"/g) || []).length === 3);
 
+// EVERY CONTROL IS WIRED, not merely rendered.
+//
+// This is the assertion that was missing. When the plan view's script was deleted with the
+// plan view, Undo, Preview, Live and the relic picker lost their handlers - and the tests
+// stayed green, because they asserted the BUTTONS existed. A button that renders and does
+// nothing is worse than no button, and it is invisible to any check that only reads the
+// markup.
+const script = html.slice(html.indexOf('<script'), html.lastIndexOf('</scr' + 'ipt>'));
+[['fit', "getElementById(\"fit\")"],
+ ['add', "getElementById(\"add\")"],
+ ['del', "getElementById(\"del\")"],
+ ['undo', 'type:"undo"'],
+ ['preview', 'type:"preview"'],
+ ['live', 'type:"live"'],
+ ['the view presets', 'querySelectorAll(".vw")'],
+ ['the navigation gizmo', 'getElementById("navg")'],
+ ['the context menu', 'addEventListener("contextmenu"'],
+].forEach(([what, needle]) => {
+  check(what + ' is wired, not just drawn', script.indexOf(needle) >= 0);
+});
+check('the relic picker is wired when there is more than one relic',
+  V.render(R.parse(DOC + NL + NL
+    + ['### [Second](two)', '---', 'Loc: 9,0,9', '---'].join(NL)).relics, 'N', 0)
+    .indexOf('type:"pick"') >= 0);
+// The strongest form of the same check: the page has to RUN. A ReferenceError anywhere in
+// it stops every listener after the throw, which is how a single missing name has twice
+// taken out a whole set of controls at once.
+check('the page script runs without throwing', (() => {
+  try {
+    const body = script.slice(script.indexOf('>') + 1);
+    new Function(body.replace('acquireVsCodeApi()', '({postMessage:function(){}})'));
+    return true;
+  } catch (e) { return false; }
+})());
+
 // ------------------------------------------------------------------ the shell
 check('a single relic is named, not offered as a list',
   markup.indexOf('<select') < 0 && markup.indexOf('The Ossuary') >= 0);
