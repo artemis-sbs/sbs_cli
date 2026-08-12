@@ -27,6 +27,7 @@
 
 const V3 = require('./relicView3d.js');
 const Orbit = require('./relicOrbit.js');
+const Nav = require('./relicNav.js');
 
 /** World z -> SVG y. The radar draws +Z up; SVG grows down. */
 function sy(z) { return 0 - z; }
@@ -292,7 +293,10 @@ function render(relics, nonce, index, view, live, mode, cam, sel3) {
     + 'svg#scene3{cursor:move}svg#scene3.orbiting{cursor:grabbing}'
     + 'svg#scene3.panning{cursor:grabbing}'
     + '.p3{cursor:pointer}.sel3{stroke:#e0af68!important;stroke-width:14}'
-    + '.gz{cursor:move}'
+    + '.gz{cursor:move}.sz{cursor:nwse-resize}'
+    + '.wrap{position:relative}'
+    + '#navg{position:absolute;top:8px;right:8px;width:78px;height:78px;'
+    + 'opacity:.9;z-index:4}'
     + '.part{cursor:move}.part.sel circle,.part.sel rect{stroke-width:12}'
     + '.insp{position:absolute;right:14px;top:56px;z-index:5;padding:8px 10px;'
     + 'background:var(--vscode-editorWidget-background,#252526);border-radius:6px;'
@@ -450,6 +454,14 @@ function render(relics, nonce, index, view, live, mode, cam, sel3) {
     + 'exist until a quest spawns it, so booting the mission is no way to look at it">3D</button>'
     + (mode === '3d' ? '' : '<button id="add">Add chamber</button>')
     + (mode === '3d' ? '' : '<button id="del">Delete</button>')
+    + (mode === '3d'
+      // Named for what they SHOW, with the axis spelled out - Cosmos is Y-up and
+      // Blender is Z-up, so anyone arriving from there will otherwise reach for
+      // the wrong one.
+      ? '<button class="vw" data-view="top" title="Look down the Y axis - the plan view">Top</button>'
+        + '<button class="vw" data-view="front" title="Look down the Z axis">Front</button>'
+        + '<button class="vw" data-view="right" title="Look down the X axis">Right</button>'
+      : '')
     + '<button id="undo" title="Undo the last edit to the .amd file (CTRL-Z in a webview does not reach it)">Undo</button>'
     + '<button id="prev" title="Rebuild this relic in a running sbs debug session">Preview</button>'
     + '<button id="live"' + (live ? ' class="on"' : '')
@@ -474,7 +486,9 @@ function render(relics, nonce, index, view, live, mode, cam, sel3) {
     + (mode === '3d'
       ? ('<div class="wrap"><svg id="scene3" viewBox="' + v3.x + ' ' + v3.y + ' '
          + v3.w + ' ' + v3.h + '" preserveAspectRatio="xMidYMid meet">'
-         + '<g id="scene3g">' + V3.body(rel, cam3) + '</g></svg></div>'
+         + '<g id="scene3g">' + V3.body(rel, cam3) + '</g></svg>'
+         + '<svg id="navg" viewBox="0 0 100 100">' + Nav.navSvg(cam3, V3.project, 100)
+         + '</svg></div>'
          + '<script nonce="' + nonce + '">' + Orbit.script(rel, cam3, v3, sel3) + '</script>')
       : ('<div class="wrap"><svg id="plan" viewBox="' + vb.x + ' ' + vb.y + ' ' + vb.w
          + ' ' + vb.h + '" preserveAspectRatio="xMidYMid meet">' + grid + '<g>' + svg

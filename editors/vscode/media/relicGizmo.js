@@ -81,13 +81,68 @@ function gizmoSvg(c, cam, L, project) {
   return out + '</g>';
 }
 
+/** The size handles for a part, or [] if it has no size to drag.
+ *
+ *  A CHAMBER or a SPHERE SOLID has one number, a radius, and under an orthographic camera
+ *  it projects to a circle of exactly that radius - so the handle can sit on the rim and
+ *  the drag is simply "how far is the cursor from the centre". No axis, no projection
+ *  factor, and true from every angle.
+ *
+ *  A BOX has three, and they are HALF-extents, so each handle rides its own axis and the
+ *  drag is the same axis projection the move gizmo uses. They sit at the face centres,
+ *  which is where the number actually reaches.
+ */
+function sizeHandles(part, cam, project) {
+  const o = project(part, cam);
+  if (part.kind === 'box' || part.hx !== undefined) {
+    const axes = [
+      { f: 'hx', v: { x: 1, y: 0, z: 0 }, n: part.hx, color: '#f7768e' },
+      { f: 'hy', v: { x: 0, y: 1, z: 0 }, n: part.hy, color: '#9ece6a' },
+      { f: 'hz', v: { x: 0, y: 0, z: 1 }, n: part.hz, color: '#7aa2f7' },
+    ];
+    return axes.map((a) => {
+      const tip = project({ x: part.x + a.v.x * a.n, y: part.y + a.v.y * a.n,
+                            z: part.z + a.v.z * a.n }, cam);
+      const dx = tip.x - o.x, dy = tip.y - o.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      return { field: a.f, color: a.color, o, tip, dx, dy, len, value: a.n,
+               // Same rule as a move axis: edge-on cannot be dragged sanely.
+               draggable: len > Math.abs(a.n) * EDGE_ON };
+    });
+  }
+  if (part.r === undefined || part.r === null) { return []; }
+  // On the rim, to the screen-right. Which point on the rim does not matter - the drag
+  // measures distance from the centre - so pick the one that never hides behind the
+  // move gizmo's vertical handle.
+  return [{ field: 'r', color: '#e0af68', o, tip: { x: o.x + part.r, y: o.y },
+            dx: part.r, dy: 0, len: part.r, value: part.r, draggable: true }];
+}
+
+/** The size gizmo as SVG. `s` scales the grab dots with the zoom. */
+function sizeSvg(part, cam, project, s) {
+  const hs = sizeHandles(part, cam, project);
+  if (!hs.length) { return ''; }
+  let out = '<g id="sz" pointer-events="all">';
+  for (const h of hs) {
+    const o = h.draggable ? 1 : 0.25;
+    out += '<rect class="sz" data-field="' + h.field + '"'
+      + ' x="' + (h.tip.x - s * 0.11).toFixed(1) + '" y="' + (h.tip.y - s * 0.11).toFixed(1) + '"'
+      + ' width="' + (s * 0.22) + '" height="' + (s * 0.22) + '"'
+      + ' fill="' + h.color + '" fill-opacity="' + o + '" rx="' + (s * 0.04) + '">'
+      + '<title>' + h.field + ' ' + Math.round(h.value)
+      + (h.draggable ? '' : ' (edge-on - orbit to reach it)') + '</title></rect>';
+  }
+  return out + '</g>';
+}
+
 /** The same functions, as source, for the webview - see relicView3d.clientBundle for
  *  why a copy is not acceptable here. */
 function clientBundle() {
   return 'const AXES = ' + JSON.stringify(AXES) + ';\n'
     + 'const EDGE_ON = ' + EDGE_ON + ';\n'
-    + [handles, along, gizmoSvg].map(function (f) { return f.toString(); }).join('\n')
+    + [handles, along, gizmoSvg, sizeHandles, sizeSvg].map(function (f) { return f.toString(); }).join('\n')
     + '\n';
 }
 
-module.exports = { handles, along, gizmoSvg, clientBundle, AXES, EDGE_ON };
+module.exports = { handles, along, gizmoSvg, sizeHandles, sizeSvg,
+                   clientBundle, AXES, EDGE_ON };

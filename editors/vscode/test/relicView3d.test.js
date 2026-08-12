@@ -176,7 +176,7 @@ check('a passage is not movable - it has no position of its own',
 // land somewhere else sometimes.
 check('one place ends a gesture', sel.indexOf('function endGesture()') >= 0);
 check('a mouse moving with no button held cancels the drag',
-  sel.indexOf('!e.buttons&&(move||orbit||pan)') >= 0);
+  sel.indexOf('!e.buttons&&(move||orbit||pan||size)') >= 0);
 check('the state comes back even if the write post throws',
   sel.indexOf('}finally{endGesture();}') >= 0);
 check('losing focus mid-drag ends it rather than waiting for a release',
@@ -190,6 +190,60 @@ check('the plan view ends a gesture the same way',
   && planScript.indexOf('!e.buttons&&(drag||pan||link)') >= 0);
 check('...and clears in a finally there too',
   planScript.indexOf('finally{endGesture();}') >= 0);
+
+// --- the navigation gizmo ---------------------------------------------------
+// Blender's control, NOT Blender's axes. Blender is Z-up; Cosmos is Y-up, because a
+// chamber's second number is altitude. Anyone reading this widget as Blender's will reach
+// for the wrong ball, so the mapping is asserted rather than left to a comment.
+const N = require('../media/relicNav.js');
+check('clicking Y looks down from above, and IS the plan view',
+  N.viewFor('top').pitch === V3.topDown().pitch && N.viewFor('top').yaw === V3.topDown().yaw);
+check('...so top puts +Z up the screen, exactly like the plan',
+  near(V3.project({ x: 0, y: 0, z: 500 }, N.viewFor('top')).y, -500));
+check('front looks down Z, so altitude is up the screen',
+  near(V3.project({ x: 0, y: 900, z: 0 }, N.viewFor('front')).y, -900));
+check('right looks down X, so Z runs across',
+  near(V3.project({ x: 0, y: 0, z: 500 }, N.viewFor('right')).x, 500));
+check('the Y ball is the one that means top, not the Z ball',
+  N.BALLS.find((b) => b.label === 'Y').view === 'top'
+  && N.BALLS.find((b) => b.label === 'Z').view === 'front');
+check('every axis has both ends', N.BALLS.length === 6);
+check('an unknown view is refused rather than guessed', N.viewFor('sideways') === undefined);
+// Without the sort a ball behind the origin paints over one in front and the widget
+// reads inside-out.
+check('the balls sort back to front', (() => {
+  const b = N.balls(V3.defaultCamera(), V3.project, 100);
+  return b.every((x, i, a) => i === 0 || a[i - 1].depth >= x.depth);
+})());
+check('the widget is drawn in its own screen space, not the scene',
+  three.indexOf('id="navg"') >= 0 && three.indexOf('viewBox="0 0 100 100"') >= 0);
+check('the toolbar names the three views', (three.match(/class="vw"/g) || []).length === 3);
+check('...and says which axis each one is', /Look down the Y axis/.test(three));
+
+// --- the size gizmo ---------------------------------------------------------
+const chamber = G.sizeHandles({ x: 0, y: 0, z: 0, r: 900 }, cam, V3.project);
+check('a chamber has exactly one size handle, its radius',
+  chamber.length === 1 && chamber[0].field === 'r');
+// Under an orthographic camera the circle IS the sphere, so the rim is at exactly r from
+// the centre from every angle - which is why the radius drag needs no axis at all.
+check('the radius handle sits on the rim', near(chamber[0].len, 900));
+check('a radius handle is draggable from any angle',
+  G.sizeHandles({ x: 0, y: 0, z: 0, r: 900 }, V3.topDown(), V3.project)[0].draggable);
+const box = G.sizeHandles({ x: 0, y: 0, z: 0, hx: 400, hy: 200, hz: 300, kind: 'box' }, cam, V3.project);
+check('a box has three, its half-extents',
+  box.map((h) => h.field).join(',') === 'hx,hy,hz');
+check('...each carrying its own number', box.map((h) => h.value).join(',') === '400,200,300');
+check('a box half-extent goes edge-on like a move axis does',
+  !G.sizeHandles({ x: 0, y: 0, z: 0, hx: 400, hy: 200, hz: 300, kind: 'box' },
+                 V3.topDown(), V3.project).find((h) => h.field === 'hy').draggable);
+check('a part with no size gets no handle',
+  G.sizeHandles({ x: 0, y: 0, z: 0 }, cam, V3.project).length === 0);
+check('a size drag writes through the same field message',
+  sel.indexOf('pa[size.field]=size.p[size.field]') >= 0);
+check('a size is never written as zero - lint rejects it and the volume refuses it',
+  sel.indexOf('v=Math.max(1,Math.round(v))') >= 0);
+check('a stuck size drag is cleared with everything else',
+  sel.indexOf('move||orbit||pan||size') >= 0);
 
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.

@@ -24,6 +24,7 @@
 
 const V3 = require('./relicView3d.js');
 const Gizmo = require('./relicGizmo.js');
+const Nav = require('./relicNav.js');
 
 /** The primitives the page needs - deliberately not the whole record, which carries source
  *  spans and raw fence text the view has no use for and would only bloat the page with. */
@@ -44,7 +45,7 @@ function sceneData(rel) {
  * @returns {string} the page script
  */
 function script(rel, cam, vb, sel) {
-  return V3.clientBundle() + Gizmo.clientBundle()
+  return V3.clientBundle() + Gizmo.clientBundle() + Nav.clientBundle()
     + 'const vscode=acquireVsCodeApi();'
     + 'const REL=' + JSON.stringify(sceneData(rel)) + ';'
     + 'const svg=document.getElementById("scene3");'
@@ -52,7 +53,7 @@ function script(rel, cam, vb, sel) {
     + 'let cam={yaw:' + cam.yaw + ',pitch:' + cam.pitch + '};'
     + 'let vb={x:' + vb.x + ',y:' + vb.y + ',w:' + vb.w + ',h:' + vb.h + '};'
     + 'let sel=' + JSON.stringify(sel || null) + ';'
-    + 'let orbit=null,pan=null,move=null;'
+    + 'let orbit=null,pan=null,move=null,size=null;'
     // Every movable part by key. Passages are NOT here on purpose: a passage has no
     // position of its own - it is defined by the two chambers it joins, so moving one
     // would have to mean moving them, which the plan view already does better.
@@ -63,7 +64,10 @@ function script(rel, cam, vb, sel) {
     + 'function gizL(){return vb.w*0.09;}'
     + 'function apply(){svg.setAttribute("viewBox",vb.x+" "+vb.y+" "+vb.w+" "+vb.h);}'
     + 'function draw(){const p=partOf(sel);'
-    + 'g.innerHTML=body(REL,cam)+(p?gizmoSvg(p,cam,gizL(),project):"");'
+    + 'g.innerHTML=body(REL,cam)+(p?gizmoSvg(p,cam,gizL(),project)'
+    + '+sizeSvg(p,cam,project,gizL()):"");'
+    + 'const nv=document.getElementById("navg");'
+    + 'if(nv)nv.innerHTML=navSvg(cam,project,100);'
     + 'if(p){const n=g.querySelector(\'[data-key="\'+CSS.escape(p.key)+\'"]\');'
     + 'if(n)n.classList.add("sel3");}'
     + 'vscode.postMessage({type:"sel3d",key:sel});}'
@@ -78,6 +82,15 @@ function script(rel, cam, vb, sel) {
     + 'svg.addEventListener("mousedown",function(e){'
     // An axis handle first: it sits on top of the part it belongs to, and grabbing the
     // part instead would make the gizmo unusable at any angle where they overlap.
+    // A SIZE handle first, then a MOVE handle, then the part. They overlap at some
+    // angles, and the smaller, more specific target has to win or it is unreachable.
+    + 'const sz=e.target.closest(".sz");'
+    + 'if(sz&&sel){const p=partOf(sel);'
+    + 'const hs=sizeHandles(p,cam,project);'
+    + 'const h=hs.find(function(x){return x.field===sz.dataset.field;});'
+    + 'if(h&&h.draggable){const q=pt(e);'
+    + 'size={field:h.field,h:h,x0:q.x,y0:q.y,o:h.o,orig:h.value,p:p,moved:false};'
+    + 'e.preventDefault();return;}}'
     + 'const gz=e.target.closest(".gz");'
     + 'if(gz&&sel){const p=partOf(sel);'
     + 'const hs=handles(p,cam,gizL(),project);'
@@ -98,13 +111,24 @@ function script(rel, cam, vb, sel) {
     // dragging with no button held, which is felt as the mouse being captured. That is not
     // hypothetical: finishing a gizmo drag REWRITES the document, and the edit can move
     // focus away from the webview, so the release lands somewhere that is not us.
-    + 'function endGesture(){orbit=null;pan=null;move=null;'
+    + 'function endGesture(){orbit=null;pan=null;move=null;size=null;'
     + 'svg.classList.remove("orbiting");svg.classList.remove("panning");}'
     // The backstop: a mouse moving with NO BUTTON DOWN cannot be a drag, whatever we
     // think we are in the middle of. Cheap, and it recovers on the very next movement
     // rather than needing a click to clear.
     + 'window.addEventListener("mousemove",function(e){'
-    + 'if(!e.buttons&&(move||orbit||pan)){endGesture();return;}'
+    + 'if(!e.buttons&&(move||orbit||pan||size)){endGesture();return;}'
+    + 'if(size){const q=pt(e);'
+    // A radius is measured from the CENTRE, not along an axis - the circle is the sphere
+    // exactly, from every angle, so distance is the whole calculation. A half-extent is
+    // an axis, so it uses the same projection the move gizmo does.
+    + 'let v;'
+    + 'if(size.field==="r"){v=Math.hypot(q.x-size.o.x,q.y-size.o.y);}'
+    + 'else{v=size.orig+along(size.h,q.x-size.x0,q.y-size.y0)*size.orig;}'
+    // A size of zero or less builds a chamber enclosing nothing, which lint reports and
+    // the volume refuses. Stop at 1 rather than write a number the file cannot hold.
+    + 'v=Math.max(1,Math.round(v));'
+    + 'size.p[size.field]=v;size.moved=true;draw();return;}'
     + 'if(move){const q=pt(e);'
     + 'const t=along(move.h,q.x-move.x0,q.y-move.y0);'
     + 'const d=t*move.L;'
@@ -128,6 +152,8 @@ function script(rel, cam, vb, sel) {
     // edit on the undo stack.
     + 'if(move&&move.moved){vscode.postMessage({type:"field",key:move.p.key,'
     + 'patch:{x:move.p.x,y:move.p.y,z:move.p.z}});}'
+    + 'if(size&&size.moved){const pa={};pa[size.field]=size.p[size.field];'
+    + 'vscode.postMessage({type:"field",key:size.p.key,patch:pa});}'
     + 'if(orbit||pan)report();'
     + '}finally{endGesture();}});'
     // The webview losing focus mid-drag - which an edit can cause by itself - means the
@@ -146,6 +172,19 @@ function script(rel, cam, vb, sel) {
     + 'if(sel)draw();report();},{passive:false});'
     + 'window.addEventListener("keydown",function(e){'
     + 'if(e.key==="Escape"&&sel){sel=null;draw();}});'
+    // Blender's move: click a ball to look along that axis. `top` is the Y ball here,
+    // not the Z ball - Cosmos is Y-up (see relicNav).
+    + 'const nvg=document.getElementById("navg");'
+    + 'if(nvg)nvg.addEventListener("click",function(e){'
+    + 'const b=e.target.closest(".nav");if(!b)return;'
+    + 'const v=NAV_VIEWS[b.dataset.view];if(!v)return;'
+    + 'cam={yaw:v.yaw,pitch:v.pitch};draw();report();});'
+    + 'window.addEventListener("message",function(e){'
+    + 'const m=e.data||{};if(m.type!=="view")return;'
+    + 'const v=NAV_VIEWS[m.name];if(!v)return;cam={yaw:v.yaw,pitch:v.pitch};draw();report();});'
+    + 'document.querySelectorAll(".vw").forEach(function(b){'
+    + 'b.addEventListener("click",function(){const v=NAV_VIEWS[b.dataset.view];'
+    + 'if(v){cam={yaw:v.yaw,pitch:v.pitch};draw();report();}});});'
     + 'const fb=document.getElementById("fit");if(fb)fb.addEventListener("click",fit);'
     + 'apply();draw();';
 }
