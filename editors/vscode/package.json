@@ -389,7 +389,8 @@
     "test:gui": "node test/guiModel.test.js",
     "test:fence": "node test/fenceModel.test.js",
     "package": "vsce package",
-    "test:relic": "node test/relicModel.test.js"
+    "test:relic": "node test/relicModel.test.js",
+    "test:view": "node test/relicView.test.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

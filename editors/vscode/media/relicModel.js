@@ -115,10 +115,31 @@ function parse(text) {
     } else if (p.fields['solid']) {
       const n = numbers(p.fields['solid'].value);
       const w = words(p.fields['solid'].value);
-      owner.solids.push(Object.assign(part, {
-        kind: 'solid', shape: (w[0] || 'sphere').toLowerCase(), nums: n,
-        line: p.fields['solid'].line,
-      }));
+      const shape = (w[0] || 'sphere').toLowerCase();
+      // Normalise every shape to a DRAW POSITION and a DRAW RADIUS, because the three
+      // carry their numbers differently and the view must not have to know that:
+      //   sphere   x y z r
+      //   box      x y z hx hy hz
+      //   capsule  ax ay az bx by bz r      <- two points, radius LAST
+      // A capsule draws at its midpoint. Leaving x/y/z unset here rendered
+      // cx="undefined" and no solid appeared at all.
+      const solid = Object.assign(part, {
+        kind: 'solid', shape, nums: n, line: p.fields['solid'].line,
+      });
+      if (shape === 'capsule') {
+        solid.ax = n[0]; solid.ay = n[1]; solid.az = n[2];
+        solid.bx = n[3]; solid.by = n[4]; solid.bz = n[5];
+        solid.r = n[6];
+        solid.x = (n[0] + n[3]) / 2; solid.y = (n[1] + n[4]) / 2; solid.z = (n[2] + n[5]) / 2;
+      } else if (shape === 'box') {
+        solid.x = n[0]; solid.y = n[1]; solid.z = n[2];
+        solid.hx = n[3]; solid.hy = n[4]; solid.hz = n[5];
+        solid.r = n[3];
+      } else {
+        solid.x = n[0]; solid.y = n[1]; solid.z = n[2];
+        solid.r = n[3];
+      }
+      owner.solids.push(solid);
     }
     const pass = p.fields['passage to'];
     if (pass) {
@@ -170,7 +191,15 @@ function moveePart(text, part, x, z) {
   }
   if (part.kind === 'solid') {
     const n = part.nums.slice();
-    n[0] = x; n[2] = z;
+    if (part.shape === 'capsule') {
+      // BOTH endpoints move, or the capsule stretches instead of translating.
+      const dx = x - part.x;
+      const dz = z - part.z;
+      n[0] += dx; n[2] += dz;
+      n[3] += dx; n[5] += dz;
+    } else {
+      n[0] = x; n[2] = z;
+    }
     return writeField(text, part.line, n, part.shape);
   }
   return text;

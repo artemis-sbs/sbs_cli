@@ -157,6 +157,52 @@ const crlf = DOC.replace(/\n/g, '\r\n');
 const cm = R.parse(crlf);
 check('CRLF parses the same', cm.relics.length === 1 && cm.relics[0].chambers.length === 2);
 
+
+// --------------------------------------------------------------- solids
+// These exist because the first version shipped three bugs at once: solids parsed with
+// x/y/z UNDEFINED (so the view emitted cx="undefined" and no solid drew at all), a
+// capsule's radius read the wrong number, and dragging a capsule moved only one endpoint
+// so it stretched instead of translating. The original tests missed all three by only
+// ever moving a sphere and never asserting its position.
+const SOLIDS = [
+  '### [O](oss)', '---', 'Loc: 0, 0, 0', '---', '',
+  '### [core](core)', '---', 'Relic: oss', 'Solid: sphere, 100, 0, 200, 320', '---', '',
+  '### [spine](spine)', '---', 'Relic: oss',
+  'Solid: capsule, 0, -2100, 0, 0, 2100, 0, 130', '---', '',
+  '### [block](block)', '---', 'Relic: oss',
+  'Solid: box, 10, 20, 30, 50, 60, 70', '---',
+].join('\n');
+const sm = R.parse(SOLIDS).relics[0];
+const sphere = sm.solids.find((s) => s.shape === 'sphere');
+const capsule = sm.solids.find((s) => s.shape === 'capsule');
+const boxSolid = sm.solids.find((s) => s.shape === 'box');
+
+check('a solid has a draw position at all',
+  Number.isFinite(sphere.x) && Number.isFinite(sphere.y) && Number.isFinite(sphere.z));
+check('sphere solid position and radius',
+  sphere.x === 100 && sphere.z === 200 && sphere.r === 320);
+check('capsule draws at its MIDPOINT',
+  capsule.x === 0 && capsule.y === 0 && capsule.z === 0);
+check('capsule radius is the LAST number, not the fourth', capsule.r === 130);
+check('capsule keeps both endpoints',
+  capsule.ay === -2100 && capsule.by === 2100);
+check('box solid carries half-extents',
+  boxSolid.hx === 50 && boxSolid.hy === 60 && boxSolid.hz === 70);
+
+const capMoved = R.movePart(SOLIDS, capsule, 500, 600);
+check('dragging a capsule TRANSLATES it - both endpoints move',
+  capMoved.includes('Solid: capsule, 500, -2100, 600, 500, 2100, 600, 130'));
+const capBack = R.parse(capMoved).relics[0].solids.find((s) => s.shape === 'capsule');
+check('...and its length is unchanged',
+  (capBack.by - capBack.ay) === (capsule.by - capsule.ay));
+check('...and its radius survives', capBack.r === 130);
+
+const sphMoved = R.parse(R.movePart(SOLIDS, sphere, 7, 8)).relics[0]
+  .solids.find((s) => s.shape === 'sphere');
+check('a sphere solid still moves plainly', sphMoved.x === 7 && sphMoved.z === 8);
+check('...keeping its radius', sphMoved.r === 320);
+
+
 console.log('');
 if (failures) { console.log(failures + ' failure(s)'); process.exit(1); }
 console.log('all relic model tests passed');

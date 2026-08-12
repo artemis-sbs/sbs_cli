@@ -4655,6 +4655,9 @@ export function deactivate(): Thenable<void> | undefined {
 // Every edit rewrites ONE LINE of the file (see relicModel's write rule), so
 // prose, comments and field order survive being dragged around.
 const RelicModel = require(path.join(__dirname, '..', 'media', 'relicModel.js'));
+// The view is a pure function living in media/ so a plain node test can RUN it - the
+// only half of this editor a unit test can reach.
+const RelicView = require(path.join(__dirname, '..', 'media', 'relicView.js'));
 
 interface RelicPart {
   key: string; name: string; kind: string; line: number;
@@ -4666,110 +4669,6 @@ interface RelicRec {
   chambers: RelicPart[]; boxes: RelicPart[]; solids: RelicPart[];
   passages: { from: string; to: string; radius: number | null; line: number }[];
   orphans: { key: string; name: string }[];
-}
-
-function renderRelic(relics: RelicRec[], nonce: string, index: number): string {
-  const rel = relics[index];
-  if (!rel) {
-    return '<!DOCTYPE html><html><body style="font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding:12px">'
-      + '<p>No relic in this file.</p><p style="opacity:.7">A relic is a record in a '
-      + '<code>Relics</code> section carrying a <code>Loc:</code>; its chambers are records '
-      + 'carrying <code>Relic:</code>.</p></body></html>';
-  }
-  const parts: RelicPart[] = [...rel.chambers, ...rel.boxes];
-  const all: RelicPart[] = [...parts, ...rel.solids];
-  const rad = (p: RelicPart) => (p.r ?? p.hx ?? (p.nums ? p.nums[3] : 200) ?? 200);
-  const xs = all.flatMap((p) => [p.x - rad(p), p.x + rad(p)]);
-  const zs = all.flatMap((p) => [p.z - rad(p), p.z + rad(p)]);
-  const minX = Math.min(...xs, 0) - 400;
-  const maxX = Math.max(...xs, 0) + 400;
-  const minZ = Math.min(...zs, 0) - 400;
-  const maxZ = Math.max(...zs, 0) + 400;
-  const w = Math.max(maxX - minX, 1);
-  const h = Math.max(maxZ - minZ, 1);
-  const fs = Math.max(w, h) / 42;
-
-  const byKey = new Map(parts.map((p) => [p.key, p]));
-  const lines = rel.passages.map((p) => {
-    const a = byKey.get(p.from);
-    const b = byKey.get(p.to);
-    if (!a || !b) { return ''; }
-    return '<line x1="' + a.x + '" y1="' + a.z + '" x2="' + b.x + '" y2="' + b.z
-      + '" stroke="#7aa2f7" stroke-width="' + ((p.radius ?? 200) * 2)
-      + '" stroke-opacity="0.30" stroke-linecap="round"/>';
-  }).join('');
-
-  const chambers = rel.chambers.map((c) =>
-    '<g class="part" data-key="' + c.key + '" data-kind="chamber">'
-    + '<circle cx="' + c.x + '" cy="' + c.z + '" r="' + c.r + '" fill="#7aa2f7"'
-    + ' fill-opacity="0.16" stroke="#7aa2f7" stroke-width="6"/>'
-    + '<text x="' + c.x + '" y="' + c.z + '" text-anchor="middle" dy="-14" font-size="' + fs
-    + '" fill="var(--vscode-foreground)">' + (c.name || c.key) + '</text>'
-    + '<text x="' + c.x + '" y="' + c.z + '" text-anchor="middle" dy="' + (fs * 1.3)
-    + '" font-size="' + (fs * 0.72) + '" fill="var(--vscode-descriptionForeground)">y '
-    + c.y + '  r ' + c.r + '</text></g>').join('');
-
-  const boxes = rel.boxes.map((b) =>
-    '<g class="part" data-key="' + b.key + '" data-kind="box">'
-    + '<rect x="' + (b.x - (b.hx ?? 0)) + '" y="' + (b.z - (b.hz ?? 0)) + '" width="'
-    + ((b.hx ?? 0) * 2) + '" height="' + ((b.hz ?? 0) * 2)
-    + '" fill="#9ece6a" fill-opacity="0.16" stroke="#9ece6a" stroke-width="6"/>'
-    + '<text x="' + b.x + '" y="' + b.z + '" text-anchor="middle" dy="-14" font-size="' + fs
-    + '" fill="var(--vscode-foreground)">' + (b.name || b.key) + '</text></g>').join('');
-
-  const solids = rel.solids.map((s) =>
-    '<g class="part" data-key="' + s.key + '" data-kind="solid">'
-    + '<circle cx="' + s.x + '" cy="' + s.z + '" r="' + ((s.nums ?? [])[3] ?? 100)
-    + '" fill="#f7768e" fill-opacity="0.30" stroke="#f7768e" stroke-width="6"'
-    + ' stroke-dasharray="18 10"/></g>').join('');
-
-  const picker = relics.length > 1
-    ? '<select id="pick">' + relics.map((r, i) => '<option value="' + i + '"'
-        + (i === index ? ' selected' : '') + '>' + (r.name || r.key) + '</option>').join('')
-      + '</select>'
-    : '<b>' + (rel.name || rel.key) + '</b>';
-  const orphanWarn = rel.orphans.length
-    ? '<div class="warn">' + rel.orphans.length
-      + ' part(s) name a relic that does not exist &mdash; they are not built.</div>'
-    : '';
-
-  const style = 'body{margin:0;font-family:var(--vscode-font-family);color:var(--vscode-foreground);'
-    + 'background:var(--vscode-editor-background);display:flex;flex-direction:column;height:100vh}'
-    + 'header{padding:8px 10px;border-bottom:1px solid var(--vscode-panel-border,#8883);'
-    + 'display:flex;gap:10px;align-items:center}'
-    + '.hint{font-size:11px;color:var(--vscode-descriptionForeground)}'
-    + '.warn{font-size:11px;color:var(--vscode-editorWarning-foreground,#e0af68);padding:4px 10px}'
-    + '.wrap{flex:1;overflow:auto}svg{display:block;width:100%;height:100%}'
-    + '.part{cursor:grab}.part.sel circle,.part.sel rect{stroke-width:12}';
-
-  const script = "const vscode=acquireVsCodeApi();const svg=document.getElementById('plan');let drag=null;"
-    + "function pt(e){const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;"
-    + "return p.matrixTransform(svg.getScreenCTM().inverse());}"
-    + "svg.addEventListener('mousedown',function(e){const g=e.target.closest('.part');if(!g)return;"
-    + "const p=pt(e);drag={key:g.dataset.key,g:g,x0:p.x,z0:p.y,dx:0,dz:0,moved:false};"
-    + "document.querySelectorAll('.part.sel').forEach(function(n){n.classList.remove('sel');});"
-    + "g.classList.add('sel');});"
-    + "window.addEventListener('mousemove',function(e){if(!drag)return;const p=pt(e);"
-    + "drag.dx=p.x-drag.x0;drag.dz=p.y-drag.z0;"
-    + "if(Math.abs(drag.dx)+Math.abs(drag.dz)>1)drag.moved=true;"
-    + "drag.g.setAttribute('transform','translate('+drag.dx+','+drag.dz+')');});"
-    + "window.addEventListener('mouseup',function(){if(!drag)return;"
-    // A click to SELECT must not touch the file - only a real move writes.
-    + "if(drag.moved)vscode.postMessage({type:'move',key:drag.key,dx:drag.dx,dz:drag.dz});"
-    + "drag.g.removeAttribute('transform');drag=null;});"
-    + "const pick=document.getElementById('pick');if(pick)pick.addEventListener('change',function(){"
-    + "vscode.postMessage({type:'pick',index:Number(pick.value)});});";
-
-  return '<!DOCTYPE html><html><head><meta charset="utf-8">'
-    + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
-    + 'style-src \'unsafe-inline\'; script-src \'nonce-' + nonce + '\';">'
-    + '<style>' + style + '</style></head><body>'
-    + '<header>' + picker + '<span class="hint">drag a chamber to move it &middot; '
-    + 'the file updates as you drop</span></header>' + orphanWarn
-    + '<div class="wrap"><svg id="plan" viewBox="' + minX + ' ' + minZ + ' ' + w + ' ' + h
-    + '" preserveAspectRatio="xMidYMid meet"><g>' + lines + '</g>'
-    + chambers + boxes + solids + '</svg></div>'
-    + '<script nonce="' + nonce + '">' + script + '</script></body></html>';
 }
 
 async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
@@ -4786,7 +4685,7 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   const draw = () => {
     const model = RelicModel.parse(doc.getText());
     if (index >= model.relics.length) { index = 0; }
-    panel.webview.html = renderRelic(model.relics, nonce(), index);
+    panel.webview.html = RelicView.render(model.relics, nonce(), index);
   };
   draw();
 
