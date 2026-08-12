@@ -108,6 +108,12 @@
         "title": "Mission Inspector (live signals & world)",
         "category": "Artemis AMD",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "amd.showRelic",
+        "title": "Show Relic Plan",
+        "category": "Artemis AMD",
+        "icon": "$(circuit-board)"
       }
     ],
     "menus": {
@@ -382,7 +388,8 @@
     "watch": "tsc -watch -p ./",
     "test:gui": "node test/guiModel.test.js",
     "test:fence": "node test/fenceModel.test.js",
-    "package": "vsce package"
+    "package": "vsce package",
+    "test:relic": "node test/relicModel.test.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

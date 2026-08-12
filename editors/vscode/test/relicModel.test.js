@@ -1,0 +1,162 @@
+// Tests for the Relic Editor's shared model (media/relicModel.js).
+// Run: npm run test:relic   (or: node test/relicModel.test.js)
+//
+// The property that matters is NOT "generate matches parse" - this model never
+// regenerates a file. It is that an edit touches ONE LINE and leaves every other byte
+// alone, so an author's prose, comments, field order and spelling survive editing.
+const assert = require('assert');
+const R = require('../media/relicModel.js');
+
+let failures = 0;
+function check(name, cond) {
+  if (cond) { console.log('  ok  - ' + name); }
+  else { console.log('  FAIL- ' + name); failures++; }
+}
+
+const DOC = [
+  '# [Story](story)',
+  '',
+  '// a comment the editor must never eat',
+  '',
+  '## [Jobs](jobs)',
+  '',
+  '### [Sweep the belt](sweep)',
+  '---',
+  'Goal: clear the rocks',
+  '---',
+  '',
+  '## [Relics](relics)',
+  '',
+  '### [The Ossuary](ossuary)',
+  '---',
+  'Loc: 12000, 0, -8000',
+  'Atmosphere: purple',
+  'Containment: tractor',
+  '---',
+  'An ancient thing, hollow, and not built by anyone still alive.',
+  '',
+  '### [hub](hub)',
+  '---',
+  'Relic: ossuary',
+  'Chamber: 0, 0, 0, 900',
+  '---',
+  '',
+  '### [gallery](gallery)',
+  '---',
+  'Relic: ossuary',
+  'Chamber: 3000, 0, 0, 700',
+  'Passage to: hub 300',
+  '---',
+  '',
+  '### [the vault](vault)',
+  '---',
+  'Relic: ossuary',
+  'Box: 3600, 0, 2900, 900, 260, 380',
+  '---',
+  '',
+  '### [the core](core)',
+  '---',
+  'Relic: ossuary',
+  'Solid: sphere, 0, 0, 0, 320',
+  '---',
+].join('\n');
+
+// ---------------------------------------------------------------- parsing
+const m = R.parse(DOC);
+check('finds exactly one relic', m.relics.length === 1);
+const rel = m.relics[0];
+check('relic key and name', rel.key === 'ossuary' && rel.name === 'The Ossuary');
+check('reads Loc', String(rel.loc) === String([12000, 0, -8000]));
+check('a Job heading is NOT mistaken for a relic',
+  !m.relics.some((r) => r.key === 'sweep'));
+
+check('two chambers', rel.chambers.length === 2);
+check('one box', rel.boxes.length === 1);
+check('one solid', rel.solids.length === 1);
+check('one passage', rel.passages.length === 1);
+
+const hub = rel.chambers.find((c) => c.key === 'hub');
+const gallery = rel.chambers.find((c) => c.key === 'gallery');
+check('chamber numbers', hub.x === 0 && hub.r === 900 && gallery.x === 3000);
+check('box half-extents', rel.boxes[0].hx === 900 && rel.boxes[0].hz === 380);
+check('solid keeps its shape word', rel.solids[0].shape === 'sphere');
+check('passage names its target and radius',
+  rel.passages[0].to === 'hub' && rel.passages[0].radius === 300);
+check('every part knows its source line', hub.line > 0 && rel.boxes[0].line > 0);
+
+// ---------------------------------------------------------- surgical writes
+const moved = R.movePart(DOC, gallery, 4200, -1500);
+const before = DOC.split('\n');
+const after = moved.split('\n');
+check('move changes exactly one line',
+  before.filter((l, i) => l !== after[i]).length === 1);
+check('the changed line is the chamber', after[gallery.line].includes('Chamber:'));
+check('the comment survives', moved.includes('// a comment the editor must never eat'));
+check('the prose survives', moved.includes('An ancient thing, hollow'));
+check('the unrelated Job survives', moved.includes('Goal: clear the rocks'));
+
+const m2 = R.parse(moved);
+const g2 = m2.relics[0].chambers.find((c) => c.key === 'gallery');
+check('the move round-trips', g2.x === 4200 && g2.z === -1500);
+check('the move preserved height and radius', g2.y === 0 && g2.r === 700);
+
+// A move must not disturb its neighbours.
+const h2 = m2.relics[0].chambers.find((c) => c.key === 'hub');
+check('the other chamber is untouched', h2.x === 0 && h2.r === 900);
+
+// --------------------------------------------------------------- edit kinds
+const resized = R.resizePart(DOC, hub, 1250);
+check('resize keeps position',
+  R.parse(resized).relics[0].chambers.find((c) => c.key === 'hub').x === 0);
+check('resize changes the radius',
+  R.parse(resized).relics[0].chambers.find((c) => c.key === 'hub').r === 1250);
+
+const raised = R.setHeight(DOC, hub, 2200);
+const h3 = R.parse(raised).relics[0].chambers.find((c) => c.key === 'hub');
+check('height edits y only', h3.y === 2200 && h3.x === 0 && h3.r === 900);
+
+const boxMoved = R.movePart(DOC, rel.boxes[0], 1, 2);
+const b2 = R.parse(boxMoved).relics[0].boxes[0];
+check('a box moves and keeps its extents',
+  b2.x === 1 && b2.z === 2 && b2.hx === 900 && b2.hy === 260 && b2.hz === 380);
+
+const solidMoved = R.movePart(DOC, rel.solids[0], 500, 600);
+check('a solid keeps its shape word when moved',
+  solidMoved.includes('Solid: sphere, 500, 0, 600, 320'));
+
+// ------------------------------------------------------- stability & safety
+let text = DOC;
+for (let i = 0; i < 5; i++) {
+  const cur = R.parse(text).relics[0].chambers.find((c) => c.key === 'gallery');
+  text = R.movePart(text, cur, cur.x, cur.z);       // a no-op drag
+}
+check('repeated no-op edits are byte-stable', text === DOC);
+
+const bogus = R.writeField(DOC, 999, [1, 2, 3]);
+check('writing past the end of the file is a no-op', bogus === DOC);
+const notAField = R.writeField(DOC, 2, [1, 2, 3]);   // line 2 is the comment
+check('writing to a non-field line is a no-op', notAField === DOC);
+
+// An author's own spelling of a label is preserved rather than normalised.
+const odd = DOC.replace('Chamber: 0, 0, 0, 900', 'chamber:   0, 0, 0, 900');
+const oddPart = R.parse(odd).relics[0].chambers.find((c) => c.key === 'hub');
+check('a lowercase label still parses', oddPart && oddPart.r === 900);
+check('the author\'s label spelling survives an edit',
+  R.movePart(odd, oddPart, 5, 6).includes('chamber: 5, 0, 6, 900'));
+
+// ------------------------------------------------------------------ orphans
+const ORPHAN = DOC.replace('Relic: ossuary\nChamber: 3000, 0, 0, 700',
+                           'Relic: typo\nChamber: 3000, 0, 0, 700');
+const om = R.parse(ORPHAN);
+check('a part naming an unknown relic is kept, not dropped',
+  om.relics[0].orphans.length === 1);
+check('...and it is not counted as a chamber', om.relics[0].chambers.length === 1);
+
+// ------------------------------------------------------------------- CRLF
+const crlf = DOC.replace(/\n/g, '\r\n');
+const cm = R.parse(crlf);
+check('CRLF parses the same', cm.relics.length === 1 && cm.relics[0].chambers.length === 2);
+
+console.log('');
+if (failures) { console.log(failures + ' failure(s)'); process.exit(1); }
+console.log('all relic model tests passed');
