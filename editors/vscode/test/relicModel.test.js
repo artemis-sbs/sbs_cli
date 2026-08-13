@@ -349,4 +349,57 @@ function splitLines(s) {
   check('both go through one writer', typeof R.addPart === 'function');
 }
 
+// --- marking a shape subtracted ---------------------------------------------
+// The editor could add a chamber and a box but never a solid, and could barely select one.
+// A toggle is the cheap half, because the numbers are identical:
+//     Chamber: x,y,z,r          <->  Solid: sphere, x,y,z,r
+//     Box: x,y,z,hx,hy,hz       <->  Solid: box, x,y,z,hx,hy,hz
+// So it is one line, like every other edit - and it is the natural way to work: build the
+// shape where the gizmos are easiest, then mark it subtracted.
+{
+  const rel = R.parse(DOC).relics[0];
+  const hub = rel.chambers[0];
+  const asSolid = R.setKind(DOC, hub, 'solid');
+  const relS = R.parse(asSolid).relics[0];
+  check('a chamber becomes a solid',
+    relS.solids.some((s) => s.key === hub.key));
+  check('...and stops being navigable space',
+    relS.chambers.length === rel.chambers.length - 1);
+  check('...keeping its centre and radius', (() => {
+    const s = relS.solids.find((x) => x.key === hub.key);
+    return s.x === hub.x && s.y === hub.y && s.z === hub.z && s.r === hub.r;
+  })());
+  // The line endings are the model's own: every writer here joins with \n, and the
+  // extension replaces ONE LINE, so the document keeps whatever it had.
+  const norm = (s) => s.split(String.fromCharCode(13)).join('');
+  check('and back again returns the file to what it was', (() => {
+    const back = R.setKind(asSolid, R.parse(asSolid).relics[0].solids
+      .find((x) => x.key === hub.key), 'chamber');
+    return norm(back) === norm(DOC);
+  })());
+
+  const hall = rel.boxes[0];
+  const boxSolid = R.setKind(DOC, hall, 'solid');
+  const bs = R.parse(boxSolid).relics[0].solids.find((x) => x.key === hall.key);
+  check('a box becomes a box-shaped solid', !!bs && bs.shape === 'box');
+  check('...keeping its half-extents',
+    bs.hx === hall.hx && bs.hy === hall.hy && bs.hz === hall.hz);
+  check('...and flips back', norm(R.setKind(boxSolid, bs, 'box')) === norm(DOC));
+
+  // A capsule carries two ENDPOINTS rather than a centre, so it has no navigable twin.
+  // Reinterpreting its six numbers as a centre and half-extents would move the shape
+  // somewhere nobody asked for; refusing is the honest answer.
+  const cap = rel.solids.find((s) => s.shape === 'capsule');
+  check('a capsule solid refuses to flip, unchanged',
+    !cap || R.setKind(DOC, cap, 'chamber') === DOC);
+  check('a part with no field line is left alone', R.setKind(DOC, { key: 'x' }, 'solid') === DOC);
+
+  const added = R.parse(R.addSolid(DOC, rel, 'pillar', 100, 0, 100, 250, 'pillar')).relics[0];
+  check('a solid can be added', added.solids.length === rel.solids.length + 1);
+  check('...as a sphere, centre and radius', (() => {
+    const s = added.solids.find((x) => x.key === 'pillar');
+    return s && s.shape === 'sphere' && s.r === 250;
+  })());
+}
+
 console.log('all relic model tests passed');

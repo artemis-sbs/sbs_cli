@@ -95,7 +95,7 @@ function parse(text) {
     const relic = {
       key: r.key, name: r.name, headingLine: r.headingLine, fields: r.fields,
       fenceEnd: r.fenceEnd,
-      chambers: [], boxes: [], solids: [], passages: [], orphans: [],
+      chambers: [], boxes: [], solids: [], points: [], passages: [], orphans: [],
       loc: r.fields['loc'] ? numbers(r.fields['loc'].value).slice(0, 3) : [0, 0, 0],
     };
     relics.push(relic);
@@ -119,6 +119,16 @@ function parse(text) {
       owner.boxes.push(Object.assign(part, {
         kind: 'box', x: n[0], y: n[1], z: n[2], hx: n[3], hy: n[4], hz: n[5],
         line: p.fields['box'].line, fenceEnd: p.fenceEnd,
+      }));
+    } else if (p.fields['point']) {
+      // A PLACE, not a shape: no radius, no extents, nothing navigable. It is here so the
+      // editor can draw and drag it - what it is FOR is its roles, which only the mission
+      // reads.
+      const n = numbers(p.fields['point'].value);
+      owner.points.push(Object.assign(part, {
+        kind: 'point', x: n[0], y: n[1], z: n[2],
+        roles: words(p.fields['roles'] ? p.fields['roles'].value : ''),
+        line: p.fields['point'].line, fenceEnd: p.fenceEnd,
       }));
     } else if (p.fields['solid']) {
       const n = numbers(p.fields['solid'].value);
@@ -204,6 +214,43 @@ function setName(text, part, name) {
   const clean = String(name === undefined || name === null ? '' : name)
     .replace(/[\[\]]/g, '').replace(/[\r\n]/g, ' ').trim();
   lines[i] = m[1] + '[' + clean + ']' + m[2];
+  return lines.join('\n');
+}
+
+/** Flip a part between navigable space and subtracted mass, in place.
+ *
+ *  `kind` is 'chamber', 'box' or 'solid'. Lossless, because the numbers are identical:
+ *
+ *      Chamber: x, y, z, r          <->  Solid: sphere, x, y, z, r
+ *      Box: x, y, z, hx, hy, hz     <->  Solid: box, x, y, z, hx, hy, hz
+ *
+ *  So it rewrites one line, like every other edit here. It is also the natural way to
+ *  work - build the shape where the gizmos are easiest, then mark it subtracted.
+ *
+ *  A CAPSULE solid is refused: it carries two endpoints rather than a centre, so it has no
+ *  navigable twin to flip to and back. Returning the text unchanged is the honest answer;
+ *  silently reinterpreting six numbers as a centre and half-extents would move the shape
+ *  somewhere nobody asked for.
+ */
+function setKind(text, part, kind) {
+  const lines = String(text).split(/\r?\n/);
+  const i = part && part.line;
+  if (i === undefined || i === null || i < 0 || i >= lines.length) { return text; }
+  const m = /^(\s*)[A-Za-z][A-Za-z ]*:/.exec(lines[i]);
+  if (!m) { return text; }
+  if (part.kind === 'solid' && part.shape === 'capsule') { return text; }
+  const isBox = part.hx !== undefined;
+  let out;
+  if (kind === 'solid') {
+    out = isBox
+      ? 'Solid: box, ' + [part.x, part.y, part.z, part.hx, part.hy, part.hz].map(fmt).join(', ')
+      : 'Solid: sphere, ' + [part.x, part.y, part.z, part.r].map(fmt).join(', ');
+  } else if (isBox) {
+    out = 'Box: ' + [part.x, part.y, part.z, part.hx, part.hy, part.hz].map(fmt).join(', ');
+  } else {
+    out = 'Chamber: ' + [part.x, part.y, part.z, part.r].map(fmt).join(', ');
+  }
+  lines[i] = m[1] + out;
   return lines.join('\n');
 }
 
@@ -376,7 +423,12 @@ function addPart(text, relic, key, field, values, name) {
   if (!Number.isFinite(at)) return text;
   const block = ['', '### [' + (name || key) + '](' + key + ')', '---',
     'Relic: ' + relic.key,
-    field + ': ' + values.map(fmt).join(', '), '---'];
+    // A string value passes through. A solid leads with its SHAPE, and `fmt` is a
+    // number formatter that turns anything non-finite into 0 - which wrote
+    // `Solid: 0, 100, 0, 100, 250` and made every added solid a sphere at the origin.
+    field + ': ' + values.map(function (v) {
+      return typeof v === 'string' ? v : fmt(v);
+    }).join(', '), '---'];
   lines.splice(at + 1, 0, ...block);
   return lines.join('\n');
 }
@@ -385,6 +437,13 @@ function addPart(text, relic, key, field, values, name) {
 function addChamber(text, relic, key, x, y, z, r, name) {
   return addPart(text, relic, key, 'Chamber', [x, y, z, r], name);
 }
+
+/** A new subtracted sphere: centre and radius - a pillar in a room, a core to fly
+ *  around. */
+function addSolid(text, relic, key, x, y, z, r, name) {
+  return addPart(text, relic, key, 'Solid', ['sphere', x, y, z, r], name);
+}
+
 
 /** A new box: centre and HALF-extents.
  *
@@ -442,7 +501,7 @@ function R_reparse(text, relicKey, partKey) {
 }
 
 module.exports = {
-  setName, addBox, addPart,
+  setName, setKind, addBox, addSolid, addPart,
   parse, writeField, movePart: moveePart, resizePart, setHeight, setPart,
   addPassage, removePassage, addChamber, removePart,
   numbers, words, fmt,

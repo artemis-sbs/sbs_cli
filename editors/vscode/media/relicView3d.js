@@ -106,6 +106,13 @@ function scene(rel, cam) {
                  hx: b.hx, hy: b.hy, hz: b.hz,
                  label: b.name || b.key, corners: boxCorners(b, cam) });
   }
+  for (const t of (rel.points || [])) {
+    const q = project(t, cam);
+    // -2 puts a point in FRONT of the room it marks: it has no size of its own, so
+    // anything else at the same depth would swallow it.
+    items.push({ kind: 'point', at: q, depth: q.depth - 2, key: t.key,
+                 label: t.name || t.key, roles: t.roles || [] });
+  }
   for (const s of (rel.solids || [])) {
     const q = project(s, cam);
     // -1 breaks ties toward the front: a solid sits INSIDE a chamber, so at equal depth
@@ -286,14 +293,37 @@ function body(rel, cam) {
         + ' r="' + rr.toFixed(0) + '" fill="#9ece6a" fill-opacity="'
         + (Number(a) * 0.25).toFixed(3) + '"/>';
       out += '</g>';
+    } else if (it.kind === 'point') {
+      // A marker, not a shape - drawn at a fixed screen-ish size because it HAS no size,
+      // and an entrance is called out because it is the one a crew has to find.
+      // Cyan for the way in, amber for everything else - NOT the box green, which would
+      // make an entrance read as a small room at a glance.
+      const isWay = (it.roles || []).indexOf('entrance') >= 0;
+      const col = isWay ? '#7dcfff' : '#e0af68';
+      const rr = 90;
+      out += '<g class="p3" data-key="' + esc(it.key) + '">'
+        + '<title>' + esc(it.label)
+        + ((it.roles || []).length ? ' [' + esc(it.roles.join(', ')) + ']' : '') + '</title>'
+        + '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
+        + ' r="' + rr + '" fill="' + col + '" fill-opacity="' + a + '"/>'
+        + '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
+        + ' r="' + (rr * 2.4) + '" fill="none" stroke="' + col + '"'
+        + ' stroke-opacity="' + (Number(a) * 0.5).toFixed(3) + '" stroke-width="14"/></g>';
     } else if (it.kind === 'solid') {
-      // A subtracted mass, drawn as a HOLE - dashed and unfilled. Filling it would read
-      // as another room, which is the exact opposite of what it is.
-      out += '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1)
-        + '" r="' + (it.r || 100) + '" fill="none" stroke="#f7768e" stroke-opacity="' + a
-        + '" stroke-width="8" stroke-dasharray="40 30" class="p3" data-key="' + esc(it.key)
-        + '"><title>'
-        + esc(it.label) + ' (subtracted)</title></circle>';
+      // A subtracted mass, drawn as a HOLE - dashed and unfilled at the rim. Filling it
+      // solidly would read as another room, which is the exact opposite of what it is.
+      //
+      // But `fill="none"` is not hit-testable in its interior, and a DASHED stroke has
+      // gaps, so the only clickable part was the dashes themselves. A solid could
+      // barely be selected, and its move and size gizmos were unreachable rather than
+      // missing - the same defect the box had. A nearly-transparent fill takes the
+      // click without reading as filled.
+      out += '<g class="p3" data-key="' + esc(it.key) + '">'
+        + '<title>' + esc(it.label) + ' (subtracted)</title>'
+        + '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
+        + ' r="' + (it.r || 100) + '" fill="#f7768e" fill-opacity="0.08"'
+        + ' stroke="#f7768e" stroke-opacity="' + a + '" stroke-width="8"'
+        + ' stroke-dasharray="40 30"/></g>';
     }
   }
   return out;

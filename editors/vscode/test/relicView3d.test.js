@@ -23,7 +23,9 @@ const DOC = ['# [T](t)', '', '## [Relics](relics)', '',
   'Passage to: high 300', '---', '',
   '### [high](high)', '---', 'Relic: o', 'Chamber: 0, 2000, 0, 500', '---', '',
   '### [hall](hall)', '---', 'Relic: o', 'Box: 3000, 0, 0, 400, 200, 300', '---', '',
-  '### [core](core)', '---', 'Relic: o', 'Solid: sphere, 0, 0, 0, 320', '---'].join('\n');
+  '### [core](core)', '---', 'Relic: o', 'Solid: sphere, 0, 0, 0, 320', '---', '',
+  '### [mouth](mouth)', '---', 'Relic: o', 'Point: -1500, 0, 0', 'Roles: entrance', '---', '',
+  '### [cache](cache)', '---', 'Relic: o', 'Point: 200, 0, 300', 'Roles: item', '---'].join('\n');
 const rel = R.parse(DOC).relics[0];
 
 console.log('\nrelicView3d\n');
@@ -50,7 +52,7 @@ const items = V3.scene(rel, V3.defaultCamera());
 check('the scene sorts far to near',
   items.every((it, i, a) => i === 0 || a[i - 1].depth >= it.depth));
 check('every primitive is in it', items.length === rel.chambers.length + rel.boxes.length
-  + rel.solids.length + rel.passages.length);
+  + rel.solids.length + rel.passages.length + rel.points.length);
 check('a subtracted solid draws in FRONT of the chamber it is inside',
   (() => {
     const cam = V3.defaultCamera();
@@ -161,7 +163,7 @@ check('a click that did not move writes nothing',
 check('the selection is reported so a redraw does not drop the gizmo',
   sel.indexOf('type:"sel3d"') >= 0);
 check('a passage is not movable - it has no position of its own',
-  sel.indexOf('REL.chambers.concat(REL.boxes,REL.solids)') >= 0);
+  sel.indexOf('REL.chambers.concat(REL.boxes,REL.solids,REL.points)') >= 0);
 
 // --- a gesture must always end ----------------------------------------------
 // Reported from use: after a gizmo drag the mouse felt captured and nothing else worked.
@@ -528,6 +530,43 @@ check('the band evaluates to a real line', (() => {
   return /^<line x1="10" y1="20" x2="90" y2="80"/.test(out)
     && out.indexOf('stroke-dasharray') > 0;
 })());
+
+// --- solids and points in the editor ----------------------------------------
+// A solid could barely be selected: fill="none" is not hit-testable in its interior, and a
+// DASHED stroke has gaps, so the only clickable part was the dashes. Its move and size
+// gizmos existed the whole time with no way to reach them - the same defect the box had.
+check('a solid has a fill to click, while still reading as a hole', (() => {
+  const h = V3.body(rel, cam);
+  const at = h.indexOf('data-key="core"');
+  if (at < 0) { return false; }
+  const grp = h.slice(h.lastIndexOf('<g class', at), h.indexOf('</g>', at));
+  return grp.indexOf('fill="#f7768e" fill-opacity="0.08"') >= 0
+    && grp.indexOf('stroke-dasharray') >= 0;
+})());
+check('...and its radius handle works', (() => {
+  const s = rel.solids.find((x) => x.shape === 'sphere');
+  const hs = G.sizeHandles(s, cam, V3.project);
+  return hs.length === 1 && hs[0].field === 'r';
+})());
+check('Add solid is offered and wired',
+  page.indexOf('id="addsolid"') >= 0 && sel.indexOf('type:"addsolid"') >= 0);
+// The numbers are identical, so flipping is one line - and it is the natural way to work.
+check('the subtracted toggle is offered and wired',
+  page.indexOf('id="fsub"') >= 0 && sel.indexOf('type:"kind"') >= 0);
+
+// A POINT is a place, not a shape: no radius, no extents, nothing navigable.
+check('a point is drawn', V3.body(rel, cam).indexOf('data-key="mouth"') >= 0);
+check('...an entrance is called out, because it is the one a crew has to find',
+  /data-key="mouth"[\s\S]{0,300}#7dcfff/.test(V3.body(rel, cam)));
+check('...it can be selected and moved',
+  sel.indexOf('REL.chambers.concat(REL.boxes,REL.solids,REL.points)') >= 0);
+check('...but has no size to drag', (() => {
+  const t = rel.points[0];
+  return G.sizeHandles(t, cam, V3.project).length === 0
+    && G.handles(t, cam, 600, V3.project).length === 3;
+})());
+check('...and is not counted as geometry',
+  rel.points.length === 2 && rel.chambers.length === 2);
 
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.

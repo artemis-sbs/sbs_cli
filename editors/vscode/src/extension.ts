@@ -4957,6 +4957,24 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       });
       return;
     }
+    if (msg && msg.type === 'kind') {
+      // Flip a part between navigable and subtracted. One line, because a chamber and a
+      // sphere solid carry the same four numbers - see relicModel.setKind.
+      await applyRelicEdit(doc, index, msg.key,
+        (text: string, part: RelicPart) => RelicModel.setKind(text, part, msg.kind));
+      return;
+    }
+    if (msg && msg.type === 'addsolid') {
+      await applyRelicStructure(doc, index, (text: string, rel: any) => {
+        const taken = new Set([...rel.chambers, ...rel.boxes, ...rel.solids]
+          .map((p: RelicPart) => p.key));
+        let n = taken.size + 1;
+        while (taken.has('solid' + n)) { n++; }
+        return RelicModel.addSolid(text, rel, 'solid' + n,
+          msg.x, msg.y, msg.z, 300, 'solid ' + n);
+      });
+      return;
+    }
     if (msg && msg.type === 'addbox') {
       await applyRelicStructure(doc, index, (text: string, rel: any) => {
         const taken = new Set([...rel.chambers, ...rel.boxes, ...rel.solids]

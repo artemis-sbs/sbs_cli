@@ -33,6 +33,7 @@ function sceneData(rel) {
     chambers: (rel.chambers || []).map((c) => ({ key: c.key, name: c.name, x: c.x, y: c.y, z: c.z, r: c.r })),
     boxes: (rel.boxes || []).map((b) => ({ key: b.key, name: b.name, x: b.x, y: b.y, z: b.z, hx: b.hx, hy: b.hy, hz: b.hz })),
     solids: (rel.solids || []).map((s) => ({ key: s.key, name: s.name, kind: s.kind, x: s.x, y: s.y, z: s.z, r: s.r })),
+    points: (rel.points || []).map((t) => ({ key: t.key, name: t.name, x: t.x, y: t.y, z: t.z, roles: t.roles })),
     passages: (rel.passages || []).map((p) => ({ from: p.from, to: p.to, radius: p.radius })),
   };
 }
@@ -73,7 +74,7 @@ function script(rel, cam, vb, sel) {
     // position of its own - it is defined by the two chambers it joins, so moving one
     // would have to mean moving them, which the plan view already does better.
     + 'function partOf(k){if(!k)return null;'
-    + 'return REL.chambers.concat(REL.boxes,REL.solids).find(function(p){return p.key===k;})||null;}'
+    + 'return REL.chambers.concat(REL.boxes,REL.solids,REL.points).find(function(p){return p.key===k;})||null;}'
     // Handle length in WORLD units, taken from the current zoom so the gizmo stays the
     // same size on screen however far in you are.
     + 'function gizL(){return vb.w*0.09;}'
@@ -328,12 +329,20 @@ function script(rel, cam, vb, sel) {
     + 'const isSolid=REL.solids.some(function(s){return s.key===p.key;});'
     + 'el("ikind").textContent=isBox?"box":(isSolid?"solid":"chamber");'
     // A rename rewrites the HEADING rather than a fence field, so it is its own message.
+    + 'const subi=el("fsub");'
+    + 'if(subi)subi.addEventListener("change",function(){const p=partOf(sel);if(!p)return;'
+    + 'vscode.postMessage({type:"kind",key:p.key,'
+    + 'kind:subi.checked?"solid":(p.hx!==undefined?"box":"chamber")});});'
     + 'const nmi=el("fname");'
     + 'if(nmi)nmi.addEventListener("change",function(){const p=partOf(sel);if(!p)return;'
     + 'p.name=nmi.value;vscode.postMessage({type:"name",key:p.key,name:nmi.value});draw();});'
     + 'Object.keys(IN).forEach(function(k){const n=el(IN[k]);if(!n)return;'
     + 'n.value=(p[k]===undefined||p[k]===null)?"":p[k];});'
     + 'const lr=el("lr");if(lr)lr.classList.toggle("hidden",p.r===undefined);'
+    + 'const sub=el("fsub");'
+    + 'if(sub)sub.checked=isSolid;'
+    + 'const lsub=el("lsub");'
+    + 'if(lsub)lsub.classList.toggle("hidden",isSolid&&p.hx===undefined&&p.r===undefined);'
     + '["lhx","lhy","lhz"].forEach(function(id){const n=el(id);'
     + 'if(n)n.classList.toggle("hidden",!isBox);});}'
     + 'Object.keys(IN).forEach(function(k){const n=el(IN[k]);if(!n)return;'
@@ -356,6 +365,11 @@ function script(rel, cam, vb, sel) {
     + 'if(bb)bb.addEventListener("click",function(){'
     + 'const w=unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y));'
     + 'vscode.postMessage({type:"addbox",x:Math.round(w.x),y:Math.round(w.y),'
+    + 'z:Math.round(w.z)});});'
+    + 'const sb2=document.getElementById("addsolid");'
+    + 'if(sb2)sb2.addEventListener("click",function(){'
+    + 'const w=unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y));'
+    + 'vscode.postMessage({type:"addsolid",x:Math.round(w.x),y:Math.round(w.y),'
     + 'z:Math.round(w.z)});});'
     + 'const db=document.getElementById("del");'
     + 'if(db)db.addEventListener("click",function(){'

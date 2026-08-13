@@ -164,6 +164,10 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     // it is the shape a rectilinear map is built from - overlapping boxes union into
     // one connected space, so a grid of them needs no passages at all.
     + '<button id="addbox" title="An axis-aligned room - flat walls and real corners">Add box</button>'
+    // A solid SUBTRACTS space: the pillar in the middle of a room, the core you
+    // have to fly around. Undressed it is an invisible obstacle, which is why the
+    // dresser scatters props on it too.
+    + '<button id="addsolid" title="A subtracted mass - a pillar to fly around">Add solid</button>'
     + '<button id="del">Delete</button>'
     // Named for what they SHOW, with the axis spelled out - Cosmos is Y-up and
     // Blender is Z-up, so anyone arriving from there will otherwise reach for
@@ -186,6 +190,10 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     // so renaming one here would silently orphan every corridor reaching it.
     + '<label class="wide">name <input id="fname" type="text"></label>'
     + '<div class="ihint" id="ikey"></div>'
+    // Lossless both ways - a chamber and a sphere solid carry the same four numbers -
+    // so this is the natural way to work: build the shape where the gizmos are
+    // easiest, then mark it subtracted.
+    + '<label id="lsub"><input id="fsub" type="checkbox"> subtracted</label>'
     + '<label>x <input id="fx" type="number" step="10"></label>'
     + '<label>y <input id="fy" type="number" step="10"></label>'
     + '<label>z <input id="fz" type="number" step="10"></label>'
