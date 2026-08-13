@@ -4879,46 +4879,19 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       return;
     }
     if (msg && msg.type === 'undo') {
-      // A webview has no undo stack of its own, so CTRL-Z inside the panel never reaches
-      // the document our WorkspaceEdits landed on. `undo` runs against the ACTIVE editor,
-      // so the document has to be focused first - and that is the fragile part: if it does
-      // not actually become active, the command goes somewhere else and nothing happens
-      // with no error to show for it.
+      // THIS BUTTON TAKES BACK WHAT THE PANEL DID, and nothing else.
       //
-      // So this VERIFIES rather than assumes. doc.version increments on every applied
-      // edit, including an undo, which makes "did it work" a fact instead of a hope - and
-      // when it did not, says so instead of leaving the author pressing a dead button.
-      // The quiet path first: no focus moves, nothing flashes.
-      if (await undoOwnEdit()) {
-        vscode.window.setStatusBarMessage('Relic: undone', 2000);
-        return;
-      }
-      const before = doc.version;
-      try {
-        const ed = await vscode.window.showTextDocument(doc, {
-          preserveFocus: false, preview: false,
-          viewColumn: vscode.window.visibleTextEditors.find(
-            (e) => e.document.uri.toString() === doc.uri.toString())?.viewColumn,
-        });
-        // Only run it once the editor really is the active one. Awaiting showTextDocument
-        // is not the same promise as focus having settled.
-        for (let i = 0; i < 10 && vscode.window.activeTextEditor !== ed; i++) {
-          await new Promise((r) => setTimeout(r, 20));
-        }
-        await vscode.commands.executeCommand('undo');
-      } catch (e) {
-        vscode.window.showWarningMessage(`Artemis AMD: undo failed - ${e}`);
-        return;
-      }
-      if (doc.version === before) {
-        vscode.window.setStatusBarMessage(
-          'Relic: nothing to undo (the document has no edits left to take back)', 4000);
-      } else {
-        vscode.window.setStatusBarMessage('Relic: undone', 2000);
-      }
-      // Focus goes back to the plan LAST, and only after the undo has landed - revealing
-      // the panel first is how the command ends up being sent to the webview instead.
-      panel.reveal(panel.viewColumn, false);
+      // It used to fall back to the editor's own `undo` command when it had nothing
+      // recorded, which was actively wrong: every quiet restore is itself an edit on the
+      // DOCUMENT's undo stack, so walking that stack re-applied the very edit just taken
+      // back. Pressing Undo past the end redid your work, with a screen flash to announce
+      // it. Reaching into a history this panel does not own was the mistake; the flash was
+      // only how you noticed.
+      //
+      // So when there is nothing of ours left, say so. CTRL-Z in the text editor is the
+      // right tool for edits made there, and it is one keystroke away.
+      const why = await undoOwnEdit();
+      vscode.window.setStatusBarMessage('Relic: ' + why, 3500);
       return;
     }
     if (msg && msg.type === 'live') {
@@ -4997,13 +4970,24 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     while (undoStack.length > UNDO_DEPTH) { undoStack.shift(); }
   }
 
-  /** Take back the panel's last edit without moving focus. False if it cannot. */
-  async function undoOwnEdit(): Promise<boolean> {
+  /** Take back the panel's last edit. Returns what to tell the author.
+   *
+   *  No focus moves and nothing flashes, because a restore is a WorkspaceEdit like any
+   *  other. It is not a second undo system: the restore lands on the document's own stack
+   *  with every other edit here.
+   */
+  async function undoOwnEdit(): Promise<string> {
     const last = undoStack[undoStack.length - 1];
+    if (!last) {
+      return 'nothing of mine left to undo - use CTRL-Z in the editor for the rest';
+    }
     // Only when the document is STILL exactly as this panel left it. Anything else means
     // the author has edited or undone in the editor since, and restoring a stale snapshot
-    // would throw their work away - which is worse than a flash.
-    if (!last || doc.getText() !== last.after) { return false; }
+    // would throw their work away.
+    if (doc.getText() !== last.after) {
+      undoStack.length = 0;      // it can never match again; stop offering it
+      return 'the file changed in the editor - use CTRL-Z there';
+    }
     undoStack.pop();
     const we = new vscode.WorkspaceEdit();
     we.replace(doc.uri, new vscode.Range(
@@ -5011,8 +4995,9 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     writing = true;
     const ok = await vscode.workspace.applyEdit(we);
     writing = false;
-    if (ok) { draw(); }
-    return ok;
+    if (!ok) { return 'undo failed'; }
+    draw();
+    return 'undone';
   }
 
   async function applyRelicStructure(
