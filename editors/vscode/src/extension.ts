@@ -4866,15 +4866,40 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     }
     if (msg && msg.type === 'undo') {
       // A webview has no undo stack of its own, so CTRL-Z inside the panel never reaches
-      // the document our WorkspaceEdits landed on. Run undo against the document itself:
-      // show it (undo acts on the ACTIVE editor), undo, then hand focus back to the plan
-      // so the author stays where they were working.
+      // the document our WorkspaceEdits landed on. `undo` runs against the ACTIVE editor,
+      // so the document has to be focused first - and that is the fragile part: if it does
+      // not actually become active, the command goes somewhere else and nothing happens
+      // with no error to show for it.
+      //
+      // So this VERIFIES rather than assumes. doc.version increments on every applied
+      // edit, including an undo, which makes "did it work" a fact instead of a hope - and
+      // when it did not, says so instead of leaving the author pressing a dead button.
+      const before = doc.version;
       try {
-        await vscode.window.showTextDocument(doc, { preserveFocus: false, preview: false });
+        const ed = await vscode.window.showTextDocument(doc, {
+          preserveFocus: false, preview: false,
+          viewColumn: vscode.window.visibleTextEditors.find(
+            (e) => e.document.uri.toString() === doc.uri.toString())?.viewColumn,
+        });
+        // Only run it once the editor really is the active one. Awaiting showTextDocument
+        // is not the same promise as focus having settled.
+        for (let i = 0; i < 10 && vscode.window.activeTextEditor !== ed; i++) {
+          await new Promise((r) => setTimeout(r, 20));
+        }
         await vscode.commands.executeCommand('undo');
-      } finally {
-        panel.reveal(panel.viewColumn, false);
+      } catch (e) {
+        vscode.window.showWarningMessage(`Artemis AMD: undo failed - ${e}`);
+        return;
       }
+      if (doc.version === before) {
+        vscode.window.setStatusBarMessage(
+          'Relic: nothing to undo (the document has no edits left to take back)', 4000);
+      } else {
+        vscode.window.setStatusBarMessage('Relic: undone', 2000);
+      }
+      // Focus goes back to the plan LAST, and only after the undo has landed - revealing
+      // the panel first is how the command ends up being sent to the webview instead.
+      panel.reveal(panel.viewColumn, false);
       return;
     }
     if (msg && msg.type === 'live') {
