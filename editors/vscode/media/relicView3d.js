@@ -117,7 +117,16 @@ function scene(rel, cam) {
     const q = project(s, cam);
     // -1 breaks ties toward the front: a solid sits INSIDE a chamber, so at equal depth
     // it is the thing you are meant to see.
+    // Carry the SHAPE and its numbers. Drawing every solid as a circle made a box solid
+    // look like a sphere - the file was right and the picture was not, which is the worse
+    // way round: you correct something that was never wrong.
     items.push({ kind: 'solid', at: q, depth: q.depth - 1, r: s.r || 0, key: s.key,
+                 shape: s.shape,
+                 hx: s.hx, hy: s.hy, hz: s.hz,
+                 corners: (s.shape === 'box' && s.hx !== undefined)
+                   ? boxCorners(s, cam) : null,
+                 a: (s.shape === 'capsule') ? project({ x: s.ax, y: s.ay, z: s.az }, cam) : null,
+                 b: (s.shape === 'capsule') ? project({ x: s.bx, y: s.by, z: s.bz }, cam) : null,
                  label: s.name || s.kind || 'solid' });
   }
   return items.sort((m, n) => n.depth - m.depth);
@@ -247,6 +256,45 @@ function labelSvg(items, size) {
   return out + '</g>';
 }
 
+/** A subtracted mass, drawn AS ITS SHAPE.
+ *
+ *  Always dashed and barely filled, whatever the shape: it is a hole, and a solid fill
+ *  would read as another room. The fill exists only so the interior takes a click - an
+ *  unfilled shape is not hit-testable, and a dashed stroke has gaps, which between them
+ *  made a solid almost impossible to select.
+ */
+function _solidShape(it, a) {
+  const dash = ' stroke="#f7768e" stroke-opacity="' + a + '" stroke-dasharray="40 30"';
+  if (it.shape === 'box' && it.corners) {
+    let out = '';
+    for (const e of BOX_EDGES) {
+      const p = it.corners[e[0]], q = it.corners[e[1]];
+      out += '<line x1="' + p.x.toFixed(1) + '" y1="' + p.y.toFixed(1) + '"'
+        + ' x2="' + q.x.toFixed(1) + '" y2="' + q.y.toFixed(1) + '"'
+        + dash + ' stroke-width="8"/>';
+    }
+    // A centre patch to click, since a wireframe is all gaps.
+    return out + '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
+      + ' r="' + Math.max(60, Math.min(it.hx, it.hy, it.hz) * 0.4).toFixed(0) + '"'
+      + ' fill="#f7768e" fill-opacity="0.10"/>';
+  }
+  if (it.shape === 'capsule' && it.a && it.b) {
+    // The column down a shaft: a tube between its two endpoints, not a disc at the middle.
+    return '<line x1="' + it.a.x.toFixed(1) + '" y1="' + it.a.y.toFixed(1) + '"'
+      + ' x2="' + it.b.x.toFixed(1) + '" y2="' + it.b.y.toFixed(1) + '"'
+      + dash + ' stroke-width="' + ((it.r || 100) * 2) + '" stroke-linecap="round"'
+      + ' fill="none"/>'
+      + '<line x1="' + it.a.x.toFixed(1) + '" y1="' + it.a.y.toFixed(1) + '"'
+      + ' x2="' + it.b.x.toFixed(1) + '" y2="' + it.b.y.toFixed(1) + '"'
+      + ' stroke="#f7768e" stroke-opacity="0.10" stroke-width="' + ((it.r || 100) * 2) + '"'
+      + ' stroke-linecap="round"/>';
+  }
+  return '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
+    + ' r="' + (it.r || 100) + '" fill="#f7768e" fill-opacity="0.08"' + dash
+    + ' stroke-width="8"/>';
+}
+
+
 /** The scene as an SVG body (no wrapper) - the caller owns the viewBox. */
 function body(rel, cam) {
   const items = scene(rel, cam);
@@ -320,10 +368,7 @@ function body(rel, cam) {
       // click without reading as filled.
       out += '<g class="p3" data-key="' + esc(it.key) + '">'
         + '<title>' + esc(it.label) + ' (subtracted)</title>'
-        + '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
-        + ' r="' + (it.r || 100) + '" fill="#f7768e" fill-opacity="0.08"'
-        + ' stroke="#f7768e" stroke-opacity="' + a + '" stroke-width="8"'
-        + ' stroke-dasharray="40 30"/></g>';
+        + _solidShape(it, a) + '</g>';
     }
   }
   return out;
@@ -360,7 +405,8 @@ function clientBundle() {
   return 'const RENDER_DISTANCE = ' + RENDER_DISTANCE + ';\n'
     + 'const GRID_MINOR = ' + GRID_MINOR + ';\n'
     + 'const GRID_MAJOR = ' + GRID_MAJOR + ';\n'
-    + [esc, project, unproject, span, boxCorners, scene, extent, shade, body, holdPivot,
+    + [esc, project, unproject, span, boxCorners, _solidShape, scene, extent, shade,
+       body, holdPivot,
        groundGrid, gridSvg, labelRows, labelSvg]
     .map(function (f) { return f.toString(); }).join('\n')
     + '\nconst BOX_EDGES = ' + JSON.stringify(BOX_EDGES) + ';\n';

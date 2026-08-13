@@ -568,6 +568,43 @@ check('...but has no size to drag', (() => {
 check('...and is not counted as geometry',
   rel.points.length === 2 && rel.chambers.length === 2);
 
+// A SOLID IS DRAWN AS ITS SHAPE.
+// Reported from use: a box marked subtracted "turns into a sphere". The file was right -
+// `Solid: box, 3600, 0, 2900, 900, 260, 380` - and the picture was not, which is the worse
+// way round, because you go and correct something that was never wrong.
+{
+  const R2 = require('../media/relicModel.js');
+  const flipped = R2.parse(R2.setKind(DOC, R2.parse(DOC).relics[0].boxes[0], 'solid'))
+    .relics[0];
+  const h = V3.body(flipped, cam);
+  const at = h.indexOf('data-key="hall"');
+  const grp = h.slice(h.lastIndexOf('<g class', at), h.indexOf('</g>', at));
+  check('a box solid draws as a box, not a circle',
+    (grp.match(/<line/g) || []).length === 12 && grp.indexOf('<circle') >= 0);
+  check('...still dashed, because it is a hole', grp.indexOf('stroke-dasharray') >= 0);
+  // A wireframe is all gaps, so the centre patch is what makes it selectable.
+  check('...with a patch to click', grp.indexOf('fill-opacity="0.10"') >= 0);
+  check('...and its half-extents survive the flip', (() => {
+    const s = flipped.solids.find((x) => x.key === 'hall');
+    return s.hx === 400 && s.hy === 200 && s.hz === 300;
+  })());
+  check('...so it resizes by its faces, like a box', (() => {
+    const s = flipped.solids.find((x) => x.key === 'hall');
+    return G.sizeHandles(s, cam, V3.project).length === 6;
+  })());
+}
+// The column down a shaft is a tube between two endpoints, not a disc at its middle.
+check('a capsule solid draws along its axis', (() => {
+  const NLC = String.fromCharCode(10);
+  const CAP = DOC + NLC + ['', '### [col](col)', '---', 'Relic: o',
+    'Solid: capsule, 0, -2000, 0, 0, 2000, 0, 130', '---'].join(NLC);
+  const r2 = require('../media/relicModel.js').parse(CAP).relics[0];
+  const h = V3.body(r2, cam);
+  const at = h.indexOf('data-key="col"');
+  const grp = h.slice(h.lastIndexOf('<g class', at), h.indexOf('</g>', at));
+  return (grp.match(/<line/g) || []).length === 2 && grp.indexOf('<circle') < 0;
+})());
+
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.
 check('the page script parses', (() => {
