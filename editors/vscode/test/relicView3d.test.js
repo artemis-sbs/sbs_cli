@@ -253,13 +253,43 @@ check('a chamber has exactly one size handle, its radius',
 check('the radius handle sits on the rim', near(chamber[0].len, 900));
 check('a radius handle is draggable from any angle',
   G.sizeHandles({ x: 0, y: 0, z: 0, r: 900 }, V3.topDown(), V3.project)[0].draggable);
-const box = G.sizeHandles({ x: 0, y: 0, z: 0, hx: 400, hy: 200, hz: 300, kind: 'box' }, cam, V3.project);
-check('a box has three, its half-extents',
-  box.map((h) => h.field).join(',') === 'hx,hy,hz');
-check('...each carrying its own number', box.map((h) => h.value).join(',') === '400,200,300');
+const box = G.sizeHandles({ x: 0, y: 0, z: 0, hx: 400, hy: 200, hz: 300 }, cam, V3.project);
+// SIX handles, one per FACE. A single handle per axis can only grow a box about its
+// centre, so dragging the right wall moves the left one too - the classic complaint about
+// box editors, and wrong for the job here: boxes are laid out by dragging a wall until it
+// meets its neighbour.
+check('a box has one handle per face',
+  box.length === 6 && box.map((h) => (h.sign > 0 ? '+' : '-') + h.axis).join(' ')
+  === '+x -x +y -y +z -z');
+check('...each carrying its own half-extent',
+  box.filter((h) => h.field === 'hx').every((h) => h.value === 400));
+check('...and named as a wall in its tooltip',
+  G.sizeSvg({ x: 0, y: 0, z: 0, hx: 400, hy: 200, hz: 300 }, cam, V3.project, 300)
+    .indexOf('wall') >= 0);
 check('a box half-extent goes edge-on like a move axis does',
-  !G.sizeHandles({ x: 0, y: 0, z: 0, hx: 400, hy: 200, hz: 300, kind: 'box' },
-                 V3.topDown(), V3.project).find((h) => h.field === 'hy').draggable);
+  !G.sizeHandles({ x: 0, y: 0, z: 0, hx: 400, hy: 200, hz: 300 },
+                 V3.topDown(), V3.project).find((h) => h.axis === 'y').draggable);
+// The arithmetic of a one-sided resize, which is the whole of it: the dragged wall moves
+// by the drag, the opposite one does not move at all. Both the size and the centre take
+// half - and `Box:` holds them on the same line, so it stays ONE write.
+check('dragging a wall leaves the opposite wall where it was', (() => {
+  const half = 900, centre = 3600, disp = 400;
+  const v = half + disp / 2, c = centre + disp / 2;
+  return (c - v) === (centre - half) && (c + v) === (centre + half + disp);
+})());
+check('...and the same going the other way', (() => {
+  const half = 900, centre = 3600, disp = -400, sign = -1;
+  const v = half + sign * disp / 2, c = centre + disp / 2;
+  return (c + v) === (centre + half) && (c - v) === (centre - half + disp);
+})());
+check('the page moves the centre with the size',
+  sel.indexOf('size.p[c]=Math.round(size.oc[c]+disp/2)') >= 0);
+check('...and writes both, still on one line',
+  sel.indexOf('pa.x=size.p.x') >= 0);
+// A sphere has no faces, so its one number stays symmetric.
+check('a chamber keeps a single symmetric radius handle',
+  G.sizeHandles({ x: 0, y: 0, z: 0, r: 900 }, cam, V3.project).length === 1);
+
 check('a part with no size gets no handle',
   G.sizeHandles({ x: 0, y: 0, z: 0 }, cam, V3.project).length === 0);
 check('a size drag writes through the same field message',
@@ -457,6 +487,21 @@ check('nothing in the picture is drawn only once',
     } catch (e) { return false; }
   })());
 });
+
+// A BOX HAS TO BE SELECTABLE, or its gizmos are unreachable rather than missing.
+// Its only hit target used to be a 60-unit circle with fill="none" - an unfilled shape is
+// not hit-testable in its interior - so a box could never be clicked, and both the move
+// and the resize handles existed the whole time with no way to reach them.
+check('the whole box is the hit target, not a dot at its middle', (() => {
+  const h = V3.body(rel, cam);
+  const at = h.indexOf('data-key="hall"');
+  if (at < 0) { return false; }
+  const grp = h.slice(at, h.indexOf('</g>', at));
+  // A stroked line IS hit-testable along its stroke, so every edge selects the box.
+  return (grp.match(/<line/g) || []).length === 12
+    && grp.indexOf('fill="#9ece6a" fill-opacity') >= 0
+    && h.indexOf('r="60" fill="none"') < 0;
+})());
 
 // --- a shift-drag has to show itself ----------------------------------------
 // Without a line following the cursor the gesture is invisible until it succeeds - and

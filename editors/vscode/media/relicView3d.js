@@ -103,6 +103,7 @@ function scene(rel, cam) {
   for (const b of (rel.boxes || [])) {
     const q = project(b, cam);
     items.push({ kind: 'box', at: q, depth: q.depth, key: b.key,
+                 hx: b.hx, hy: b.hy, hz: b.hz,
                  label: b.name || b.key, corners: boxCorners(b, cam) });
   }
   for (const s of (rel.solids || [])) {
@@ -263,15 +264,28 @@ function body(rel, cam) {
         + ' data-key="' + esc(it.key) + '"><title>' + esc(it.label) + ' r' + it.r
         + (it.y ? ' y' + it.y : '') + '</title></circle>';
     } else if (it.kind === 'box') {
+      // THE WHOLE BOX IS THE TARGET, not a dot at its middle. The hit area used to be a
+      // 60-unit circle with fill="none" - an unfilled shape is not hit-testable in its
+      // interior, so a box could not be selected at all, and its move and size gizmos
+      // were unreachable rather than missing.
+      //
+      // Wrapping the edges in the group is what does it: a stroked line IS hit-testable
+      // along its stroke, so clicking any edge selects the box.
+      out += '<g class="p3" data-key="' + esc(it.key) + '">'
+        + '<title>' + esc(it.label) + '</title>';
       for (const e of BOX_EDGES) {
         const p = it.corners[e[0]], q = it.corners[e[1]];
-        out += '<line x1="' + p.x.toFixed(1) + '" y1="' + p.y.toFixed(1)
-          + '" x2="' + q.x.toFixed(1) + '" y2="' + q.y.toFixed(1)
-          + '" stroke="#9ece6a" stroke-opacity="' + a + '" stroke-width="8"/>';
+        out += '<line x1="' + p.x.toFixed(1) + '" y1="' + p.y.toFixed(1) + '"'
+          + ' x2="' + q.x.toFixed(1) + '" y2="' + q.y.toFixed(1) + '"'
+          + ' stroke="#9ece6a" stroke-opacity="' + a + '" stroke-width="8"/>';
       }
-      out += '<circle class="p3" cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1)
-        + '" r="60" fill="none" data-key="' + esc(it.key) + '"><title>'
-        + esc(it.label) + '</title></circle>';
+      // A filled centre marker as well, sized to the box: the edges can be awkward to
+      // hit edge-on, and a transparent fill still takes a click.
+      const rr = Math.max(60, Math.min(it.hx, it.hy, it.hz) * 0.4);
+      out += '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
+        + ' r="' + rr.toFixed(0) + '" fill="#9ece6a" fill-opacity="'
+        + (Number(a) * 0.25).toFixed(3) + '"/>';
+      out += '</g>';
     } else if (it.kind === 'solid') {
       // A subtracted mass, drawn as a HOLE - dashed and unfilled. Filling it would read
       // as another room, which is the exact opposite of what it is.

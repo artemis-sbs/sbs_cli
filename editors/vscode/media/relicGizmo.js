@@ -94,27 +94,41 @@ function gizmoSvg(c, cam, L, project) {
  */
 function sizeHandles(part, cam, project) {
   const o = project(part, cam);
-  if (part.kind === 'box' || part.hx !== undefined) {
+  if (part.hx !== undefined) {
+    // SIX handles, one per FACE - and dragging one moves THAT WALL, leaving the opposite
+    // where it is. A single handle per axis can only grow the box about its centre, so
+    // dragging the right wall moves the left one too, which is the classic complaint
+    // about box editors and is wrong for the job here: boxes are laid out by dragging a
+    // wall until it meets its neighbour.
+    //
+    // It still writes one line, because `Box:` carries the centre and the half-extents
+    // together - a one-sided resize is just both of them moving by half the drag.
+    const out = [];
     const axes = [
       { f: 'hx', v: { x: 1, y: 0, z: 0 }, n: part.hx, color: '#f7768e' },
       { f: 'hy', v: { x: 0, y: 1, z: 0 }, n: part.hy, color: '#9ece6a' },
       { f: 'hz', v: { x: 0, y: 0, z: 1 }, n: part.hz, color: '#7aa2f7' },
     ];
-    return axes.map((a) => {
-      const tip = project({ x: part.x + a.v.x * a.n, y: part.y + a.v.y * a.n,
-                            z: part.z + a.v.z * a.n }, cam);
-      const dx = tip.x - o.x, dy = tip.y - o.y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      return { field: a.f, color: a.color, o, tip, dx, dy, len, value: a.n,
-               // Same rule as a move axis: edge-on cannot be dragged sanely.
-               draggable: len > Math.abs(a.n) * EDGE_ON };
-    });
+    for (const a of axes) {
+      for (const sign of [1, -1]) {
+        const tip = project({ x: part.x + a.v.x * a.n * sign,
+                              y: part.y + a.v.y * a.n * sign,
+                              z: part.z + a.v.z * a.n * sign }, cam);
+        const dx = tip.x - o.x, dy = tip.y - o.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        out.push({ field: a.f, axis: a.f.slice(1), sign, color: a.color, o, tip,
+                   dx, dy, len, value: a.n,
+                   draggable: len > Math.abs(a.n) * EDGE_ON });
+      }
+    }
+    return out;
   }
   if (part.r === undefined || part.r === null) { return []; }
-  // On the rim, to the screen-right. Which point on the rim does not matter - the drag
-  // measures distance from the centre - so pick the one that never hides behind the
-  // move gizmo's vertical handle.
-  return [{ field: 'r', color: '#e0af68', o, tip: { x: o.x + part.r, y: o.y },
+  // A sphere has no faces, so its one number stays symmetric. On the rim, to the
+  // screen-right: which point of the rim does not matter - the drag measures distance
+  // from the centre - so pick the one that never hides behind a move handle.
+  return [{ field: 'r', axis: 'r', sign: 1, color: '#e0af68', o,
+            tip: { x: o.x + part.r, y: o.y },
             dx: part.r, dy: 0, len: part.r, value: part.r, draggable: true }];
 }
 
@@ -125,11 +139,11 @@ function sizeSvg(part, cam, project, s) {
   let out = '<g id="sz" pointer-events="all">';
   for (const h of hs) {
     const o = h.draggable ? 1 : 0.25;
-    out += '<rect class="sz" data-field="' + h.field + '"'
+    out += '<rect class="sz" data-field="' + h.field + '" data-sign="' + h.sign + '"'
       + ' x="' + (h.tip.x - s * 0.11).toFixed(1) + '" y="' + (h.tip.y - s * 0.11).toFixed(1) + '"'
       + ' width="' + (s * 0.22) + '" height="' + (s * 0.22) + '"'
       + ' fill="' + h.color + '" fill-opacity="' + o + '" rx="' + (s * 0.04) + '">'
-      + '<title>' + h.field + ' ' + Math.round(h.value)
+      + '<title>' + (h.sign > 0 ? '+' : '-') + h.axis + ' wall, ' + h.field + ' ' + Math.round(h.value)
       + (h.draggable ? '' : ' (edge-on - orbit to reach it)') + '</title></rect>';
   }
   return out + '</g>';

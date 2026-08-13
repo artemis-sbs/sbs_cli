@@ -150,9 +150,11 @@ function script(rel, cam, vb, sel) {
     + 'const sz=e.target.closest(".sz");'
     + 'if(sz&&sel){const p=partOf(sel);'
     + 'const hs=sizeHandles(p,cam,project);'
-    + 'const h=hs.find(function(x){return x.field===sz.dataset.field;});'
+    + 'const h=hs.find(function(x){return x.field===sz.dataset.field'
+    + '&&String(x.sign)===sz.dataset.sign;});'
     + 'if(h&&h.draggable){const q=pt(e);'
-    + 'size={field:h.field,h:h,x0:q.x,y0:q.y,o:h.o,orig:h.value,p:p,moved:false};'
+    + 'size={field:h.field,sign:h.sign,axis:h.axis,h:h,x0:q.x,y0:q.y,o:h.o,'
+    + 'orig:h.value,oc:{x:p.x,y:p.y,z:p.z},p:p,moved:false};'
     + 'e.preventDefault();return;}}'
     + 'const gz=e.target.closest(".gz");'
     + 'if(gz&&sel){const p=partOf(sel);'
@@ -200,7 +202,17 @@ function script(rel, cam, vb, sel) {
     // an axis, so it uses the same projection the move gizmo does.
     + 'let v;'
     + 'if(size.field==="r"){v=Math.hypot(q.x-size.o.x,q.y-size.o.y);}'
-    + 'else{v=size.orig+along(size.h,q.x-size.x0,q.y-size.y0)*size.orig;}'
+    + 'else{'
+    // How far the WALL moved along its own axis. The handle vector is the half-extent, so
+    // the drag multiplier times it is the displacement in world units.
+    + 'const disp=along(size.h,q.x-size.x0,q.y-size.y0)*size.orig*size.sign;'
+    // One-sided: the dragged wall moves by `disp`, the opposite one stays. Both the size
+    // and the centre take half of it - which is the whole of a one-sided resize when a box
+    // is stored as centre plus half-extents.
+    + 'v=size.orig+size.sign*disp/2;'
+    + 'const c=size.axis==="x"?"x":(size.axis==="y"?"y":"z");'
+    + 'size.p[c]=Math.round(size.oc[c]+disp/2);'
+    + '}'
     // A size of zero or less builds a chamber enclosing nothing, which lint reports and
     // the volume refuses. Stop at 1 rather than write a number the file cannot hold.
     + 'v=Math.max(1,Math.round(v));'
@@ -256,6 +268,9 @@ function script(rel, cam, vb, sel) {
     + 'if(move&&move.moved){vscode.postMessage({type:"field",key:move.p.key,'
     + 'patch:{x:move.p.x,y:move.p.y,z:move.p.z}});}'
     + 'if(size&&size.moved){const pa={};pa[size.field]=size.p[size.field];'
+    // A one-sided resize moves the centre as well as the size, and `Box:` holds both on
+    // the same line - so it is still one write and one undo step.
+    + 'if(size.field!=="r"){pa.x=size.p.x;pa.y=size.p.y;pa.z=size.p.z;}'
     + 'vscode.postMessage({type:"field",key:size.p.key,patch:pa});}'
     // A press on empty space that never turned into a drag is a CLICK, and a click on
     // nothing means deselect. Told apart here rather than at mousedown, because at
