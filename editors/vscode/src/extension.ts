@@ -4809,7 +4809,8 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     const model = RelicModel.parse(doc.getText());
     if (index >= model.relics.length) { index = 0; }
     panel.webview.html = RelicView.render(
-      model.relics, nonce(), index, lastView, relicLive, cam, sel3);
+      model.relics, nonce(), index, lastView, relicLive, cam, sel3,
+      RelicModel.itemKeys(doc.getText()));
   };
   draw();
 
@@ -4971,6 +4972,15 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       // touches a position.
       await applyRelicEdit(doc, index, msg.key,
         (text: string, part: RelicPart) => RelicModel.setRoles(text, part, msg.roles));
+      return;
+    }
+    if (msg && msg.type === 'linefield') {
+      // The contents fields - item, qty, spawn, starts when. One handler rather than four,
+      // because they are the same edit: one fence line written, replaced, or removed when
+      // the box is emptied. Same one-line-per-undo-step shape as `roles`.
+      await applyRelicEdit(doc, index, msg.key,
+        (text: string, part: RelicPart) =>
+          RelicModel.setLineField(text, part, msg.label, msg.value));
       return;
     }
     if (msg && msg.type === 'addpoint') {

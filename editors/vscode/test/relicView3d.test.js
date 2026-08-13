@@ -616,6 +616,63 @@ check('...and is not refilled while you are typing in it',
 // Roles only mean something on a point today, so the field hides for a chamber.
 check('roles are shown only where they apply', sel.indexOf('p.roles===undefined') >= 0);
 
+
+// --- authored contents ------------------------------------------------------
+// What is IN the relic - the Red Beacon in the vault, the raiders that wake at the core.
+// The panel is where an author writes it, so every box here is asserted WIRED, not merely
+// present: a rendered control with no handler looks identical until you click it.
+const CDOC = ['# [T](t)', '', '## [Items](items)', '',
+  '### [Red Beacon](red_beacon)', '---', 'Type: item', '---', '',
+  '## [Relics](relics)', '',
+  '### [O](o)', '---', 'Loc: 0,0,0', '---', '',
+  '### [vault](vault)', '---', 'Relic: o', 'Chamber: 0, 0, 0, 400',
+  'Item: red_beacon', 'Qty: 2', 'Starts when: reach vault_door 900', '---', '',
+  '### [plain](plain)', '---', 'Relic: o', 'Chamber: 2000, 0, 0, 400', '---', '',
+  '### [ambush](ambush)', '---', 'Relic: o', 'Point: 0, 0, 900',
+  'Spawn: raider x2', '---'].join('\n');
+const crel = R.parse(CDOC).relics[0];
+const cpage = V.render([crel], 'n', 0, null, false, null, null, R.itemKeys(CDOC));
+const csel = cpage.slice(cpage.indexOf('<script'));
+
+check('contents hang off any part, not only a point',
+  crel.chambers[0].item === 'red_beacon' && crel.chambers[0].qty === '2'
+  && crel.points[0].spawn === 'raider x2');
+check('a part with no contents says so rather than guessing',
+  crel.chambers[1].hasContents === false && crel.chambers[0].hasContents === true);
+check('the four contents boxes are offered',
+  ['fitem', 'fqty', 'fspawn', 'fwhen'].every((id) => cpage.indexOf('id="' + id + '"') >= 0));
+check('...and every one of them writes a line',
+  csel.indexOf('type:"linefield"') >= 0 && csel.indexOf('"starts when"') >= 0
+  && csel.indexOf('CFIELDS') >= 0);
+check('...and none is refilled while you are typing in it',
+  csel.indexOf('document.activeElement!==n') >= 0);
+check('the item box offers the file\'s own item keys',
+  cpage.indexOf('id="items"') >= 0 && cpage.indexOf('value="red_beacon"') >= 0);
+// The one-glance question the view exists to answer.
+check('a furnished part is marked in the view, an empty one is not',
+  (V3.body(crel, V3.defaultCamera()).match(/class="cm"/g) || []).length === 2);
+check('the mark travels in the client bundle', (() => {
+  const f = new Function(V3.clientBundle() + '; return contentsMark;')();
+  return f({ hasContents: true, at: { x: 0, y: 0 } }, '1').indexOf('class="cm"') >= 0
+    && f({ hasContents: false, at: { x: 0, y: 0 } }, '1') === '';
+})());
+
+// The model writes one line, and emptying a box removes it rather than leaving `Item:`
+// with nothing after it - a blank field is a lint finding waiting to happen.
+const vaultPart = crel.chambers[0];
+check('a contents edit writes exactly one line',
+  R.setLineField(CDOC, vaultPart, 'qty', '5').split('\n').length
+    === CDOC.split('\n').length);
+check('emptying a contents box removes its line',
+  R.setLineField(CDOC, vaultPart, 'qty', '').indexOf('Qty:') < 0);
+check('a field the part does not carry yet is added under it',
+  R.setLineField(CDOC, crel.chambers[1], 'item', 'torch').indexOf('Item: torch') > 0);
+check('the label is written the way an author would write it',
+  R.setLineField(CDOC, crel.chambers[1], 'starts when', 'signal x')
+    .indexOf('Starts when: signal x') > 0);
+check('item keys come from an Items section and from Type: item',
+  R.itemKeys(CDOC).join(',') === 'red_beacon');
+
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.
 check('the page script parses', (() => {

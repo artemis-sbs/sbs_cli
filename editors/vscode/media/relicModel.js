@@ -106,7 +106,15 @@ function parse(text) {
     const part = {
       key: p.key, name: p.name, headingLine: p.headingLine, fields: p.fields,
       fenceEnd: p.fenceEnd,
+      // CONTENTS - what is at this part and when it appears. They hang off any KIND of
+      // part (a point marks a spot, a chamber means "somewhere in this room"), so they
+      // are read here rather than in one of the branches below. Empty string, not
+      // undefined: the panel binds these to inputs, and an input's value is a string.
+      item: fieldValue(p, 'item'), qty: fieldValue(p, 'qty'),
+      spawn: fieldValue(p, 'spawn'),
+      when: fieldValue(p, 'starts when') || fieldValue(p, 'when'),
     };
+    part.hasContents = !!(part.item || part.spawn);
     if (!owner) { if (relics[0]) relics[0].orphans.push(part); continue; }
     if (p.fields['chamber']) {
       const n = numbers(p.fields['chamber'].value);
@@ -284,26 +292,85 @@ function addPoint(text, relic, key, x, y, z, name, roles) {
  *  rather than its position. Kept separate from setPart because it writes a DIFFERENT line
  *  - or a line that does not exist yet.
  */
-function setRoles(text, part, roles) {
+/** Every item key this file declares - the completions for a part's `Item:` box.
+ *
+ *  Two ways to be an item, because both are in the corpus: a record inside an `Items`
+ *  section, and a record anywhere carrying `Type: item`. Suggestions only - an item may
+ *  live in an addon this file cannot see, so nothing here forbids a key. Lint is what
+ *  decides, and it can see the whole mission.
+ */
+function itemKeys(text) {
   const lines = String(text).split(/\r?\n/);
-  const clean = String(roles === undefined || roles === null ? '' : roles)
+  const out = [];
+  let inItems = false;         // inside an `## [Items](items)` section
+  let pending = null;          // the last record heading, until its fence says otherwise
+  for (const line of lines) {
+    const h = /^(#{1,6})\s*\[([^\]]*)\]\(([^)]+)\)/.exec(line);
+    if (h) {
+      const key = h[3].trim();
+      if (h[1].length <= 2) {
+        // A SECTION heading. Matched on the key, which is the stable half of the pair -
+        // the display text is free to be anything.
+        inItems = /^items?$/i.test(key);
+        pending = null;
+        continue;
+      }
+      pending = key;
+      if (inItems && out.indexOf(key) < 0) { out.push(key); }
+      continue;
+    }
+    const t = /^\s*Type\s*:\s*(.+)$/i.exec(line);
+    if (t && pending && /^item\b/i.test(t[1].trim()) && out.indexOf(pending) < 0) {
+      out.push(pending);
+    }
+  }
+  return out;
+}
+
+/** A fence field's value as a trimmed string, or '' when the part does not carry it. */
+function fieldValue(p, label) {
+  const got = p && p.fields && p.fields[label];
+  return got ? String(got.value).trim() : '';
+}
+
+/**
+ * Write one named fence line onto a part: replace it, add it, or - when the value is
+ * emptied - remove it.
+ *
+ * The generalization of setRoles. Every one of these fields is the same edit and the same
+ * single undo step, so they share one writer rather than growing a function each.
+ */
+function setLineField(text, part, label, value) {
+  const lines = String(text).split(/\r?\n/);
+  const clean = String(value === undefined || value === null ? '' : value)
     .replace(/[\r\n]/g, ' ').trim();
-  const existing = part && part.fields && part.fields['roles'];
+  const existing = part && part.fields && part.fields[String(label).toLowerCase()];
   if (existing && Number.isFinite(existing.line)) {
     if (!clean) {
-      lines.splice(existing.line, 1);        // no roles left: drop the line entirely
+      lines.splice(existing.line, 1);        // emptied: drop the line entirely
       return lines.join('\n');
     }
     const m = /^(\s*)/.exec(lines[existing.line]);
-    lines[existing.line] = m[1] + 'Roles: ' + clean;
+    lines[existing.line] = m[1] + fieldLabel(label) + ': ' + clean;
     return lines.join('\n');
   }
   if (!clean) { return text; }
   const at = part && part.line;
   if (at === undefined || at === null || at < 0 || at >= lines.length) { return text; }
   const m = /^(\s*)/.exec(lines[at]);
-  lines.splice(at + 1, 0, m[1] + 'Roles: ' + clean);
+  lines.splice(at + 1, 0, m[1] + fieldLabel(label) + ': ' + clean);
   return lines.join('\n');
+}
+
+/** `starts when` -> `Starts when`. AMD matches labels case-insensitively, but a file a
+ *  person has to read should look like one they would have written. */
+function fieldLabel(label) {
+  const s = String(label);
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function setRoles(text, part, roles) {
+  return setLineField(text, part, 'roles', roles);
 }
 
 /** Numbers as an author would write them: no trailing `.0`, no exponent noise. */
@@ -557,7 +624,7 @@ function R_reparse(text, relicKey, partKey) {
     .find((p) => p.key === partKey) || null;
 }
 
-module.exports = {
+module.exports = { setLineField, itemKeys,
   setName, setKind, setRoles, addBox, addSolid, addPoint, addPart,
   parse, writeField, movePart: moveePart, resizePart, setHeight, setPart,
   addPassage, removePassage, addChamber, removePart,

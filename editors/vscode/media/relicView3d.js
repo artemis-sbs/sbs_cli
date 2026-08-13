@@ -98,12 +98,13 @@ function scene(rel, cam) {
   for (const c of (rel.chambers || [])) {
     const q = project(c, cam);
     items.push({ kind: 'chamber', at: q, r: c.r, depth: q.depth,
-                 key: c.key, label: c.name || c.key, y: c.y });
+                 key: c.key, label: c.name || c.key, y: c.y,
+                 hasContents: !!c.hasContents });
   }
   for (const b of (rel.boxes || [])) {
     const q = project(b, cam);
     items.push({ kind: 'box', at: q, depth: q.depth, key: b.key,
-                 hx: b.hx, hy: b.hy, hz: b.hz,
+                 hx: b.hx, hy: b.hy, hz: b.hz, hasContents: !!b.hasContents,
                  label: b.name || b.key, corners: boxCorners(b, cam) });
   }
   for (const t of (rel.points || [])) {
@@ -111,7 +112,8 @@ function scene(rel, cam) {
     // -2 puts a point in FRONT of the room it marks: it has no size of its own, so
     // anything else at the same depth would swallow it.
     items.push({ kind: 'point', at: q, depth: q.depth - 2, key: t.key,
-                 label: t.name || t.key, roles: t.roles || [] });
+                 label: t.name || t.key, roles: t.roles || [],
+                 hasContents: !!t.hasContents });
   }
   for (const s of (rel.solids || [])) {
     const q = project(s, cam);
@@ -296,6 +298,26 @@ function _solidShape(it, a) {
 
 
 /** The scene as an SVG body (no wrapper) - the caller owns the viewBox. */
+/** A small mark over a part that holds authored contents.
+ *
+ *  The view's job is to show the shape of the thing, and "which rooms are furnished" is
+ *  part of that shape - clicking every part in turn to find out is the question this
+ *  answers at a glance. A dot rather than an icon: it has to read at the size a whole
+ *  relic is drawn at, and it is drawn OVER the part rather than inside it so the same
+ *  code serves a chamber, a box and a point.
+ */
+function contentsMark(it, a) {
+  if (!it || !it.hasContents || !it.at) { return ''; }
+  const r = 60;
+  const x = it.at.x, y = it.at.y - r * 2.6;
+  return '<g class="cm" pointer-events="none">'
+    + '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + r + '"'
+    + ' fill="#bb9af7" fill-opacity="' + a + '"/>'
+    + '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (r * 2) + '"'
+    + ' fill="none" stroke="#bb9af7" stroke-width="12" stroke-opacity="'
+    + (Number(a) * 0.45).toFixed(3) + '"/></g>';
+}
+
 function body(rel, cam) {
   const items = scene(rel, cam);
   let lo = Infinity, hi = -Infinity;
@@ -303,6 +325,7 @@ function body(rel, cam) {
   let out = '';
   for (const it of items) {
     const a = shade(it.depth, lo, hi).toFixed(3);
+    out += contentsMark(it, a);
     if (it.kind === 'passage') {
       out += '<line x1="' + it.a.x.toFixed(1) + '" y1="' + it.a.y.toFixed(1)
         + '" x2="' + it.b.x.toFixed(1) + '" y2="' + it.b.y.toFixed(1)
@@ -406,13 +429,13 @@ function clientBundle() {
     + 'const GRID_MINOR = ' + GRID_MINOR + ';\n'
     + 'const GRID_MAJOR = ' + GRID_MAJOR + ';\n'
     + [esc, project, unproject, span, boxCorners, _solidShape, scene, extent, shade,
-       body, holdPivot,
+       contentsMark, body, holdPivot,
        groundGrid, gridSvg, labelRows, labelSvg]
     .map(function (f) { return f.toString(); }).join('\n')
     + '\nconst BOX_EDGES = ' + JSON.stringify(BOX_EDGES) + ';\n';
 }
 
-module.exports = { project, unproject, scene, body, extent, boxCorners, shade, clientBundle,
+module.exports = { project, unproject, scene, body, contentsMark, extent, boxCorners, shade, clientBundle,
                    span, RENDER_DISTANCE,
                    groundGrid, gridSvg, labelRows, labelSvg, GRID_MINOR, GRID_MAJOR,
                    holdPivot,

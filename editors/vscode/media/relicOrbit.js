@@ -319,6 +319,11 @@ function script(rel, cam, vb, sel) {
     // view used, same `field` message out, so a typed number and a dragged one are the
     // same one-line write.
     + 'const IN={x:"fx",y:"fy",z:"fz",r:"fr",hx:"fhx",hy:"fhy",hz:"fhz"};'
+    // The contents boxes: which input, which property on the part, which AMD label.
+    + 'const CFIELDS=[{id:"fitem",prop:"item",label:"item"},'
+    + '{id:"fqty",prop:"qty",label:"qty"},'
+    + '{id:"fspawn",prop:"spawn",label:"spawn"},'
+    + '{id:"fwhen",prop:"when",label:"starts when"}];'
     + 'function el(id){return document.getElementById(id);}'
     + 'function showInsp(){const p=partOf(sel);const ins=el("insp");if(!ins)return;'
     + 'if(!p){ins.classList.add("hidden");return;}'
@@ -329,6 +334,11 @@ function script(rel, cam, vb, sel) {
     + 'if(rl&&document.activeElement!==rl)rl.value=(p.roles||[]).join(", ");'
     + 'const lrl=el("lroles");'
     + 'if(lrl)lrl.classList.toggle("hidden",p.roles===undefined);'
+    // CONTENTS. Filled from the part, and never while the box has focus - a redraw
+    // fires on every keystroke in the document, and overwriting what someone is halfway
+    // through typing is the "it eats my input" bug.
+    + 'CFIELDS.forEach(function(f){const n=el(f.id);if(!n)return;'
+    + 'if(document.activeElement!==n)n.value=(p[f.prop]===undefined?"":p[f.prop]);});'
     + 'const isBox=p.hx!==undefined;'
     + 'const isSolid=REL.solids.some(function(s){return s.key===p.key;});'
     + 'el("ikind").textContent=isBox?"box":(isSolid?"solid":"chamber");'
@@ -338,6 +348,14 @@ function script(rel, cam, vb, sel) {
     + 'p.roles=rli.value.split(",").map(function(s){return s.trim().toLowerCase();})'
     + '.filter(function(s){return s;});'
     + 'vscode.postMessage({type:"roles",key:p.key,roles:rli.value});draw();});'
+    // One message for all four, because they are one kind of edit: a single fence line
+    // written, replaced or removed. `label` travels with it so the extension does not
+    // need a branch per field.
+    + 'CFIELDS.forEach(function(f){const n=el(f.id);if(!n)return;'
+    + 'n.addEventListener("change",function(){const p=partOf(sel);if(!p)return;'
+    + 'p[f.prop]=n.value;p.hasContents=!!(p.item||p.spawn);'
+    + 'vscode.postMessage({type:"linefield",key:p.key,label:f.label,value:n.value});'
+    + 'draw();});});'
     + 'const subi=el("fsub");'
     + 'if(subi)subi.addEventListener("change",function(){const p=partOf(sel);if(!p)return;'
     + 'vscode.postMessage({type:"kind",key:p.key,'

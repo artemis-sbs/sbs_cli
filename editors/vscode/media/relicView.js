@@ -51,7 +51,7 @@ function esc(s) {
  * redraw happens on every keystroke in the document, so losing it would make the plan
  * unusable while editing.
  */
-function render(relics, nonce, index, view, live, cam, sel3) {
+function render(relics, nonce, index, view, live, cam, sel3, items) {
   const rel = relics[index];
   if (!rel) {
     return '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);'
@@ -60,6 +60,13 @@ function render(relics, nonce, index, view, live, cam, sel3) {
       + 'carrying a <code>Loc:</code>; its chambers are records carrying '
       + '<code>Relic:</code>.</p></body></html>';
   }
+  // The item keys this file declares, offered as completions on the `item` box. A
+  // DATALIST rather than a select: an item may live in an addon this panel cannot see, so
+  // the list has to suggest without forbidding. Lint is what catches a key that resolves
+  // nowhere, and it can see the whole mission.
+  const itemOptions = (items || []).map(function (k) {
+    return '<option value="' + esc(String(k)) + '"></option>';
+  }).join('');
   // Framing for the ONE view. `view` is what the page last reported, so a redraw - which
   // fires on every keystroke in the document - puts you back where you were looking.
   // The camera and its framing.
@@ -149,6 +156,9 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     + 'color:var(--vscode-input-foreground,#ccc);border:1px solid '
     + 'var(--vscode-input-border,#5555);border-radius:3px;padding:1px 4px}'
     + '.ihint{opacity:.55;font-size:10px;margin-top:2px}'
+    // A rule, not a heading: the panel is small and a bold word would compete with
+    // the part's own name at the top of it.
+    + '.isec{margin-top:6px;padding-top:5px;border-top:1px solid var(--vscode-panel-border,#8883);opacity:.6;font-size:10px;text-transform:uppercase;letter-spacing:.08em}'
     + 'body{position:relative}'
     + 'button{background:var(--vscode-button-secondaryBackground,#444);'
     + 'color:var(--vscode-button-secondaryForeground,#fff);border:none;border-radius:4px;'
@@ -205,7 +215,25 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     + '<label id="lhx" class="hidden">hx <input id="fhx" type="number" step="10" min="1"></label>'
     + '<label id="lhy" class="hidden">hy <input id="fhy" type="number" step="10" min="1"></label>'
     + '<label id="lhz" class="hidden">hz <input id="fhz" type="number" step="10" min="1"></label>'
-    + '<div class="ihint">drag a handle, or type an exact number here</div></div>'
+    + '<div class="ihint">drag a handle, or type an exact number here</div>'
+    // CONTENTS - what is HERE, and when it turns up. Below the geometry because that is
+    // the order the work happens in: shape the room first, then furnish it. An author
+    // writing an adventure module is describing a ruin's contents, so this is the half
+    // of the panel that is about the mission rather than about the map.
+    + '<div class="isec">contents</div>'
+    + '<label class="wide" id="litem">item <input id="fitem" type="text" list="items"'
+    + ' placeholder="red_beacon - a key from the Items section"></label>'
+    + '<datalist id="items">' + itemOptions + '</datalist>'
+    + '<label id="lqty">qty <input id="fqty" type="number" step="1" min="1"></label>'
+    + '<label class="wide" id="lspawn">spawn <input id="fspawn" type="text"'
+    + ' placeholder="raider x2"></label>'
+    // The vocabulary goes in the placeholder rather than a dropdown: it is the same
+    // grammar quests use, and a list of four canned phrases would read as the whole
+    // language when it is not.
+    + '<label class="wide" id="lwhen">when <input id="fwhen" type="text"'
+    + ' placeholder="always - or: reach <role> 900 / signal x / 5 minutes"></label>'
+    + '<div class="ihint">leave `when` empty and it is simply there from the start'
+    + '</div></div>'
     + '<div class="wrap"><svg id="scene3" viewBox="' + v3.x + ' ' + v3.y + ' '
     + v3.w + ' ' + v3.h + '" preserveAspectRatio="xMidYMid meet">'
     + '<g id="grid3g">' + V3.gridSvg(rel, cam3, Math.max(v3.w, v3.h), v3.w) + '</g>'
