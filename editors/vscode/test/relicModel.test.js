@@ -8,6 +8,7 @@ const assert = require('assert');
 const R = require('../media/relicModel.js');
 
 const NL = String.fromCharCode(10);
+const NL2 = /\r?\n/;
 let failures = 0;
 function check(name, cond) {
   if (cond) { console.log('  ok  - ' + name); }
@@ -400,6 +401,52 @@ function splitLines(s) {
     const s = added.solids.find((x) => x.key === 'pillar');
     return s && s.shape === 'sphere' && s.r === 250;
   })());
+}
+
+// --- points: adding one, and saying what it is for --------------------------
+// An "item to be found" is a point with Roles: item. Until this existed the editor could
+// draw and move a point but never make one, so the answer to "how do I add an item" was
+// "go and type it".
+{
+  const rel = R.parse(DOC).relics[0];
+  const out = R.addPoint(DOC, rel, 'stash', 500, 100, -200, 'the stash', 'item');
+  const p = R.parse(out).relics[0].points.find((x) => x.key === 'stash');
+  check('a point can be added', !!p);
+  check('...where it was asked for', p.x === 500 && p.y === 100 && p.z === -200);
+  check('...with its roles', p.roles.join(',') === 'item');
+  check('...and it is not geometry', (() => {
+    const r2 = R.parse(out).relics[0];
+    return r2.chambers.length === rel.chambers.length
+      && r2.boxes.length === rel.boxes.length && r2.solids.length === rel.solids.length;
+  })());
+
+  // Roles are what a point is FOR, so they are the one edit that changes its meaning
+  // rather than its position - a different line, or one that does not exist yet.
+  const re = R.setRoles(out, p, 'item, quest, boss');
+  check('roles can be rewritten',
+    R.parse(re).relics[0].points.find((x) => x.key === 'stash').roles.join(',')
+    === 'item,quest,boss');
+  const bare = R.addPoint(DOC, rel, 'bare', 1, 2, 3, 'bare');
+  const bp = R.parse(bare).relics[0].points.find((x) => x.key === 'bare');
+  check('a point may have no roles at all', bp.roles.length === 0);
+  check('...and gain them later',
+    R.parse(R.setRoles(bare, bp, 'spawn')).relics[0].points
+      .find((x) => x.key === 'bare').roles.join(',') === 'spawn');
+  check('...and lose them again', (() => {
+    const withRoles = R.setRoles(bare, bp, 'spawn');
+    const wp = R.parse(withRoles).relics[0].points.find((x) => x.key === 'bare');
+    return R.parse(R.setRoles(withRoles, wp, '')).relics[0].points
+      .find((x) => x.key === 'bare').roles.length === 0;
+  })());
+
+  // A move must write the position line and leave the roles alone.
+  const moved = R.setPart(out, p, { x: p.x + 100, y: p.y, z: p.z });
+  const mp = R.parse(moved).relics[0].points.find((x) => x.key === 'stash');
+  check('moving a point rewrites one line', (() => {
+    const a = out.split(NL2), b = moved.split(NL2);
+    return a.map((l, i2) => (l !== b[i2] ? 1 : 0)).reduce((s, v) => s + v, 0) === 1;
+  })());
+  check('...and does not touch its roles', mp.x === p.x + 100 && mp.roles.join(',') === 'item');
 }
 
 console.log('all relic model tests passed');

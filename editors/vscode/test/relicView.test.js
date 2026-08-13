@@ -82,6 +82,8 @@ const script = html.slice(html.indexOf('<script'), html.lastIndexOf('</scr' + 'i
 [['fit', "getElementById(\"fit\")"],
  ['add', "getElementById(\"add\")"],
  ['addbox', 'getElementById("addbox")'],
+ ['addsolid', 'getElementById("addsolid")'],
+ ['addpoint', 'getElementById("addpoint")'],
  ['del', "getElementById(\"del\")"],
  ['undo', 'type:"undo"'],
  ['preview', 'type:"preview"'],

@@ -4939,7 +4939,9 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     }
     if (msg && msg.type === 'remove') {
       await applyRelicStructure(doc, index, (text: string, rel: any) => {
-        const part = [...rel.chambers, ...rel.boxes, ...rel.solids]
+        // POINTS TOO. They are drawn and draggable, so leaving them out of the lookup made
+        // a drag silently do nothing - the edit found no part and returned.
+        const part = [...rel.chambers, ...rel.boxes, ...rel.solids, ...rel.points]
           .find((p: RelicPart) => p.key === msg.key);
         return part ? RelicModel.removePart(text, rel, part) : text;
       });
@@ -4962,6 +4964,26 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       // sphere solid carry the same four numbers - see relicModel.setKind.
       await applyRelicEdit(doc, index, msg.key,
         (text: string, part: RelicPart) => RelicModel.setKind(text, part, msg.kind));
+      return;
+    }
+    if (msg && msg.type === 'roles') {
+      // What a point is FOR. Its own line, so a move never touches it and this never
+      // touches a position.
+      await applyRelicEdit(doc, index, msg.key,
+        (text: string, part: RelicPart) => RelicModel.setRoles(text, part, msg.roles));
+      return;
+    }
+    if (msg && msg.type === 'addpoint') {
+      await applyRelicStructure(doc, index, (text: string, rel: any) => {
+        const taken = new Set([...rel.chambers, ...rel.boxes, ...rel.solids, ...rel.points]
+          .map((p: RelicPart) => p.key));
+        let n = taken.size + 1;
+        while (taken.has('point' + n)) { n++; }
+        // No roles by default: a point with an invented purpose is worse than one with
+        // none, and the panel's roles box is right there.
+        return RelicModel.addPoint(text, rel, 'point' + n,
+          msg.x, msg.y, msg.z, 'point ' + n, '');
+      });
       return;
     }
     if (msg && msg.type === 'addsolid') {
@@ -5077,7 +5099,9 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     const model = RelicModel.parse(d.getText());
     const rel = model.relics[idx];
     if (!rel) { return; }
-    const part = [...rel.chambers, ...rel.boxes, ...rel.solids]
+    // POINTS TOO. They are drawn and draggable, so leaving them out of the lookup made
+        // a drag silently do nothing - the edit found no part and returned.
+        const part = [...rel.chambers, ...rel.boxes, ...rel.solids, ...rel.points]
       .find((p: RelicPart) => p.key === key);
     if (!part) { return; }
     const text = d.getText();

@@ -605,6 +605,17 @@ check('a capsule solid draws along its axis', (() => {
   return (grp.match(/<line/g) || []).length === 2 && grp.indexOf('<circle') < 0;
 })());
 
+// Adding a point, and saying what it is for - the answer to "how do I add an item".
+check('Add point is offered, on the toolbar and in the menu',
+  page.indexOf('id="addpoint"') >= 0 && sel.indexOf('type:"addpoint"') >= 0
+  && sel.indexOf('Add point here') >= 0);
+check('the roles field is offered and wired',
+  page.indexOf('id="froles"') >= 0 && sel.indexOf('type:"roles"') >= 0);
+check('...and is not refilled while you are typing in it',
+  sel.indexOf('document.activeElement!==rl') >= 0);
+// Roles only mean something on a point today, so the field hides for a chamber.
+check('roles are shown only where they apply', sel.indexOf('p.roles===undefined') >= 0);
+
 // The page must PARSE. A name collision here (the gizmo once exported `svg`, which the
 // page already binds to its element) blanks the view with nothing in the log.
 check('the page script parses', (() => {

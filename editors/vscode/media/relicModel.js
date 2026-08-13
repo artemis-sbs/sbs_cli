@@ -254,6 +254,58 @@ function setKind(text, part, kind) {
   return lines.join('\n');
 }
 
+/** A new named place: an item to be found, where NPCs arrive, the way in.
+ *
+ *  It adds no navigable space and subtracts none - what it is FOR is its roles, which only
+ *  the mission reads. Authored relative to the relic's `Loc:` like every other part, so it
+ *  travels with the relic.
+ */
+function addPoint(text, relic, key, x, y, z, name, roles) {
+  const lines = String(text).split(/\r?\n/);
+  const parts = [].concat(relic.chambers, relic.boxes, relic.solids, relic.points || []);
+  let at = relic.fenceEnd;
+  for (const p of parts) {
+    if (Number.isFinite(p.fenceEnd) && p.fenceEnd > at) at = p.fenceEnd;
+  }
+  if (!Number.isFinite(at)) return text;
+  const block = ['', '### [' + (name || key) + '](' + key + ')', '---',
+    'Relic: ' + relic.key,
+    'Point: ' + [x, y, z].map(fmt).join(', ')];
+  if (roles) { block.push('Roles: ' + roles); }
+  block.push('---');
+  lines.splice(at + 1, 0, ...block);
+  return lines.join('\n');
+}
+
+
+/** Rewrite a part's `Roles:` line, adding one if it has none.
+ *
+ *  Roles are what a point is FOR, so this is the one edit that changes a point's meaning
+ *  rather than its position. Kept separate from setPart because it writes a DIFFERENT line
+ *  - or a line that does not exist yet.
+ */
+function setRoles(text, part, roles) {
+  const lines = String(text).split(/\r?\n/);
+  const clean = String(roles === undefined || roles === null ? '' : roles)
+    .replace(/[\r\n]/g, ' ').trim();
+  const existing = part && part.fields && part.fields['roles'];
+  if (existing && Number.isFinite(existing.line)) {
+    if (!clean) {
+      lines.splice(existing.line, 1);        // no roles left: drop the line entirely
+      return lines.join('\n');
+    }
+    const m = /^(\s*)/.exec(lines[existing.line]);
+    lines[existing.line] = m[1] + 'Roles: ' + clean;
+    return lines.join('\n');
+  }
+  if (!clean) { return text; }
+  const at = part && part.line;
+  if (at === undefined || at === null || at < 0 || at >= lines.length) { return text; }
+  const m = /^(\s*)/.exec(lines[at]);
+  lines.splice(at + 1, 0, m[1] + 'Roles: ' + clean);
+  return lines.join('\n');
+}
+
 /** Numbers as an author would write them: no trailing `.0`, no exponent noise. */
 function fmt(n) {
   if (!Number.isFinite(n)) return '0';
@@ -280,6 +332,11 @@ function setPart(text, part, patch) {
     if (patch[k] !== undefined && patch[k] !== null && Number.isFinite(Number(patch[k]))) {
       v[k] = Number(patch[k]);
     }
+  }
+  if (part.kind === 'point') {
+    // Three numbers and no size: a point is a PLACE. Its roles live on their own line, so
+    // they are untouched by a move.
+    return writeField(text, part.line, [v.x, v.y, v.z]);
   }
   if (part.kind === 'chamber') {
     return writeField(text, part.line, [v.x, v.y, v.z, v.r]);
@@ -501,7 +558,7 @@ function R_reparse(text, relicKey, partKey) {
 }
 
 module.exports = {
-  setName, setKind, addBox, addSolid, addPart,
+  setName, setKind, setRoles, addBox, addSolid, addPoint, addPart,
   parse, writeField, movePart: moveePart, resizePart, setHeight, setPart,
   addPassage, removePassage, addChamber, removePart,
   numbers, words, fmt,

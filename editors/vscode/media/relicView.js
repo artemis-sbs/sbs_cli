@@ -168,6 +168,9 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     // have to fly around. Undressed it is an invisible obstacle, which is why the
     // dresser scatters props on it too.
     + '<button id="addsolid" title="A subtracted mass - a pillar to fly around">Add solid</button>'
+    // A place rather than a shape: where an item is found, where NPCs arrive, the
+    // way in. What it is FOR is its roles.
+    + '<button id="addpoint" title="A named place - an item, a spawn, the way in">Add point</button>'
     + '<button id="del">Delete</button>'
     // Named for what they SHOW, with the axis spelled out - Cosmos is Y-up and
     // Blender is Z-up, so anyone arriving from there will otherwise reach for
@@ -194,6 +197,7 @@ function render(relics, nonce, index, view, live, cam, sel3) {
     // so this is the natural way to work: build the shape where the gizmos are
     // easiest, then mark it subtracted.
     + '<label id="lsub"><input id="fsub" type="checkbox"> subtracted</label>'
+    + '<label class="wide" id="lroles">roles <input id="froles" type="text"></label>'
     + '<label>x <input id="fx" type="number" step="10"></label>'
     + '<label>y <input id="fy" type="number" step="10"></label>'
     + '<label>z <input id="fz" type="number" step="10"></label>'
