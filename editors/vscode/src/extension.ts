@@ -4775,6 +4775,20 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   // redraws the panel - so a selection kept only in the page would be dropped by the very
   // edit that used it, and the gizmo would vanish after every move.
   let sel3: string | undefined;
+  // WHAT THIS PANEL WROTE, newest last: the text before each edit and the text it left.
+  //
+  // It exists to make Undo instant. Running the editor's own `undo` command means showing
+  // the document, taking focus, undoing and coming back - which works, and flashes the
+  // screen every time. Restoring a snapshot is a WorkspaceEdit like any other: no focus
+  // moves, nothing flashes.
+  //
+  // It does NOT become a second undo system. The restore lands on the document's own undo
+  // stack like every other edit, and if the text is not still exactly as this panel left
+  // it - because the author typed in the editor, or undid there - the snapshot is stale
+  // and the command path is used instead. Documents here are a hundred lines, so holding
+  // a few of them costs nothing.
+  const undoStack: Array<{ before: string; after: string }> = [];
+  const UNDO_DEPTH = 40;
 
   const panel = vscode.window.createWebviewPanel(
     'amdRelic', 'Relic Plan', column, { enableScripts: true },
@@ -4874,6 +4888,11 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       // So this VERIFIES rather than assumes. doc.version increments on every applied
       // edit, including an undo, which makes "did it work" a fact instead of a hope - and
       // when it did not, says so instead of leaving the author pressing a dead button.
+      // The quiet path first: no focus moves, nothing flashes.
+      if (await undoOwnEdit()) {
+        vscode.window.setStatusBarMessage('Relic: undone', 2000);
+        return;
+      }
       const before = doc.version;
       try {
         const ed = await vscode.window.showTextDocument(doc, {
@@ -4973,6 +4992,29 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   // the whole document rather than a single line. Everything positional still goes
   // through applyRelicEdit's one-line path, which is what keeps a drag a single undo
   // step; a structural change is genuinely a bigger edit and should read as one.
+  function remember(before: string, after: string): void {
+    undoStack.push({ before, after });
+    while (undoStack.length > UNDO_DEPTH) { undoStack.shift(); }
+  }
+
+  /** Take back the panel's last edit without moving focus. False if it cannot. */
+  async function undoOwnEdit(): Promise<boolean> {
+    const last = undoStack[undoStack.length - 1];
+    // Only when the document is STILL exactly as this panel left it. Anything else means
+    // the author has edited or undone in the editor since, and restoring a stale snapshot
+    // would throw their work away - which is worse than a flash.
+    if (!last || doc.getText() !== last.after) { return false; }
+    undoStack.pop();
+    const we = new vscode.WorkspaceEdit();
+    we.replace(doc.uri, new vscode.Range(
+      doc.positionAt(0), doc.positionAt(doc.getText().length)), last.before);
+    writing = true;
+    const ok = await vscode.workspace.applyEdit(we);
+    writing = false;
+    if (ok) { draw(); }
+    return ok;
+  }
+
   async function applyRelicStructure(
     d: vscode.TextDocument, idx: number,
     edit: (text: string, rel: any) => string,
@@ -4990,6 +5032,12 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     writing = true;
     await vscode.workspace.applyEdit(we);
     writing = false;
+    // Recorded AFTER the edit, from the document itself. The model joins lines with 
+
+    // while the file may be CRLF, so `next` is not necessarily what the document ends up
+    // holding - and a snapshot that never matches would silently disable the quiet undo
+    // and leave the screen flashing forever.
+    remember(text, d.getText());
     draw();
     previewSoon();
   }
@@ -5020,6 +5068,7 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     writing = true;
     await vscode.workspace.applyEdit(we);
     writing = false;
+    remember(text, d.getText());   // the document's own text - see applyRelicStructure
     draw();
     previewSoon();
   }
