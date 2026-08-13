@@ -4685,6 +4685,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));
   context.subscriptions.push(vscode.commands.registerCommand('amd.reloadRelicInSession', reloadRelicInSession));
+  context.subscriptions.push(vscode.commands.registerCommand('amd.relicUndo', async () => {
+    if (activeRelicUndo) { await activeRelicUndo(); }
+  }));
   context.subscriptions.push(vscode.commands.registerCommand('amd.newFile', newContentFile));
 
   // Reverse sync: when an Inspector's .amd changes elsewhere, mirror it back into
@@ -4757,6 +4760,14 @@ interface RelicRec {
 // Live preview is a MODE, not a per-panel setting: closing the plan and opening it
 // again should not quietly stop previewing.
 let relicLive = false;
+// The undo of the relic panel that currently has focus, if any.
+//
+// CTRL-Z is bound as a VS CODE KEYBINDING scoped to this panel rather than listened for
+// inside the page, because the page cannot be relied on to have keyboard focus: every edit
+// replaces the whole webview HTML, and the fresh document does not hold focus until it is
+// clicked. That is why the first CTRL-Z after an edit did nothing and every one after it
+// worked. A keybinding on `activeWebviewPanelId` does not care where focus is inside.
+let activeRelicUndo: (() => Promise<void>) | undefined;
 
 async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.ViewColumn.Beside): Promise<void> {
   const uri = uriArg ?? vscode.window.activeTextEditor?.document.uri.toString();
@@ -4793,6 +4804,7 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   const panel = vscode.window.createWebviewPanel(
     'amdRelic', 'Relic Plan', column, { enableScripts: true },
   );
+  const claimUndo = () => { activeRelicUndo = doUndo; };
   const draw = () => {
     const model = RelicModel.parse(doc.getText());
     if (index >= model.relics.length) { index = 0; }
@@ -4848,6 +4860,16 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
   };
   panel.onDidDispose(() => { if (liveTimer) { clearTimeout(liveTimer); } });
 
+  const doUndo = async () => {
+    vscode.window.setStatusBarMessage('Relic: ' + await undoOwnEdit(), 3500);
+  };
+  claimUndo();
+  panel.onDidChangeViewState((e) => {
+    if (e.webviewPanel.active) { claimUndo(); }
+    else if (activeRelicUndo === doUndo) { activeRelicUndo = undefined; }
+  });
+  panel.onDidDispose(() => { if (activeRelicUndo === doUndo) { activeRelicUndo = undefined; } });
+
   panel.webview.onDidReceiveMessage(async (msg: any) => {
     if (msg && msg.type === 'view') {
       lastView = { x: msg.x, y: msg.y, w: msg.w, h: msg.h };
@@ -4890,8 +4912,7 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       //
       // So when there is nothing of ours left, say so. CTRL-Z in the text editor is the
       // right tool for edits made there, and it is one keystroke away.
-      const why = await undoOwnEdit();
-      vscode.window.setStatusBarMessage('Relic: ' + why, 3500);
+      await doUndo();
       return;
     }
     if (msg && msg.type === 'live') {

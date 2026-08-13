@@ -99,6 +99,11 @@
         "icon": "$(broadcast)"
       },
       {
+        "command": "amd.relicUndo",
+        "title": "Undo Relic Edit",
+        "category": "Artemis AMD"
+      },
+      {
         "command": "amd.reloadRelicInSession",
         "title": "Reload Relic in Running Session",
         "category": "Artemis AMD",
@@ -120,6 +125,14 @@
         "title": "Show Relic Plan",
         "category": "Artemis AMD",
         "icon": "$(circuit-board)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "amd.relicUndo",
+        "key": "ctrl+z",
+        "mac": "cmd+z",
+        "when": "activeWebviewPanelId == 'amdRelic'"
       }
     ],
     "menus": {

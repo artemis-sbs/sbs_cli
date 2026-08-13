@@ -140,6 +140,24 @@ check('a part can be renamed from the panel', markup.indexOf('id="fname"') >= 0)
 check('...and the key is shown but not editable',
   markup.indexOf('id="ikey"') >= 0 && markup.indexOf('id="fkey"') < 0);
 
+// CTRL-Z is ALSO a VS Code keybinding scoped to the panel, because the page cannot be
+// relied on to hold keyboard focus: every edit replaces the whole webview HTML, and the
+// fresh document does not have focus until it is clicked. That is why the first CTRL-Z
+// after an edit did nothing while every one after it worked. The in-page handler stays as
+// well - it costs a line and covers the case where the panel is focused but VS Code has
+// not updated its context yet.
+{
+  const pkg = require('../package.json');
+  const kb = (pkg.contributes.keybindings || []).find((k) => k.command === 'amd.relicUndo');
+  check('CTRL-Z is bound at the VS Code level, not only inside the page', !!kb);
+  check('...scoped to this panel, so it cannot shadow undo anywhere else',
+    kb && kb.when === "activeWebviewPanelId == 'amdRelic'");
+  check('...on both platforms', kb && kb.key === 'ctrl+z' && kb.mac === 'cmd+z');
+  check('the command it runs is contributed',
+    (pkg.contributes.commands || []).some((c) => c.command === 'amd.relicUndo'));
+  check('the page still handles it too', script.indexOf('type:"undo"') >= 0);
+}
+
 // ------------------------------------------------------------------ warnings
 const ORPHAN = DOC + NL + NL
   + ['### [stray](stray)', '---', 'Relic: nosuch', 'Chamber: 0,0,0,100', '---'].join(NL);
