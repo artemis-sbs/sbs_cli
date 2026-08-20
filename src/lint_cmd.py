@@ -114,6 +114,26 @@ def _load_signal_lint(missions, mission):
         return signal_lint
 
 
+def _load_blob_lint(missions, mission):
+    """Import `blob_lint` - working tree first, else the mission's own sbslib.
+
+    Returns None when the mission's sbs_utils predates the rule, so linting an older
+    mission still works instead of dying on the import.
+    """
+    _prefer_working_tree_sbs_utils(missions, mission)
+    sys.path.insert(0, mission)
+    try:
+        from sbs_utils.procedural.blob_lint import blob_lint
+        return blob_lint
+    except Exception:
+        try:
+            sbs_lib_import(missions, mission)
+            from sbs_utils.procedural.blob_lint import blob_lint
+            return blob_lint
+        except Exception:
+            return None
+
+
 def lint_self_packaging(mission, user="artemis-sbs"):
     """Check a repo that ships its OWN addons keeps its three lists in step.
 
@@ -348,6 +368,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
     try:
         amd_lint = _load_amd_lint(missions, mission)
         signal_lint = None if no_signals else _load_signal_lint(missions, mission)
+        blob_lint = _load_blob_lint(missions, mission)
     except Exception as e:
         print(f"ERROR: could not load sbs_utils to lint ({e})")
         raise SystemExit(2)
@@ -415,6 +436,29 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
                 print(f.compact(rel))
         else:  # json
             bundle.extend(f.to_dict(file=rel) for f in findings)
+
+    # MAST data_set pass: a blob read compared or `in`-tested with no None guard. Same
+    # printing rule as the signal pass below - only files WITH findings.
+    if blob_lint is not None:
+        for path in mast_files:
+            findings = blob_lint(file_path=path)
+            if not findings:
+                continue
+            rel = os.path.relpath(path, mission)
+            for f in findings:
+                if f.is_error():
+                    total_err += 1
+                else:
+                    total_warn += 1
+            if fmt == "text":
+                print(f"== {rel} ==")
+                for f in findings:
+                    print(f"  {f}")
+            elif fmt == "compact":
+                for f in findings:
+                    print(f.compact(rel))
+            else:  # json
+                bundle.extend(f.to_dict(file=rel) for f in findings)
 
     # MAST signal-route pass: side-effects in a //signal route (per-console duplication).
     # Only files WITH findings are printed (a mission has many clean .mast files).
