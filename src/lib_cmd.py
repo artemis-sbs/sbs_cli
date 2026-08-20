@@ -82,18 +82,15 @@ def lib_impl(folder, user):
     if version is None:
         print(f"ERROR: version is needed in __lib__.json to build libraries ")
         return
+    # Bake the version into the packages BEFORE zipping them, so the number the
+    # library reports at runtime is the one __lib__.json authored.
+    _stamp_version(Path(working_directory).resolve() / folder, libs, version)
     #
     # Roll through keys and use that as the extension
     #
     repo = folder
     for key, values in libs.items():
         if key == "version":
-            # v = version_file_contents(values)
-            # if v is None:
-            #     continue
-            # version_file = Path(working_directory).resolve() / folder / folder / "version__.py"
-            # with open(version_file, "w") as f:
-            #     f.write(v)
             continue
         ext = key
         for folder_path in values:
@@ -143,14 +140,42 @@ def lib_impl(folder, user):
         print(f"WARNING: could not unpack media: {e}")
 
 
+def _stamp_version(repo_dir, libs, version):
+    """Rewrite each sbslib package's version__.py from __lib__.json.
+
+    __lib__.json is the one place the version is authored, but it does NOT travel
+    inside the .sbslib - an sbslib zip holds the package directory alone - so the
+    number has to be baked into a module at build time or the library reports a
+    stale one for the rest of its life.
+
+    Only a package that ALREADY has a version__.py is stamped. The earlier version
+    of this wrote <folder>/<folder>/version__.py unconditionally, which for a
+    mastlib repo like LegendaryMissions meant creating a stray
+    LegendaryMissions/LegendaryMissions/ folder - so it was commented out rather
+    than fixed, and every library published since has carried a frozen version.
+    """
+    body = version_file_contents(version)
+    if body is None:
+        print(f"WARNING: version {version!r} is not vMAJOR.MINOR.BUILD - not stamping version__.py")
+        return
+    for folder_path in libs.get("sbslib") or []:
+        target = repo_dir / folder_path / "version__.py"
+        if not target.exists():
+            continue
+        with open(target, "w") as f:
+            f.write(body)
+        print(f"stamped {folder_path}/version__.py = {version}")
+
+
 def version_file_contents(version):
     if version is None:
         return None
-    v = version.split(".")
-    print(version)
-    if len(v)!=3:
+    # Tags and __lib__.json both spell it "v1.4.0"; tolerate a bare "1.4.0" too.
+    # The old code did v[0] = v[0][1:] unconditionally, which turned a bare version
+    # into __version = (,4,0) - a SyntaxError baked into the shipped library.
+    v = version.lstrip("vV").split(".")
+    if len(v) != 3 or not all(p.isdigit() for p in v):
         return None
-    v[0] = v[0][1:]
     return f"""
 __version = ({v[0]},{v[1]},{v[2]})
 def version_get():
