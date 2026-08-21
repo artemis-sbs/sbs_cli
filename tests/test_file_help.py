@@ -82,3 +82,76 @@ class UnzipExcludeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DerivedArtIsNeverPackagedTests(unittest.TestCase):
+    """zipdir must not put engine-generated art into a library or media pack.
+
+    A .paxmesh BAKES THE FOLDER IT WAS CREATED IN - its texture references are stored as
+    paths, so a mesh baked in one folder looks for its textures relative to that folder
+    wherever it later ends up. Shipping one hands every install a mesh pointing at
+    somebody else's disk: the engine resolves the textures to nothing and dereferences
+    NULL in DX11PAXShaderRedwood::Draw3DMesh, which is a crash to desktop.
+
+    Cosmos-TNG-Mod shipped 45 of them for exactly this reason. Its .gitignore already
+    excluded them; the packer walked the folder and took them anyway, so "not in git"
+    never meant "not in the zip" (2026-08-21).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.ships = os.path.join(self.tmp, "ships")
+        os.makedirs(self.ships)
+
+    def _write(self, path, data=b"x" * 16):
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def _zip_names(self):
+        out = os.path.join(self.tmp, "out.zip")
+        file_help.zipdir(self.tmp, out)
+        with zipfile.ZipFile(out) as z:
+            return {n.replace(chr(92), "/") for n in z.namelist()}
+
+    def test_real_art_is_packaged(self):
+        for f in ("FED_Akira.obj", "FED_Akira_diffuse.png", "FED_Akira_normal.png"):
+            self._write(os.path.join(self.ships, f))
+        names = self._zip_names()
+        for f in ("FED_Akira.obj", "FED_Akira_diffuse.png", "FED_Akira_normal.png"):
+            self.assertIn("ships/" + f, names)
+
+    def test_generated_meshes_are_not_packaged(self):
+        self._write(os.path.join(self.ships, "FED_Akira.obj"))
+        for f in ("FED_Akira.paxmesh", "FED_Akira.pointcube", "FED_Akira.rawbitmap"):
+            self._write(os.path.join(self.ships, f))
+        names = self._zip_names()
+        self.assertIn("ships/FED_Akira.obj", names)
+        for f in ("FED_Akira.paxmesh", "FED_Akira.pointcube", "FED_Akira.rawbitmap"):
+            self.assertNotIn("ships/" + f, names)
+
+    def test_generated_thumbnails_beside_a_mesh_are_not_packaged(self):
+        self._write(os.path.join(self.ships, "FED_Akira.obj"))
+        self._write(os.path.join(self.ships, "FED_Akira1024.png"))
+        self._write(os.path.join(self.ships, "FED_Akira256.png"))
+        names = self._zip_names()
+        self.assertNotIn("ships/FED_Akira1024.png", names)
+        self.assertNotIn("ships/FED_Akira256.png", names)
+
+    def test_a_mission_may_ship_art_whose_name_ends_in_1024(self):
+        # The thumbnails are judged by whether the MESH they came from is next to them.
+        # Dropping every *1024.png on the name alone would take a mission's own artwork
+        # with it, which is a worse failure than the one being prevented.
+        self._write(os.path.join(self.tmp, "backdrop1024.png"))
+        self._write(os.path.join(self.tmp, "hud256.png"))
+        names = self._zip_names()
+        self.assertIn("backdrop1024.png", names)
+        self.assertIn("hud256.png", names)
+
+    def test_it_reports_what_it_dropped(self):
+        # A packer that quietly drops files is indistinguishable from a broken one.
+        self._write(os.path.join(self.ships, "FED_Akira.obj"))
+        self._write(os.path.join(self.ships, "FED_Akira.paxmesh"))
+        out = os.path.join(self.tmp, "out.zip")
+        dropped = file_help.zipdir(self.tmp, out)
+        self.assertEqual([d.replace(chr(92), "/") for d in dropped],
+                         ["ships/FED_Akira.paxmesh"])
