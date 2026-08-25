@@ -507,6 +507,7 @@ that in one install and it took two separate crash hunts to find them.
 sbs art check              # anything half-finished?
 sbs art clear              # throw the half-finished bits away
 sbs art bake               # ...and get the game to build them again
+sbs art bake --undrawn     # also build art nobody has looked at yet
 ```
 
 `check` is safe and reads nothing but file names. A ship listed as *not yet drawn*
@@ -517,6 +518,12 @@ a problem.
 never touched. `bake` then starts the game once per ship to rebuild them, and tells
 you at the end if any ship still won't build — which turns "the server keeps dying"
 into a short list of names.
+
+`--undrawn` builds ahead of time, so the game never has to do it mid-match — every
+build that already happened is one that can't go wrong while people are playing.
+It reaches fewer ships than the count suggests, and says so: most never-drawn art
+is leftovers nothing can put on screen (older versions of a hull, pieces of a
+larger model, backdrops), and the game can only build art it can actually spawn.
 
 > Art that a **mod** carries can't be rebuilt where it sits, and `sbs art` says so
 > rather than trying. The rebuilt file remembers where its textures were, so it has

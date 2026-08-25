@@ -263,10 +263,12 @@ def _bake_one(cosmos, missions, folder, root, key, settle):
 
 @art.command("bake")
 @click.argument("folder", default=None, required=False)
+@click.option("--undrawn", is_flag=True,
+              help="Also bake art that has never been drawn, not just the broken ones.")
 @click.option("--settle", default=90.0, show_default=True, metavar="SECONDS",
               help="How long to give one hull before calling it a timeout.")
 @click.option("--dry-run", is_flag=True, help="Show what would be baked, launch nothing.")
-def art_bake(folder, settle, dry_run):
+def art_bake(folder, undrawn, settle, dry_run):
     """Clear half-baked art and drive the engine to bake it again.
 
     ONE HULL PER ENGINE RUN. The failure being repaired is the engine dying mid-bake, so a
@@ -277,11 +279,20 @@ def art_bake(folder, settle, dry_run):
     Only the install's own `data/graphics` can be baked in place. A mod's art cannot: a
     `.paxmesh` stores its texture paths under `data/graphics/`, so a mesh baked anywhere
     else looks for textures that are not there. Those are reported, not baked.
+
+    --undrawn ALSO BAKES ART NOBODY HAS DRAWN YET, which is how you make sure a crash
+    cannot happen live: every bake that has already happened is a bake that cannot fail
+    during a game. Expect it to reach fewer roots than the count suggests - most undrawn
+    art has no shipData key pointing at it (superseded hulls, mesh sub-parts like
+    `monster2_jaw`, and non-ship assets like `skyPlane`), and nothing can spawn what
+    nothing names. Those are listed as skipped rather than silently passed over, because
+    "17 undrawn" reading as "17 to bake" is exactly the wrong impression.
     """
     cosmos, missions = _cosmos_root()
-    rows = [r for r in _scan(folder) if r[3]["state"] == "half"]
+    wanted = ("half", "unbaked") if undrawn else ("half",)
+    rows = [r for r in _scan(folder) if r[3]["state"] in wanted]
     if not rows:
-        print("  nothing half-baked - nothing to do")
+        print("  nothing to do" if undrawn else "  nothing half-baked - nothing to do")
         return
     keys = _shipdata_keys_by_artroot(cosmos)
     graphics = os.path.join(cosmos, "data", "graphics")
@@ -295,6 +306,7 @@ def art_bake(folder, settle, dry_run):
             skipped.append((root, "no shipData key points at this art root"))
             continue
         if dry_run:
+            baked.append(root)
             print(f"  would bake {root} (key {key})")
             continue
         for f in derived_art_files(d, root):      # clear IMMEDIATELY before its own run
@@ -308,9 +320,13 @@ def art_bake(folder, settle, dry_run):
             for f in derived_art_files(d, root):  # never leave the crashing state behind
                 os.remove(os.path.join(d, f))
         print(f"    {result}")
-    if dry_run:
-        return
-    print(f"\n  baked {len(baked)}, failed {len(failed)}, skipped {len(skipped)}")
+    # The skip list is the POINT of a dry run here: "20 undrawn" reads as "20 to bake",
+    # and 16 of them have no shipData key, so nothing can spawn them. Returning early hid
+    # exactly the number the flag exists to set expectations about.
+    verb = "would bake" if dry_run else "baked"
+    tail = "" if dry_run else f", failed {len(failed)}"
+    print()
+    print(f"  {verb} {len(baked)}{tail}, skipped {len(skipped)}")
     for root, why in failed:
         print(f"  !!  {root}: {why} - this hull cannot be baked on this build")
     for root, why in skipped:
