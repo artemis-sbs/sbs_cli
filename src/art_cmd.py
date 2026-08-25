@@ -191,6 +191,7 @@ _STORY_MAST = """
     remove_role(bake_cam, "__player__")
     sbs.assign_client_to_ship(0, bake_cam.id)
     sim_resume()
+{extras}
     bake_ids = []
     for bake_key in {keys!r}:
         bake_ids.append(npc_spawn(90000, 0, 90000, "Bake", "tsn", bake_key, "behav_station"))
@@ -263,7 +264,59 @@ Gui.client_start_page_class(BakePage)
 '''
 
 
-def _write_bake_mission(missions, keys, dwell):
+def _newest_libs(names, ext):
+    """The NEWEST version of each library in `__lib__`, by extension.
+
+    `__lib__` holds every release side by side - `…ai.v1.1.0.mastlib` sits next to
+    `v1.3.0`, `v1.4.0` and `v1.4.0_dev`, so 117 files are really about 30 addons. Loading
+    the lot means every addon three times over at three different vintages, which is not
+    a mission any engine should be asked to run.
+
+    Version is compared NUMERICALLY, not as a string: `v1.10.0` sorts before `v1.4.0`
+    lexically, and that bug would only appear on the release that finally reached ten.
+    `_dev` builds are excluded - they are a working tree, not a release.
+    """
+    import re
+    pat = re.compile(r"^(?P<id>.+)\.v(?P<ver>\d+(?:\.\d+)*)(?P<tag>_[A-Za-z]+)?\."
+                     + re.escape(ext) + r"$")
+    best = {}
+    for n in names:
+        m = pat.match(n)
+        if not m or m.group("tag"):
+            continue
+        key = m.group("id")
+        ver = tuple(int(x) for x in m.group("ver").split("."))
+        if key not in best or ver > best[key][0]:
+            best[key] = (ver, n)
+    return sorted(v[1] for v in best.values())
+
+
+def _extra_ship_data_calls(cosmos):
+    """`ship_data_add_extra` lines for every mod ship-data file on disk.
+
+    WHY NOT JUST LOAD THE MOD'S ADDON. The first version listed every mastlib in the
+    generated story.json so that a mod's `ship_data_add_extra` would run and its hulls
+    would exist. That pulls in ~42 addons - all of LegendaryMissions' gameplay - to get
+    one registration call, and `__lib__` keeps every past release side by side, so the
+    first cut loaded v1.1.0, v1.3.0 and v1.4.0 of everything at once.
+
+    The mission can just make the call itself. `ship_data_add_extra` takes the stem and
+    an explicit path, so nothing but sbs_utils needs to load - no gameplay, no side
+    effects, no version soup.
+    """
+    out = []
+    media = os.path.join(cosmos, "data", "missions", "__lib__", "media")
+    for root, _dirs, files in os.walk(media):
+        for f in sorted(files):
+            if not f.lower().endswith((".json", ".yaml")) or "ship" not in f.lower():
+                continue
+            stem = os.path.splitext(f)[0]
+            rel = os.path.relpath(root, cosmos).replace(os.sep, "/")
+            out.append(f'    ship_data_add_extra("{stem}", path="{rel}")')
+    return chr(10).join(out)
+
+
+def _write_bake_mission(cosmos, missions, keys, dwell):
     """A throwaway mission that parades `keys` past a camera.
 
     Deliberately NOT VisualTestRange's `visual_art_census` map, which does this job well
@@ -274,20 +327,16 @@ def _write_bake_mission(missions, keys, dwell):
     os.makedirs(folder)
     lib = os.path.join(missions, "__lib__")
     names = os.listdir(lib)
-    sbslib = sorted(f for f in names
-                    if f.startswith("artemis-sbs.sbs_utils.") and f.endswith(".sbslib")
-                    and "_dev" not in f)
-    # LOAD EVERY MASTLIB AND MEDIA PACK, not just sbs_utils. A mod's hulls only exist
-    # once its addon has run `ship_data_add_extra`, so a mission that loads nothing can
-    # spawn nothing a mod declares - and mod art is most of what needs baking.
-    mastlib = sorted(f for f in names if f.endswith(".mastlib") and "_dev" not in f)
-    media = sorted(f for f in names if f.endswith(".zip"))
-    story = {"sbslib": [sbslib[-1]] if sbslib else [],
-             "mastlib": mastlib, "shared_media": media}
+    sbslib = [f for f in _newest_libs(names, "sbslib")
+              if f.startswith("artemis-sbs.sbs_utils.")]
+    # ONLY sbs_utils. The mod ship-data files are registered by the mission itself, so
+    # no addon has to load - see _extra_ship_data_calls.
+    story = {"sbslib": sbslib}
     with open(os.path.join(folder, "story.json"), "w", encoding="utf-8") as f:
         json.dump(story, f, indent=4)
     with open(os.path.join(folder, "story.mast"), "w", encoding="utf-8") as f:
-        f.write(_STORY_MAST.format(keys=list(keys), dwell=dwell))
+        f.write(_STORY_MAST.format(keys=list(keys), dwell=dwell,
+                                     extras=_extra_ship_data_calls(cosmos)))
     with open(os.path.join(folder, "script.py"), "w", encoding="utf-8") as f:
         f.write(_SCRIPT_PY)
     return folder
@@ -304,7 +353,7 @@ def _bake_batch(cosmos, missions, targets, settle, dwell):
     the caller retries those.
     """
     keys = [k for _d, _r, k in targets]
-    _write_bake_mission(missions, keys, dwell)
+    _write_bake_mission(cosmos, missions, keys, dwell)
     exe = os.path.join(cosmos, EXE)
     if not os.path.isfile(exe):
         raise click.ClickException(f"engine not found: {exe}")
