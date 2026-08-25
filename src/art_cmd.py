@@ -2,8 +2,9 @@
 
 A hull's `.paxmesh` and its `<root>1024.png` / `<root>256.png` are not authored. The engine
 generates them the first time it draws that hull, beside the source `.obj`. They are never
-packaged (see `file_help.is_derived_art`) because a baked mesh hardcodes its texture paths
-under `data/graphics/`, so shipping one points another install at somebody else's disk.
+packaged (see `file_help.is_derived_art`) - they are per-install output, rebuilt wherever
+the art actually lives, so carrying them in a zip only ships one machine's copy of
+something every machine makes for itself.
 
 WHY THIS COMMAND EXISTS. If the engine dies partway through a bake it leaves the mesh
 without its sprites - and every later draw retries, dies at the same point, and leaves the
@@ -17,6 +18,7 @@ engine can. `bake` clears what is broken and then DRIVES the engine, one hull pe
 reads the exit code - because the thing being repaired is the engine crashing mid-bake, so
 a batch that dies takes the whole batch with it.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -162,11 +164,91 @@ def art_clear(folder, clear_all, dry_run):
 # NOTHING HERE BAKES ANYTHING. Only the engine does, on first draw. This clears what is
 # broken and then drives the engine at it, which is the only lever available.
 
-_STORY_MAST = '''@map/bake "Bake"
-    npc_spawn(0, 0, 3000, "Bake", "tsn", "{key}", "behav_station")
-    await delay_sim(600)
+# SPAWNING IS NOT DRAWING, and that is the whole difficulty of baking from a script. The
+# engine bakes a hull's derived art when it RENDERS it - `MeshSilhouette` runs off the
+# draw path - so a mission that spawns an object and waits bakes nothing at all. The first
+# version of this did exactly that and would have reported `timeout` for every hull.
+#
+# So: an invisible detached camera for the server console to ride (the Game Master /
+# Admiral pattern), a `3dview` widget so there IS a render, and the hull parked in front
+# of it.
+# SPAWNING IS NOT DRAWING, and that is the whole difficulty of baking from a script. The
+# engine bakes a hull's derived art when it RENDERS it - `MeshSilhouette` runs off the
+# draw path - so a mission that spawns objects and waits bakes nothing. The first version
+# of this did exactly that and would have reported `timeout` for every hull.
+#
+# THE PARADE. One invisible detached camera at the origin (the Game Master / Admiral
+# pattern) with a `3dview` so there IS a render, and every hull is MOVED in front of it in
+# turn rather than the camera being aimed at each. Moving the subject to a known-good spot
+# is far easier to get right than pointing a camera, and it means every hull is drawn at
+# the same distance in the same frame position.
+#
+# The sim comes up PAUSED, so `sim_resume()` is load-bearing: without it the frame never
+# advances, nothing renders, and a paused bake looks exactly like a hull that cannot bake.
+_STORY_MAST = """
+@map/bake "Bake"
+    bake_cam = to_object(player_spawn(0, 0, 0, "BakeCam", "#,bake_cam", "invisible"))
+    remove_role(bake_cam, "__player__")
+    sbs.assign_client_to_ship(0, bake_cam.id)
+    sim_resume()
+    bake_ids = []
+    for bake_key in {keys!r}:
+        bake_ids.append(npc_spawn(90000, 0, 90000, "Bake", "tsn", bake_key, "behav_station"))
+    jump bake_watch
+
+== bake_watch ==
+    gui_console("bake_view")
+    sub_task_schedule(bake_parade)
+    await gui()
+
+== bake_parade ==
+    for bake_id in bake_ids:
+        bake_obj = to_object(bake_id)
+        continue if bake_obj is None
+        bake_obj.pos = Vec3(0, 0, 1200)
+        await delay_sim({dwell})
+        bake_obj.pos = Vec3(90000, 0, 90000)
     ->END
-'''
+
+@console/bake_view !0 ^1 "Bake"
+    gui_layout_widget("3dview")
+    await gui()
+
+"""
+
+def _shipdata_keys_by_artroot(cosmos):
+    """artfileroot basename -> shipData key, so a folder name can be spawned.
+
+    Reads the files as TEXT rather than parsing them: they are large, the two fields
+    wanted are flat, and a parse failure would take out a command whose whole job is
+    repairing a broken install.
+
+    A MOD DECLARES ITS HULLS IN ITS OWN FILE, not in shipData.yaml - the media pack
+    carries something like `tng_ships.json` and the addon points the engine at it with
+    `ship_data_add_extra`. Without those a mod hull has no key here and `bake` reports
+    "no shipData key" for art that bakes perfectly well.
+    """
+    import re
+    sources = [os.path.join(cosmos, "data", "shipData.yaml")]
+    media = os.path.join(cosmos, "data", "missions", "__lib__", "media")
+    for root, _dirs, files in os.walk(media):
+        for f in files:
+            if f.lower().endswith((".json", ".yaml")) and "ship" in f.lower():
+                sources.append(os.path.join(root, f))
+    out = {}
+    for path in sources:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                txt = f.read()
+        except OSError:
+            continue
+        pat = r'"key"\s*:\s*"([^"]+)"(.*?)(?="key"\s*:|\Z)'
+        for key, body in re.findall(pat, txt, re.S):
+            m = re.search(r'"artfileroot"\s*:\s*"([^"]*)"', body)
+            if m and m.group(1):
+                out.setdefault(os.path.basename(m.group(1)).lower(), key)
+    return out
+
 
 _SCRIPT_PY = '''import sbslibs
 from sbs_utils.handlerhooks import *
@@ -181,76 +263,74 @@ Gui.client_start_page_class(BakePage)
 '''
 
 
-def _shipdata_keys_by_artroot(cosmos):
-    """artfileroot basename -> shipData key, so a folder name can be spawned.
+def _write_bake_mission(missions, keys, dwell):
+    """A throwaway mission that parades `keys` past a camera.
 
-    Reads shipData.yaml as TEXT rather than parsing it as YAML: the file is large, the two
-    fields wanted are flat, and a parse failure here would take out a command whose whole
-    job is repairing a broken install.
-    """
-    import re
-    path = os.path.join(cosmos, "data", "shipData.yaml")
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            txt = f.read()
-    except OSError:
-        return {}
-    out = {}
-    for key, body in re.findall(r'"key"\s*:\s*"([^"]+)"(.*?)(?="key"\s*:|\Z)', txt, re.S):
-        m = re.search(r'"artfileroot"\s*:\s*"([^"]*)"', body)
-        if m and m.group(1):
-            out.setdefault(os.path.basename(m.group(1)).lower(), key)
-    return out
-
-
-def _write_bake_mission(missions, key):
-    """A throwaway mission that spawns exactly one hull.
-
-    Deliberately NOT VisualTestRange's `visual_art_census` map, which does this job well but
-    lives in Cosmos-dev and is absent from a normal install. Generating it keeps `bake`
-    self-contained, and one hull per mission is what makes a crash cost one hull.
+    Deliberately NOT VisualTestRange's `visual_art_census` map, which does this job well
+    but lives in Cosmos-dev and is absent from a normal install.
     """
     folder = os.path.join(missions, "_sbs_art_bake")
     shutil.rmtree(folder, ignore_errors=True)
     os.makedirs(folder)
     lib = os.path.join(missions, "__lib__")
-    sbslib = sorted(f for f in os.listdir(lib)
+    names = os.listdir(lib)
+    sbslib = sorted(f for f in names
                     if f.startswith("artemis-sbs.sbs_utils.") and f.endswith(".sbslib")
                     and "_dev" not in f)
+    # LOAD EVERY MASTLIB AND MEDIA PACK, not just sbs_utils. A mod's hulls only exist
+    # once its addon has run `ship_data_add_extra`, so a mission that loads nothing can
+    # spawn nothing a mod declares - and mod art is most of what needs baking.
+    mastlib = sorted(f for f in names if f.endswith(".mastlib") and "_dev" not in f)
+    media = sorted(f for f in names if f.endswith(".zip"))
+    story = {"sbslib": [sbslib[-1]] if sbslib else [],
+             "mastlib": mastlib, "shared_media": media}
     with open(os.path.join(folder, "story.json"), "w", encoding="utf-8") as f:
-        f.write('{\n    "sbslib": ["%s"]\n}\n' % (sbslib[-1] if sbslib else ""))
+        json.dump(story, f, indent=4)
     with open(os.path.join(folder, "story.mast"), "w", encoding="utf-8") as f:
-        f.write(_STORY_MAST.format(key=key))
+        f.write(_STORY_MAST.format(keys=list(keys), dwell=dwell))
     with open(os.path.join(folder, "script.py"), "w", encoding="utf-8") as f:
         f.write(_SCRIPT_PY)
     return folder
 
 
-def _bake_one(cosmos, missions, folder, root, key, settle):
-    """Draw one hull in a real engine until its derived files appear.
+def _bake_batch(cosmos, missions, targets, settle, dwell):
+    """Bake a whole batch in ONE engine run. Returns {root: "baked"|"crashed"|"timeout"}.
 
-    Returns "baked" | "crashed" | "timeout". The EXIT CODE is what says the engine died -
-    inferring death from the files not appearing cannot tell a crash from a slow bake, and
-    this command exists because the engine crashes here.
+    BATCHED, not one run per hull. The original did one engine start each, to stop a crash
+    costing the batch - but the crash that motivated it turned out to be a STALE half-baked
+    mesh, and a clean bake works. So paying an engine start per hull bought very little and
+    cost minutes. What actually protects the run is that progress is durable: every hull
+    that finished has its files on disk, so a crash mid-parade loses only the remainder, and
+    the caller retries those.
     """
-    _write_bake_mission(missions, key)
+    keys = [k for _d, _r, k in targets]
+    _write_bake_mission(missions, keys, dwell)
     exe = os.path.join(cosmos, EXE)
     if not os.path.isfile(exe):
         raise click.ClickException(f"engine not found: {exe}")
-    # ABSOLUTE PATH, not a bare name: CreateProcess only searches the working directory when
-    # `NoDefaultCurrentDirectoryInExePath` is unset, and MSYS2/Git-Bash exports it.
+    # ABSOLUTE PATH, not a bare name: CreateProcess only searches the working directory
+    # when `NoDefaultCurrentDirectoryInExePath` is unset, and MSYS2/Git-Bash exports it.
     proc = subprocess.Popen([exe, "autostartserver", "defaultmission=_sbs_art_bake"],
                             cwd=cosmos)
+    done = {}
     try:
         import time
-        deadline = time.time() + settle
+        deadline = time.time() + settle + dwell * len(targets)
         while time.time() < deadline:
+            for d, root, _k in targets:
+                if root in done:
+                    continue
+                if derived_art_status(d).get(root, {}).get("state") == "complete":
+                    done[root] = "baked"
+            if len(done) == len(targets):
+                break
             if proc.poll() is not None:
-                return "crashed"
-            if derived_art_status(folder).get(root, {}).get("state") == "complete":
-                return "baked"
+                break                       # died - whatever finished still counts
             time.sleep(1.0)
-        return "timeout"
+        crashed = proc.poll() is not None
+        for _d, root, _k in targets:
+            done.setdefault(root, "crashed" if crashed else "timeout")
+        return done
     finally:
         if proc.poll() is None:
             proc.terminate()
@@ -267,18 +347,25 @@ def _bake_one(cosmos, missions, folder, root, key, settle):
               help="Also bake art that has never been drawn, not just the broken ones.")
 @click.option("--settle", default=90.0, show_default=True, metavar="SECONDS",
               help="How long to give one hull before calling it a timeout.")
+@click.option("--dwell", default=3.0, show_default=True, metavar="SECONDS",
+              help="Sim-seconds each hull is held in front of the camera.")
 @click.option("--dry-run", is_flag=True, help="Show what would be baked, launch nothing.")
-def art_bake(folder, undrawn, settle, dry_run):
+def art_bake(folder, undrawn, settle, dwell, dry_run):
     """Clear half-baked art and drive the engine to bake it again.
 
-    ONE HULL PER ENGINE RUN. The failure being repaired is the engine dying mid-bake, so a
-    batch that dies takes the batch with it; this way a crash costs one hull and the run
-    continues. A hull that crashes has its partial output deleted before moving on, so the
-    install is never left in the state that crashes every client that draws it.
+    BATCHED: every hull is paraded past one camera in a SINGLE engine run. It used to be
+    one run per hull, to stop a crash costing the batch - but the crash that motivated
+    that turned out to be a stale half-baked mesh, and a clean bake works. Progress is
+    durable anyway: each hull that finishes has its files on disk, so a crash mid-parade
+    loses only the remainder, and those are retried one at a time to find the bad one.
 
-    Only the install's own `data/graphics` can be baked in place. A mod's art cannot: a
-    `.paxmesh` stores its texture paths under `data/graphics/`, so a mesh baked anywhere
-    else looks for textures that are not there. Those are reported, not baked.
+    MOD ART BAKES WHERE IT LIVES, like everything else. This used to refuse to touch it,
+    on the strength of a 1.3.5 writeup saying a `.paxmesh` stores its texture paths under
+    `data/graphics/` so a mesh baked elsewhere cannot find them - and telling people to
+    bake in `data/graphics` and copy back. That is superseded: `artfileroot` is the whole
+    path as of 1.3.6, `artfilepath` is gone, and the Cosmos-TNG-Mod media pack has all 46
+    of its hulls baked in place, complete with sprites. The refusal blocked art that bakes
+    perfectly well.
 
     --undrawn ALSO BAKES ART NOBODY HAS DRAWN YET, which is how you make sure a crash
     cannot happen live: every bake that has already happened is a bake that cannot fail
@@ -295,13 +382,9 @@ def art_bake(folder, undrawn, settle, dry_run):
         print("  nothing to do" if undrawn else "  nothing half-baked - nothing to do")
         return
     keys = _shipdata_keys_by_artroot(cosmos)
-    graphics = os.path.join(cosmos, "data", "graphics")
-    baked, failed, skipped = [], [], []
-    for label, d, root, _info in rows:
+    baked, failed, skipped, todo = [], [], [], []
+    for _label, d, root, _info in rows:
         key = keys.get(root.lower())
-        if not os.path.abspath(d).startswith(os.path.abspath(graphics)):
-            skipped.append((root, "mod art - bake it in data/graphics and copy back"))
-            continue
         if not key:
             skipped.append((root, "no shipData key points at this art root"))
             continue
@@ -309,20 +392,36 @@ def art_bake(folder, undrawn, settle, dry_run):
             baked.append(root)
             print(f"  would bake {root} (key {key})")
             continue
-        for f in derived_art_files(d, root):      # clear IMMEDIATELY before its own run
-            os.remove(os.path.join(d, f))
-        print(f"  baking {root} (key {key}) ...", flush=True)
-        result = _bake_one(cosmos, missions, d, root, key, settle)
-        if result == "baked":
-            baked.append(root)
-        else:
-            failed.append((root, result))
-            for f in derived_art_files(d, root):  # never leave the crashing state behind
+        todo.append((d, root, key))
+
+    if todo:
+        # Clear the partial files first: a stale mesh without its sprites is the state
+        # that crashes the bake, so going in clean is the point of the exercise.
+        for d, root, _key in todo:
+            for f in derived_art_files(d, root):
                 os.remove(os.path.join(d, f))
-        print(f"    {result}")
-    # The skip list is the POINT of a dry run here: "20 undrawn" reads as "20 to bake",
-    # and 16 of them have no shipData key, so nothing can spawn them. Returning early hid
-    # exactly the number the flag exists to set expectations about.
+        print(f"  baking {len(todo)} hull(s) in one run ...", flush=True)
+        done = _bake_batch(cosmos, missions, todo, settle, dwell)
+        left = [t for t in todo if done.get(t[1]) != "baked"]
+        baked += [t[1] for t in todo if done.get(t[1]) == "baked"]
+        # RETRY THE REMAINDER ONE AT A TIME. A batch that died says nothing about WHICH
+        # hull killed it; alone, each one either bakes or names itself.
+        if left:
+            print(f"  {len(left)} did not finish - retrying individually", flush=True)
+        for d, root, key in left:
+            for f in derived_art_files(d, root):
+                os.remove(os.path.join(d, f))
+            print(f"    {root} ...", end="", flush=True)
+            one = _bake_batch(cosmos, missions, [(d, root, key)], settle, dwell)
+            state = one.get(root, "timeout")
+            print(f" {state}")
+            if state == "baked":
+                baked.append(root)
+            else:
+                failed.append((root, state))
+                for f in derived_art_files(d, root):   # never leave the crashing state
+                    os.remove(os.path.join(d, f))
+
     verb = "would bake" if dry_run else "baked"
     tail = "" if dry_run else f", failed {len(failed)}"
     print()
