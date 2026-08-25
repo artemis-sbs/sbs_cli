@@ -185,35 +185,74 @@ def art_clear(folder, clear_all, dry_run):
 #
 # The sim comes up PAUSED, so `sim_resume()` is load-bearing: without it the frame never
 # advances, nothing renders, and a paused bake looks exactly like a hull that cannot bake.
+# A SCRIPTED CAMERA NEEDS FOUR THINGS, NOT ONE. `gui_layout_widget` only PLACES a view the
+# console has already declared - it does not declare it - so a console that calls only
+# that has no viewport at all and renders BLANK. Copied from VisualTestRange's
+# `visual_stage`, which exists to prove what the renderer draws:
+#
+#   1. gui_activate_console("gamemaster_sci")  - the console has a type
+#   2. gui_update_widget_list("3dview")        - it declares a 3dview
+#   3. gui_layout_widget("3dview")             - the 3dview is placed in the layout
+#   4. assign a cambot, then cinematic control - the lens
+#
+# The look-at anchor is INVISIBLE art: the camera has to aim at something that stays
+# put, and a visible one would be drawn in front of every hull it is framing.
+#
+# The WAITS in the camera task are load-bearing too: LM's Game Master leaves a full
+# second between spawning its cambot and assigning a client to it, and only sets the view
+# up after that. Doing all of it in one console build is a camera that works sometimes.
+#
+# `bake_ids` and `bake_subject` are SHARED because the camera and the parade run in their
+# own tasks - `task_schedule` gives the child its own scope, so a plain assignment in the
+# map body is invisible to them.
+#
+# And the sim comes up PAUSED - without `sim_resume()` the frame never advances, nothing
+# renders, and the bake (which runs off the DRAW path) never happens.
 _STORY_MAST = """
 @map/bake "Bake"
-    bake_cam = to_object(player_spawn(0, 0, 0, "BakeCam", "#,bake_cam", "invisible"))
-    remove_role(bake_cam, "__player__")
-    sbs.assign_client_to_ship(0, bake_cam.id)
     sim_resume()
 {extras}
-    bake_ids = []
+    shared bake_ids = []
     for bake_key in {keys!r}:
         bake_ids.append(npc_spawn(90000, 0, 90000, "Bake", "tsn", bake_key, "behav_station"))
+    shared bake_subject = npc_spawn(0, 0, 0, "Stage", "tsn", "invisible", "behav_station")
     jump bake_watch
 
 == bake_watch ==
     gui_console("bake_view")
-    sub_task_schedule(bake_parade)
     await gui()
+
+@console/bake_view !0 ^1 "Bake"
+    gui_activate_console("gamemaster_sci")
+    gui_update_widget_list("3dview")
+    gui_layout_widget("3dview")
+    task_schedule(bake_camera, {{"cam_client": client_id}})
+    await gui()
+
+== bake_camera ==
+metadata: ``` yaml
+cam_client: 0
+```
+    bake_cam = to_object(player_spawn(0, 900, -1800, "BakeCam", "#,bake_cam", "invisible"))
+    ->END if bake_cam is None
+    remove_role(bake_cam, "__player__")
+    await delay_sim(1)
+    sbs.assign_client_to_ship(cam_client, bake_cam.id)
+    await delay_sim(1)
+    gui_cinematic_full_control(cam_client, bake_cam.id, None, bake_subject.id, None)
+    # task_schedule, NOT sub_task_schedule: a sub-task shares its parent's lifecycle and
+    # this parent ->ENDs on the very next line, which would kill the parade instantly.
+    task_schedule(bake_parade)
+    ->END
 
 == bake_parade ==
     for bake_id in bake_ids:
         bake_obj = to_object(bake_id)
         continue if bake_obj is None
-        bake_obj.pos = Vec3(0, 0, 1200)
+        bake_obj.pos = Vec3(0, 0, 0)
         await delay_sim({dwell})
         bake_obj.pos = Vec3(90000, 0, 90000)
     ->END
-
-@console/bake_view !0 ^1 "Bake"
-    gui_layout_widget("3dview")
-    await gui()
 
 """
 
