@@ -127,6 +127,15 @@ def run(consoles, extra, mission, ip, no_auto, dry_run, settle):
     data_path = os.path.dirname(missions)
     cosmos_path = os.path.dirname(data_path)
     os.chdir(cosmos_path)
+    # LAUNCH BY ABSOLUTE PATH, not by bare name. The chdir above is still needed - the
+    # engine resolves its own data relative to the working directory - but it is NOT enough
+    # to FIND the exe. CreateProcess only searches the current directory when
+    # `NoDefaultCurrentDirectoryInExePath` is unset, and MSYS2/Git-Bash exports it, so a bare
+    # "Artemis3-x64-release.exe" died with WinError 2 for anyone launching from Git Bash (or
+    # any terminal descended from one) while working perfectly from cmd.
+    exe = os.path.join(cosmos_path, "Artemis3-x64-release.exe")
+    if not os.path.isfile(exe):
+        raise click.ClickException(f"engine not found: {exe}")
     #
     #
     #
@@ -206,7 +215,7 @@ def run(consoles, extra, mission, ip, no_auto, dry_run, settle):
         c = 0
         for w in windows:
             is_server = w.strip().lower() == "server"
-            args = ["Artemis3-x64-release.exe"]
+            args = [exe]
             if not no_auto:
                 # Clickless. The server is launched first (it heads the list), so by the time a
                 # client tries to connect the server window has already been waited for below.
