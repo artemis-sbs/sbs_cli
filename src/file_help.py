@@ -79,6 +79,110 @@ def is_derived_art(root, file):
     return False
 
 
+# WHAT A COMPLETE BAKE LOOKS LIKE, and this is MEASURED off the stock corpus rather than
+# assumed - 201 art roots in data/graphics/ships produce exactly three combinations:
+#
+#   paxmesh + 1024 + 256, no pointcube   120 roots   healthy
+#   paxmesh + pointcube + 1024 + 256      64 roots   healthy
+#   nothing at all                        17 roots   never drawn
+#
+# So the three that always travel together are `.paxmesh`, `<root>1024.png` and
+# `<root>256.png`. `.pointcube` is OPTIONAL - 120 healthy roots (asteroids, containers,
+# mines, the primitives) have none, and requiring it flags every one of them. `.rawbitmap`
+# has never been observed being generated at all. Both stay in _DERIVED_EXT because they
+# are unmistakably engine output when they DO turn up and must not be packaged; they just
+# are not evidence of a finished bake.
+#
+# See VisualTestRange/ENGINE_BUG_derived_art_generation.md for what the engine writes and
+# where. Note that doc records `.pointcube` as generated beside the art, which is true but
+# not universal - the corpus above is the authority on what to REQUIRE.
+_BAKE_REQUIRED = (".paxmesh", "1024.png", "256.png")
+_BAKE_OPTIONAL = (".pointcube", ".rawbitmap")
+
+# THE SPRITES ARE A SHIP THING, and this is measured too. Walking a stock `data/graphics`:
+#
+#   graphics/ships/   184 paxmesh+sprites   0 paxmesh-without-sprites   17 undrawn
+#   graphics/ (root)    0 paxmesh+sprites   9 paxmesh-without-sprites    3 undrawn
+#
+# Not one counterexample either way. The flat `<root>1024.png` is what a hull is drawn AS
+# when something needs it face-on - the called-shot panel, the interior mask - and the
+# effect meshes at the graphics root (typhon parts, drones, AHBall, oldClassicMonsterPart)
+# are only ever 3D, so the engine never makes them one. Requiring sprites everywhere
+# reports those 9 as broken on a clean install, which is how a check earns its way into
+# being ignored.
+_SPRITE_FOLDERS = ("ships",)
+
+# The source meshes a bake is derived FROM. A root is only interesting if one of these is
+# sitting there - otherwise a stray `foo256.png` would invent an art root that never was.
+_SOURCE_EXT = (".obj",)
+
+
+def derived_art_status(folder):
+    """Per art root in `folder`, what the engine has and has not baked.
+
+    THE STATE THAT MATTERS IS "half". A root with the complete set renders. A root with
+    NOTHING derived is simply art nobody has drawn yet, which is normal and must not be
+    reported as broken. A root with SOME of the set is the one that crashes the client, on
+    every draw, forever: the engine retries the bake, dies at the same point, and leaves the
+    same partial output behind. Three hulls were in that state and cost two separate crash
+    investigations before anyone looked at the folder.
+
+    Returns:
+        dict: root name -> {"present": [...], "absent": [...], "state": one of
+            "complete" | "unbaked" | "half"}. Roots with no source mesh are skipped, and
+            the optional members are reported but never make a root "half".
+    """
+    out = {}
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return out
+    have = {n.lower() for n in names}
+    roots = sorted({n[: -len(ext)] for n in names for ext in _SOURCE_EXT
+                    if n.lower().endswith(ext)})
+    wants_sprites = os.path.basename(os.path.normpath(folder)).lower() in _SPRITE_FOLDERS
+    required = _BAKE_REQUIRED if wants_sprites else (".paxmesh",)
+    for root in roots:
+        low = root.lower()
+        present = [m for m in required if low + m in have]
+        absent = [m for m in required if low + m not in have]
+        extra = [m for m in _BAKE_OPTIONAL if low + m in have]
+        if not absent:
+            state = "complete"
+        elif not present:
+            state = "unbaked"
+        else:
+            state = "half"
+        out[root] = {"present": present + extra, "absent": absent, "state": state}
+    return out
+
+
+def derived_art_files(folder, root):
+    """Every derived file belonging to `root`, for deleting it.
+
+    Deliberately wider than what :func:`derived_art_status` REQUIRES: clearing a half-baked
+    root has to take `.rawbitmap` with it too, or a re-bake starts from a folder that is
+    still partly stale.
+    """
+    out = []
+    low = root.lower()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return out
+    for n in names:
+        nl = n.lower()
+        if not nl.startswith(low):
+            continue
+        if nl.endswith(_DERIVED_EXT) and nl[: -len(os.path.splitext(nl)[1])] == low:
+            out.append(n)
+            continue
+        for png in _DERIVED_PNG:
+            if nl.endswith(png) and nl[: -len(png)] == low:
+                out.append(n)
+    return sorted(out)
+
+
 def zipdir(folder_path, zip_file_name, first_folder=None):
 
     skips =  {"__pycache__"}
