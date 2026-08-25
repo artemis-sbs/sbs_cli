@@ -144,6 +144,51 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("sbs lint", res.output)
         self.assertIn("sbs compile", res.output)
 
+    def test_the_summary_counts_every_row(self):
+        """A full report is long enough that one flagged row scrolls past unnoticed."""
+        rep = doctor_cmd.Report()
+        rep.add("A", "one", doctor_cmd.OK)
+        rep.add("A", "two", doctor_cmd.ABSENT)
+        rep.add("B", "three", doctor_cmd.PROBLEM, "bad", "fix it")
+        self.assertEqual({"checks": 3, "ok": 1, "absent": 1, "problems": 1}, rep.tally)
+
+    def test_optional_absent_is_not_counted_as_a_problem(self):
+        """`--` means an optional thing is not installed. Folding it into one "not ok"
+        number would make a healthy machine look broken."""
+        rep = doctor_cmd.Report()
+        rep.add("Tools", "weasyprint", doctor_cmd.ABSENT, "not installed")
+        self.assertEqual(0, rep.tally["problems"])
+
+    def test_the_summary_names_the_sections_to_look_in(self):
+        rep = doctor_cmd.Report()
+        rep.add("Alpha", "x", doctor_cmd.PROBLEM, "bad", "fix")
+        rep.add("Alpha", "y", doctor_cmd.PROBLEM, "bad", "fix")
+        rep.add("Beta", "z", doctor_cmd.PROBLEM, "bad", "fix")
+        rep.add("Gamma", "w", doctor_cmd.OK)
+        import io as _io, contextlib
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rep.echo_summary()
+        out = buf.getvalue()
+        self.assertIn("3 problems", out)
+        self.assertIn("to fix: Alpha, Beta", out)
+        self.assertNotIn("Gamma", out, "a section with nothing wrong was listed to fix")
+        self.assertEqual(1, out.count("Alpha"), "a section was named once per problem row")
+
+    def test_a_clean_report_says_zero_problems_without_the_marker(self):
+        """The healthy-machine assertion elsewhere is `assertNotIn("!!")`, so the summary
+        must not spell the marker when there is nothing wrong."""
+        rep = doctor_cmd.Report()
+        rep.add("A", "one", doctor_cmd.OK)
+        import io as _io, contextlib
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rep.echo_summary()
+        out = buf.getvalue()
+        self.assertIn("0 problems", out)
+        self.assertNotIn("!!", out)
+        self.assertNotIn("to fix", out)
+
     def test_json_output_is_a_flat_record_list(self):
         _mission(self.missions)
         res = self.run_doctor("--json")

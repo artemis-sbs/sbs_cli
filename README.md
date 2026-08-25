@@ -446,6 +446,16 @@ Three markers: `ok` is fine, `--` means something optional isn't installed (not 
 problem), and `!!` is a real problem — always followed by the command that fixes
 it.
 
+It finishes with a count, so you don't have to read every line to see whether
+anything needs doing:
+
+```
+17 checks: 14 ok, 3 optional absent, 0 problems
+```
+
+If there are problems it also tells you which parts of the report to look in — the
+fix for each one is already printed next to it.
+
 It always exits successfully, because it's a report and not a test. Use `--strict`
 if you want it to fail a build, or `--json` to feed it to something else.
 

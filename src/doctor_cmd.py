@@ -40,6 +40,16 @@ class Report:
     def problems(self):
         return [r for r in self.rows if r["status"] == PROBLEM]
 
+    @property
+    def tally(self):
+        """How many checks ran, and how they landed."""
+        return {
+            "checks": len(self.rows),
+            "ok": sum(1 for r in self.rows if r["status"] == OK),
+            "absent": sum(1 for r in self.rows if r["status"] == ABSENT),
+            "problems": len(self.problems),
+        }
+
     def echo(self):
         section = None
         for r in self.rows:
@@ -49,10 +59,39 @@ class Report:
             print(f"  {r['status']}  {r['name']:<11} {r['detail']}".rstrip())
             if r["remedy"]:
                 print(f"      {r['remedy']}")
+        self.echo_summary()
+
+    def echo_summary(self):
+        """One line of arithmetic, and where to look if it is not all `ok`.
+
+        A full report is long enough that a single flagged row scrolls past unnoticed - the
+        half-baked-art check exists because exactly that had been happening to a failing
+        unit test for weeks. The tally makes "is anything wrong" answerable without reading
+        every line, and naming the SECTIONS is the part that saves time: the remedies are
+        printed inline beside each row already, so repeating them here would be noise.
+
+        `--` is counted APART from problems on purpose. It means an optional thing is not
+        installed, which is not a fault, and folding it into one "not ok" number would make
+        a healthy machine look broken.
+        """
+        t = self.tally
+        bits = f"{t['checks']} checks: {t['ok']} ok"
+        if t["absent"]:
+            bits += f", {t['absent']} optional absent"
+        bits += f", {t['problems']} problem" + ("" if t["problems"] == 1 else "s")
+        print()
+        print(bits)
+        if t["problems"]:
+            where = []
+            for r in self.problems:
+                if r["section"] not in where:
+                    where.append(r["section"])
+            print("to fix: " + ", ".join(where) + " (remedies are beside each row above)")
 
     def as_json(self):
         from version import VERSION
-        return json.dumps({"sbs": VERSION, "checks": self.rows}, indent=2)
+        return json.dumps({"sbs": VERSION, "summary": self.tally,
+                           "checks": self.rows}, indent=2)
 
 
 def _missions_dir():
