@@ -250,6 +250,7 @@ def _check_mission(rep, mission):
     _check_packaging(rep, name, mission)
 
     _check_shipdata(rep, name, mission)
+    _check_derived_art(rep, name, mission, "mission art")
 
 
 def _check_shipdata(rep, name, mission):
@@ -342,6 +343,73 @@ def _check_packaging(rep, name, mission):
                 message)
 
 
+def _art_dirs(base):
+    """Folders under `base` that hold source meshes. Cheap walk, no content read."""
+    out = []
+    for root, subdirs, files in os.walk(base):
+        if "__pycache__" in root:
+            continue
+        if any(f.lower().endswith(".obj") for f in files):
+            out.append(root)
+    return out
+
+
+def _check_derived_art(rep, section, base, label):
+    """Half-baked art: a `.paxmesh` whose sprites were never written.
+
+    THE FAILURE THIS CATCHES IS A CRASH, not a cosmetic gap. The engine bakes a hull's
+    derived art on first draw. If it dies partway it leaves the mesh without its sprites,
+    and every later draw retries, dies at the same point, and leaves the same wreckage - so
+    one bad hull crashes that client forever. Three hulls in one install cost two separate
+    crash investigations before anyone thought to look at the folder.
+
+    Directory listings only, which is what keeps this inside doctor's scope: it never opens
+    the art, it counts names beside each other.
+    """
+    from file_help import derived_art_status
+    half, unbaked, complete = [], 0, 0
+    for folder in _art_dirs(base):
+        for root, info in derived_art_status(folder).items():
+            if info["state"] == "half":
+                half.append((os.path.relpath(folder, base), root, info["absent"]))
+            elif info["state"] == "unbaked":
+                unbaked += 1
+            else:
+                complete += 1
+    if half:
+        shown = ", ".join(f"{r} (no {'/'.join(a)})" for _, r, a in half[:4])
+        more = f" +{len(half) - 4} more" if len(half) > 4 else ""
+        rep.add(section, "art", PROBLEM,
+                f"{len(half)} half-baked in {label}: {shown}{more}",
+                "delete the derived files and let the engine bake clean - "
+                "`sbs art clear` (a mesh without its sprites crashes the client on every draw)")
+    else:
+        rep.add(section, "art", OK,
+                f"{complete} baked, {unbaked} not yet drawn, 0 half-baked in {label}")
+
+
+def _check_stray_sprites(rep, cosmos_root):
+    """`<root>256.png` written to the EXE ROOT instead of beside the art.
+
+    A documented engine bug (VisualTestRange/ENGINE_BUG_derived_art_generation.md): the 256
+    bitmap lands in the working directory. Two consequences - the art folder never becomes
+    complete on its own, so every load regenerates and drops another copy; and it made the
+    file look ungeneratable while investigating, because looking beside the art showed
+    nothing. Not seen on 1.3.6, so this may already be fixed; it costs one listing to notice
+    if it comes back.
+    """
+    try:
+        stray = sorted(f for f in os.listdir(cosmos_root)
+                       if f.lower().endswith(("256.png", "1024.png")))
+    except OSError:
+        return
+    if stray:
+        rep.add("install", "stray art", PROBLEM,
+                f"{len(stray)} sprite(s) at the exe root: " + ", ".join(stray[:4]),
+                "the engine wrote these to the working directory instead of beside the "
+                "art; move them next to their mesh, or the folder never completes")
+
+
 @cli.command()
 @click.argument("folder", default=None, required=False)
 @click.option("--env", "env_only", is_flag=True, help="Environment only.")
@@ -363,6 +431,11 @@ def doctor(folder, env_only, as_json, strict):
     _check_layout(rep)
     _check_tools(rep)
     _check_sidecar(rep)
+    _cosmos = os.path.dirname(os.path.dirname(_missions_dir()))
+    _graphics = os.path.join(_cosmos, "data", "graphics")
+    if os.path.isdir(_graphics):
+        _check_derived_art(rep, "install", _graphics, "data/graphics")
+        _check_stray_sprites(rep, _cosmos)
 
     if not env_only:
         missions = _missions_dir()

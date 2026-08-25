@@ -449,6 +449,9 @@ it.
 It always exits successfully, because it's a report and not a test. Use `--strict`
 if you want it to fail a build, or `--json` to feed it to something else.
 
+It also checks your **ship art** — see `sbs art` below for what that means and how
+to fix it.
+
 ### `sbs deps` — optional extras
 
 A few features can do more if an extra Python library is present. `sbs deps`
@@ -478,6 +481,36 @@ feature that uses one works without it.
 *running mission* can use it. It asks first, because a mission that relies on it
 will only run on machines where you've done the same — it's no longer something
 you can just hand to someone.
+
+### `sbs art` — check and repair the art the game builds for itself
+
+Some of a ship's art isn't drawn by an artist — the game builds it the first time
+it shows that ship, and saves it next to the original. If the game is interrupted
+while it's doing that, it leaves the job half-finished.
+
+**That is worth catching, because a half-finished ship crashes the game every time
+anyone looks at it.** The game tries the job again, fails in the same place, and
+leaves the same mess — so it never recovers on its own. Three ships were stuck like
+that in one install and it took two separate crash hunts to find them.
+
+```
+sbs art check              # anything half-finished?
+sbs art clear              # throw the half-finished bits away
+sbs art bake               # ...and get the game to build them again
+```
+
+`check` is safe and reads nothing but file names. A ship listed as *not yet drawn*
+is completely normal — that's just art nobody has looked at yet, and it is **not**
+a problem.
+
+`clear` deletes only the files the game made. Your `.obj` and your textures are
+never touched. `bake` then starts the game once per ship to rebuild them, and tells
+you at the end if any ship still won't build — which turns "the server keeps dying"
+into a short list of names.
+
+> Art that a **mod** carries can't be rebuilt where it sits, and `sbs art` says so
+> rather than trying. The rebuilt file remembers where its textures were, so it has
+> to be built in the game's own `data/graphics/ships` and copied back.
 
 ---
 
