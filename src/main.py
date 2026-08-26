@@ -3,6 +3,7 @@ from cli_cmd import cli, zipapp_dir
 # Import needed to properly see commands
 from debug_cmd import debug
 from overnight_cmd import overnight
+from soak_cmd import soak
 from web_cmd import web, web_static
 from fetch_cmd import fetch
 from create_cmd import create, templates
