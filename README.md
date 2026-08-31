@@ -287,6 +287,49 @@ sbs overnight LegendaryMissions --hours 8      # run itself for 8 hours
 sbs overnight LegendaryMissions --map 0 --gui  # watch it in the browser as it goes
 ```
 
+### `sbs soak` — an overnight run that grades itself
+
+Where `sbs overnight` just keeps playing, `sbs soak` runs a *scenario* and comes
+back with a verdict and a real exit code, so it can be left alone or wired into
+CI. It plays in the fast simulator by default; add `--engine` to run the actual
+game.
+
+```
+sbs soak init  LegendaryMissions               # write starter scenarios, one per map
+sbs soak bless LegendaryMissions peacetime --runs 8   # teach it what "working" looks like
+sbs soak run   LegendaryMissions peacetime --hours 8
+```
+
+With `--engine` it launches the real game. That is a server on its own unless
+you ask for consoles too:
+
+```
+sbs soak run LegendaryMissions peacetime --engine --hours 8 --clients 3
+sbs soak run LegendaryMissions peacetime --engine --hours 8 --consoles helm,science,engineering
+```
+
+`--clients 3` connects three consoles without caring which; `--consoles` names
+them. Because the console each client opens on travels through a single shared
+file, the clients are started a few seconds apart — and **only one console soak
+can run on a machine at a time**.
+
+However you start it, the run prints where it will leave its results, at the
+beginning and again at the end:
+
+| What | Where |
+|---|---|
+| Summary of every run so far — read this first | `<mission>/soaks/runs/<scenario>.state.json` |
+| Evidence from each run, including its verdict | `<mission>/soaks/runs/` |
+| The mission's log (rewritten each run) | `<mission>_soak/mast.runtime.log` |
+| Crash dumps, with `--engine` | `%LOCALAPPDATA%\CrashDumps` |
+
+Exit codes: `0` everything passed, `1` something got worse, `2` the libraries
+were rebuilt while it ran so the numbers can't be trusted, `3` nothing ran.
+
+> **Windows only keeps ten crash dumps.** Once that folder is full a real crash
+> writes nothing at all, and the night looks clean when it wasn't. The soak tells
+> you how many are already there; move them somewhere else before a long run.
+
 ---
 
 ## For mission makers — building and packaging
@@ -662,6 +705,7 @@ Start the server and clients and let it run.
 | `sbs web <folder>` | Serve a mission's live web pages |
 | `sbs web-static <folder> <page>` | Save a web page as a standalone HTML file |
 | `sbs overnight <folder>` | Long, self-playing soak test |
+| `sbs soak run <folder> <scenario>` | Overnight run that grades itself and returns an exit code |
 | `sbs lib <folder>` | Package a mission's libraries/add-ons |
 | `sbs watch <folder>` | Auto-rebuild libraries as you edit |
 | `sbs compile <folder>` | Check a mission's script for errors |

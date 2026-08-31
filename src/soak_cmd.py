@@ -142,12 +142,23 @@ def soak_run(mission_path, scenario, no_fetch, refresh_libs,
     session somebody is playing.
 
     Extra options pass through to `cosmos_dev.tools.mission_soak`: --hours, --runs,
-    --seed, --seconds, --engine, --timeout, --artifacts, --use-working-tree, --verbose.
+    --seed, --seconds, --engine, --timeout, --artifacts, --use-working-tree, --verbose,
+    and for the engine leg --consoles / --clients / --client-ip.
+
+    The engine leg is server-only unless you ask for clients. `--clients N` launches N
+    of them on whatever console the engine last used; `--consoles helm,science` names
+    them. A console cannot be a command-line argument (launch args reach only the
+    SERVER), so it travels through a shared file and the clients start a few seconds
+    apart - which means ONE console soak per machine at a time.
+
+    Either way the run prints where it left its evidence, at the start and at the end.
 
     \b
       sbs soak run LegendaryMissions peacetime --hours 8
       sbs soak run LegendaryMissions peacetime --runs 3
       sbs soak run LegendaryMissions peacetime --engine --runs 6
+      sbs soak run LegendaryMissions peacetime --engine --hours 8 --clients 3
+      sbs soak run LegendaryMissions peacetime --engine --hours 8 --consoles helm,science,engineering
     """
     mission_abs = os.path.abspath(mission_path)
     _ensure_libs(mission_abs, _find_sbs_utils() is None,
