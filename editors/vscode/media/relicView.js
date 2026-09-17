@@ -51,7 +51,7 @@ function esc(s) {
  * redraw happens on every keystroke in the document, so losing it would make the plan
  * unusable while editing.
  */
-function render(relics, nonce, index, view, live, cam, sel3, items) {
+function render(relics, nonce, index, view, live, cam, sel3, items, rails) {
   const rel = relics[index];
   if (!rel) {
     return '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);'
@@ -185,6 +185,14 @@ function render(relics, nonce, index, view, live, cam, sel3, items) {
     // it severs the routes that cross it until something opens it, which is what
     // makes a ruin a dungeon rather than a set of rooms.
     + '<button id="addbarrier" title="A shut way - severs the routes through it until it is opened">Add barrier</button>'
+    // THE FEEDBACK LOOP THE WHOLE DESIGN NEEDS. A ruin's routes are derived, so an
+    // author cannot see what they wrote until somebody flies it. This asks a running
+    // session what the relic actually solved into and draws it over the geometry -
+    // and the number to read is the COMPONENT count, which is the difference between
+    // a router being wrong and a ruin not being joined up.
+    + '<button id="rails"' + (rails ? ' class="on"' : '')
+    + ' title="Ask a running session what this relic solved into, and draw it">'
+    + (rails ? 'Rails: ' + esc(V3.railsSummary(rails)) : 'Rails') + '</button>'
     + '<button id="del">Delete</button>'
     // Named for what they SHOW, with the axis spelled out - Cosmos is Y-up and
     // Blender is Z-up, so anyone arriving from there will otherwise reach for
@@ -242,13 +250,17 @@ function render(relics, nonce, index, view, live, cam, sel3, items) {
     + v3.w + ' ' + v3.h + '" preserveAspectRatio="xMidYMid meet">'
     + '<g id="grid3g">' + V3.gridSvg(rel, cam3, Math.max(v3.w, v3.h), v3.w) + '</g>'
     + '<g id="scene3g">' + V3.body(rel, cam3) + '</g>'
+    // UNDER the labels and OVER the rooms: a diagnostic laid over the thing being
+    // authored, not the thing itself.
+    + '<g id="rails3g">' + (rails ? V3.railsSvg(rails, cam3) : '') + '</g>'
     + '<g id="link3"></g>'
     + '<g id="lab3g">' + V3.labelSvg(V3.scene(rel, cam3), Math.max(v3.w, v3.h) / 42) + '</g>'
     + '</svg>'
     + '<div id="ctx" class="ctx hidden"></div>'
     + '<svg id="navg" viewBox="0 0 100 100">' + Nav.navSvg(cam3, V3.project, 100)
     + '</svg></div>'
-    + '<script nonce="' + nonce + '">' + Orbit.script(rel, cam3, v3, sel3) + '</script>'
+    + '<script nonce="' + nonce + '">' + Orbit.script(rel, cam3, v3, sel3, rails)
+    + '</script>'
     + '</body></html>';
 }
 

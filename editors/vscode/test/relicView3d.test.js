@@ -751,5 +751,55 @@ check('a passage can only be dragged to a room',
   sel.indexOf('const rooms=[].concat(REL.chambers||[],REL.boxes||[]);') >= 0
   && sel.indexOf('rooms.some(function(c){return c.key===k2;})') >= 0);
 
+// --- the rails overlay -------------------------------------------------------
+//
+// A ruin's routes are DERIVED, so an author cannot see what they wrote until somebody
+// flies it. This is the feedback loop: ask a running session what the relic solved into
+// and draw it over the geometry. The payload is `rail_dump()` verbatim - verified against
+// a live session, not invented here.
+
+const RAILS = {
+  stats: { name: 'ruin', nodes: 3, edges: 2, components: 1, step: 450 },
+  nodes: [
+    { key: 'way_in', pos: [0, 0, 0], kind: 'place', roles: ['entrance'], hidden: false },
+    { key: 'cache', pos: [800, 0, 0], kind: 'content', roles: [], hidden: true },
+    { key: '@spine:1', pos: [400, 0, 0], kind: 'spine', roles: [], hidden: false },
+  ],
+  edges: [
+    { a: 'way_in', b: '@spine:1', cost: 400, cut: false },
+    { a: '@spine:1', b: 'cache', cost: 400, cut: true },
+  ],
+  barriers: [],
+};
+
+const railSvg = V3.railsSvg(RAILS, cam);
+check('the web draws its nodes and its legs',
+  (railSvg.match(/<circle/g) || []).length === 3
+  && (railSvg.match(/<line/g) || []).length === 2);
+check('an authored place is drawn apart from the derived fill',
+  railSvg.indexOf('#e0af68') >= 0 && railSvg.indexOf('#565f89') >= 0);
+check('a leg a barrier is severing is called out - the one bit of STATE here',
+  railSvg.indexOf('(shut)') >= 0 && railSvg.indexOf('#f7768e') >= 0);
+check('a hidden node is ringed', railSvg.indexOf('stroke="#bb9af7"') >= 0);
+check('nothing at all when no session has answered', V3.railsSvg(null, cam) === '');
+
+check('the summary leads with the number that matters',
+  V3.railsSummary(RAILS).indexOf('1 piece') >= 0);
+check('...and shouts when the ruin is in pieces',
+  V3.railsSummary({ stats: { nodes: 9, edges: 4, components: 2 } }).indexOf('2 PIECES')
+  >= 0);
+
+check('the overlay has its own stable group, like the grid and the labels',
+  V.render([rel], 'n', 0, null, false, null, null, null, RAILS).indexOf('id="rails3g"')
+  >= 0);
+check('...and the button carries the summary once a session has answered',
+  V.render([rel], 'n', 0, null, false, null, null, null, RAILS).indexOf('Rails: 3 nodes')
+  >= 0);
+check('...or is just a button when none has',
+  V.render([rel], 'n', 0).indexOf('>Rails<') >= 0);
+check('the page can redraw the overlay as the camera turns',
+  sel.indexOf('rg.innerHTML=RAILS?railsSvg(RAILS,cam)') >= 0);
+
+
 console.log('\n' + (fail ? fail + ' FAILED' : 'all relicView3d tests passed') + '\n');
 process.exit(fail ? 1 : 0);

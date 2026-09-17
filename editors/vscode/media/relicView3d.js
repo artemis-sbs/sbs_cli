@@ -143,6 +143,74 @@ function scene(rel, cam) {
   return items.sort((m, n) => n.depth - m.depth);
 }
 
+/** What colour a rail node is drawn: by what it IS, so the derived bulk reads as one
+ *  thing and the places an author actually wrote stand out of it. */
+const RAIL_COLORS = {
+  place: '#e0af68',      // authored, and offered as a destination
+  content: '#9ece6a',    // something placed IN the ruin - a cache, a piece
+  doorway: '#7dcfff',    // measured where two rooms meet
+  skirt: '#bb9af7',      // the way round a subtracted mass
+  spine: '#565f89',      // the fill - deliberately dim, there are hundreds of them
+};
+
+/**
+ * Draw a relic's RAIL WEB over the geometry.
+ *
+ * WHAT THIS IS FOR, and it is the whole reason it exists: the routes through a ruin are
+ * DERIVED, so an author cannot see what they wrote until somebody flies it. This is the
+ * feedback loop - drag a wall, re-solve, and the web either still joins up or it does not.
+ *
+ * `rails` is `rail_dump()` straight off a running session: {stats, nodes, edges}. It is
+ * drawn UNDER the geometry's labels and over its rooms, thin and dim, because it is a
+ * diagnostic laid over the thing being authored rather than the thing itself.
+ *
+ * An edge a shut barrier is severing is drawn red and dashed. That is the one piece of
+ * state here that is not geometry, and it is the one people will be looking for.
+ */
+function railsSvg(rails, cam) {
+  if (!rails || !rails.nodes) { return ''; }
+  const at = new Map();
+  for (const n of rails.nodes) {
+    at.set(n.key, project({ x: n.pos[0], y: n.pos[1], z: n.pos[2] }, cam));
+  }
+  let out = '';
+  for (const e of (rails.edges || [])) {
+    const a = at.get(e.a), b = at.get(e.b);
+    if (!a || !b) { continue; }
+    out += '<line x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1)
+      + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1)
+      + '" stroke="' + (e.cut ? '#f7768e' : '#7aa2f7') + '" stroke-width="6"'
+      + ' stroke-opacity="' + (e.cut ? '0.9' : '0.35') + '"'
+      + (e.cut ? ' stroke-dasharray="60 40"' : '') + '>'
+      + '<title>' + esc(e.a) + ' - ' + esc(e.b)
+      + (e.cut ? ' (shut)' : '') + '</title></line>';
+  }
+  for (const n of (rails.nodes || [])) {
+    const q = at.get(n.key);
+    if (!q) { continue; }
+    const derived = n.kind === 'spine' || n.kind === 'doorway' || n.kind === 'skirt';
+    const r = derived ? 26 : 60;
+    out += '<circle cx="' + q.x.toFixed(1) + '" cy="' + q.y.toFixed(1) + '" r="' + r + '"'
+      + ' fill="' + (RAIL_COLORS[n.kind] || '#565f89') + '"'
+      + ' fill-opacity="' + (derived ? 0.55 : 0.95) + '"'
+      + (n.hidden ? ' stroke="#bb9af7" stroke-width="10"' : '')
+      + '><title>' + esc(n.key) + ' (' + esc(n.kind) + ')'
+      + (n.hidden ? ' - hidden' : '') + '</title></circle>';
+  }
+  return out;
+}
+
+/** One line saying what the ruin solved into. `components` is the number to read: more
+ *  than one means part of it cannot be flown to from the rest. */
+function railsSummary(rails) {
+  if (!rails || !rails.stats) { return ''; }
+  const st = rails.stats;
+  const parts = [st.nodes + ' nodes', st.edges + ' edges',
+                 st.components + (st.components === 1 ? ' piece' : ' PIECES')];
+  if (st.step) { parts.push('step ' + Math.round(st.step)); }
+  return parts.join(' / ');
+}
+
 /** How far the scene reaches on screen, so the caller can frame it. */
 function extent(items) {
   const min = { x: Infinity, y: Infinity }, max = { x: -Infinity, y: -Infinity };
@@ -469,14 +537,15 @@ function clientBundle() {
   return 'const RENDER_DISTANCE = ' + RENDER_DISTANCE + ';\n'
     + 'const GRID_MINOR = ' + GRID_MINOR + ';\n'
     + 'const GRID_MAJOR = ' + GRID_MAJOR + ';\n'
+    + 'const RAIL_COLORS = ' + JSON.stringify(RAIL_COLORS) + ';\n'
     + [esc, project, unproject, span, boxCorners, _solidShape, scene, extent, shade,
        contentsMark, body, holdPivot,
-       groundGrid, gridSvg, labelRows, labelSvg]
+       groundGrid, gridSvg, labelRows, labelSvg, railsSvg]
     .map(function (f) { return f.toString(); }).join('\n')
     + '\nconst BOX_EDGES = ' + JSON.stringify(BOX_EDGES) + ';\n';
 }
 
-module.exports = { project, unproject, scene, body, contentsMark, extent, boxCorners, shade, clientBundle,
+module.exports = { project, unproject, scene, body, contentsMark, extent, boxCorners, shade, clientBundle, railsSvg, railsSummary,
                    span, RENDER_DISTANCE,
                    groundGrid, gridSvg, labelRows, labelSvg, GRID_MINOR, GRID_MAJOR,
                    holdPivot,

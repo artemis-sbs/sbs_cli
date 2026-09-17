@@ -4805,12 +4805,17 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     'amdRelic', 'Relic Plan', column, { enableScripts: true },
   );
   const claimUndo = () => { activeRelicUndo = doUndo; };
+  // The web a running session last reported, or undefined. NOT part of the model: it is
+  // derived from the geometry by the session, so it is a diagnostic drawn over what is
+  // being authored and nothing in the panel can write it back. Cleared on every edit,
+  // because a web drawn over geometry it no longer describes is worse than none.
+  let railsData: any;
   const draw = () => {
     const model = RelicModel.parse(doc.getText());
     if (index >= model.relics.length) { index = 0; }
     panel.webview.html = RelicView.render(
       model.relics, nonce(), index, lastView, relicLive, cam, sel3,
-      RelicModel.itemKeys(doc.getText()));
+      RelicModel.itemKeys(doc.getText()), railsData);
   };
   draw();
 
@@ -4998,6 +5003,45 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
       });
       return;
     }
+    if (msg && msg.type === 'rails') {
+      // Pressing it again puts the overlay away - one button, both ways, because "show me"
+      // and "that is enough of that" are the same question asked twice.
+      if (railsData) { railsData = undefined; draw(); return; }
+      const rel = RelicModel.parse(doc.getText()).relics[index];
+      const port = vscode.workspace.getConfiguration('amd').get<number>('sessionPort', 8765);
+      try {
+        // No `name`: ask for every web and pick this relic's out of the answer. A mission
+        // is free to build a relic under a name of its own, and guessing the key instead
+        // is how `relic_contain` used to address a volume that did not exist.
+        const reply: any = await DebugCommand.postDebugCommand(
+          port, { action: 'rails', full: true }, { wait: true });
+        const webs = (reply && reply.rails) || {};
+        const key = rel ? rel.key : undefined;
+        const got = (key && webs[key]) || webs[Object.keys(webs)[0]];
+        if (!got) {
+          vscode.window.showWarningMessage(
+            'Artemis AMD: the session has not built a relic yet - start the map that '
+            + 'builds it, then press Rails again');
+          return;
+        }
+        railsData = got;
+        draw();
+        const st = got.stats || {};
+        vscode.window.setStatusBarMessage(
+          'Rails: ' + st.nodes + ' nodes, ' + st.edges + ' edges, '
+          + st.components + (st.components === 1 ? ' piece' : ' PIECES'), 6000);
+      } catch (e) {
+        const why = (e as Error)?.message || String(e);
+        // The same three outcomes a preview has, and the same words for them: a session
+        // that is not there, one at the map picker, and one that answered no.
+        const kind = DebugCommand.classifyReloadFailure(why);
+        vscode.window.showWarningMessage('Artemis AMD: '
+          + (kind === 'no-session'
+            ? `no session on port ${port} - press Preview to start one`
+            : why));
+      }
+      return;
+    }
     if (msg && msg.type === 'addbarrier') {
       await applyRelicStructure(doc, index, (text: string, rel: any) => {
         const taken = new Set([...rel.chambers, ...rel.boxes, ...rel.solids,
@@ -5144,6 +5188,9 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     await vscode.workspace.applyEdit(we);
     writing = false;
     remember(text, d.getText());   // the document's own text - see applyRelicStructure
+    // The web described the geometry as it WAS. Drawing it over geometry that has moved
+    // is worse than not drawing it: it looks like the solver disagreeing with the file.
+    railsData = undefined;
     draw();
     previewSoon();
   }

@@ -62,10 +62,14 @@ function embed(value) {
  * @param {string} sel  the key to start selected, if any
  * @returns {string} the page script
  */
-function script(rel, cam, vb, sel) {
+function script(rel, cam, vb, sel, rails) {
   return V3.clientBundle() + Gizmo.clientBundle() + Nav.clientBundle()
     + 'const vscode=acquireVsCodeApi();'
     + 'const REL=' + embed(sceneData(rel)) + ';'
+    // The web a RUNNING session solved, or null. It is a diagnostic laid over the
+    // thing being authored, so it is data the page draws rather than part of the
+    // model the page edits - nothing here can write it back.
+    + 'const RAILS=' + embed(rails || null) + ';'
     + 'const svg=document.getElementById("scene3");'
     + 'const g=document.getElementById("scene3g");'
     + 'let cam={yaw:' + cam.yaw + ',pitch:' + cam.pitch + '};'
@@ -111,6 +115,8 @@ function script(rel, cam, vb, sel) {
     // innerHTML into a STABLE wrapper. `outerHTML` on an SVG element parses its string as
     // HTML, so the new nodes land in the HTML namespace and never render - the grid simply
     // disappears after the first redraw.
+    + 'const rg=document.getElementById("rails3g");'
+    + 'if(rg)rg.innerHTML=RAILS?railsSvg(RAILS,cam):"";'
     + 'const gr=document.getElementById("grid3g");'
     + 'if(gr)gr.innerHTML=gridSvg(REL,cam,Math.max(vb.w,vb.h),vb.w);'
     // The labels are part of the PICTURE, so they have to be redrawn with it. Rendering
@@ -419,6 +425,8 @@ function script(rel, cam, vb, sel) {
     + 'const w=unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y));'
     + 'vscode.postMessage({type:"addpoint",x:snap(w.x),y:snap(w.y),'
     + 'z:snap(w.z)});});'
+    + 'const rl=document.getElementById("rails");'
+    + 'if(rl)rl.addEventListener("click",function(){vscode.postMessage({type:"rails"});});'
     + 'const br2=document.getElementById("addbarrier");'
     + 'if(br2)br2.addEventListener("click",function(){const w=unproject('
     + '{x:vb.x+vb.w/2,y:vb.y+vb.h/2},cam,pivot().y);'
