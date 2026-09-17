@@ -95,7 +95,8 @@ function parse(text) {
     const relic = {
       key: r.key, name: r.name, headingLine: r.headingLine, fields: r.fields,
       fenceEnd: r.fenceEnd,
-      chambers: [], boxes: [], solids: [], points: [], passages: [], orphans: [],
+      chambers: [], boxes: [], solids: [], points: [], barriers: [], passages: [],
+      orphans: [],
       loc: r.fields['loc'] ? numbers(r.fields['loc'].value).slice(0, 3) : [0, 0, 0],
     };
     relics.push(relic);
@@ -136,7 +137,22 @@ function parse(text) {
       owner.points.push(Object.assign(part, {
         kind: 'point', x: n[0], y: n[1], z: n[2],
         roles: words(p.fields['roles'] ? p.fields['roles'].value : ''),
+        // A SECRET. The place still exists and a route still passes through it; it is
+        // simply not OFFERED until the crew has been near it.
+        hidden: /^(yes|true|on|1)$/i.test(String(fieldValue(p, 'hidden')).trim()),
         line: p.fields['point'].line, fenceEnd: p.fenceEnd,
+      }));
+    } else if (p.fields['barrier']) {
+      // A WAY THAT IS SHUT. Not navigable space and not subtracted from it either - the
+      // geometry is untouched. A barrier severs the rail legs that cross it, which is
+      // worked out at runtime; here it is a sphere with a position and a size, so it can
+      // be dragged and resized like anything else.
+      const n = numbers(p.fields['barrier'].value);
+      owner.barriers.push(Object.assign(part, {
+        kind: 'barrier', x: n[0], y: n[1], z: n[2], r: n[3],
+        opensWhen: fieldValue(p, 'opens when') || fieldValue(p, 'opens_when'),
+        clearWith: fieldValue(p, 'clear with') || fieldValue(p, 'clear_with'),
+        line: p.fields['barrier'].line, fenceEnd: p.fenceEnd,
       }));
     } else if (p.fields['solid']) {
       const n = numbers(p.fields['solid'].value);
@@ -405,7 +421,9 @@ function setPart(text, part, patch) {
     // they are untouched by a move.
     return writeField(text, part.line, [v.x, v.y, v.z]);
   }
-  if (part.kind === 'chamber') {
+  if (part.kind === 'chamber' || part.kind === 'barrier') {
+    // A barrier carries the same four numbers a chamber does - centre and radius - so it
+    // drags and resizes with no special case.
     return writeField(text, part.line, [v.x, v.y, v.z, v.r]);
   }
   if (part.kind === 'box') {
@@ -558,6 +576,27 @@ function addPart(text, relic, key, field, values, name) {
 }
 
 /** A new chamber: a sphere, centre and radius. */
+/**
+ * Add a `Barrier:` - a shut way.
+ *
+ * `Clear with: beam` by default, because a barrier that can never open is the one shape
+ * `sbs lint` complains about, and it is almost never what somebody reaching for this
+ * button meant. Delete the line to make it a wall.
+ */
+function addBarrier(text, relic, key, x, y, z, r, name) {
+  const withField = addPart(text, relic, key, 'Barrier',
+    [x, y, z, r === undefined ? 240 : r], name);
+  if (withField === text) return text;
+  const lines = withField.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (/^Barrier:/.test(lines[i]) && lines[i + 1] === '---') {
+      lines.splice(i + 1, 0, 'Clear with: beam');
+      return lines.join('\n');
+    }
+  }
+  return withField;
+}
+
 function addChamber(text, relic, key, x, y, z, r, name) {
   return addPart(text, relic, key, 'Chamber', [x, y, z, r], name);
 }
@@ -624,7 +663,7 @@ function R_reparse(text, relicKey, partKey) {
     .find((p) => p.key === partKey) || null;
 }
 
-module.exports = { setLineField, itemKeys,
+module.exports = { setLineField, itemKeys, addBarrier,
   setName, setKind, setRoles, addBox, addSolid, addPoint, addPart,
   parse, writeField, movePart: moveePart, resizePart, setHeight, setPart,
   addPassage, removePassage, addChamber, removePart,

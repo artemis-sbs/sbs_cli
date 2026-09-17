@@ -163,7 +163,8 @@ check('a click that did not move writes nothing',
 check('the selection is reported so a redraw does not drop the gizmo',
   sel.indexOf('type:"sel3d"') >= 0);
 check('a passage is not movable - it has no position of its own',
-  sel.indexOf('REL.chambers.concat(REL.boxes,REL.solids,REL.points)') >= 0);
+  sel.indexOf('REL.chambers.concat(REL.boxes,REL.solids,REL.points,REL.barriers||[])')
+  >= 0 && sel.indexOf('REL.passages') < 0);
 
 // --- a gesture must always end ----------------------------------------------
 // Reported from use: after a gizmo drag the mouse felt captured and nothing else worked.
@@ -285,7 +286,7 @@ check('...and the same going the other way', (() => {
   return (c + v) === (centre + half) && (c - v) === (centre - half + disp);
 })());
 check('the page moves the centre with the size',
-  sel.indexOf('size.p[c]=Math.round(size.oc[c]+disp/2)') >= 0);
+  sel.indexOf('size.p[c]=snap(size.oc[c]+disp/2,e)') >= 0);
 check('...and writes both, still on one line',
   sel.indexOf('pa.x=size.p.x') >= 0);
 // A sphere has no faces, so its one number stays symmetric.
@@ -297,7 +298,17 @@ check('a part with no size gets no handle',
 check('a size drag writes through the same field message',
   sel.indexOf('pa[size.field]=size.p[size.field]') >= 0);
 check('a size is never written as zero - lint rejects it and the volume refuses it',
-  sel.indexOf('v=Math.max(1,Math.round(v))') >= 0);
+  sel.indexOf('v=Math.max(1,snap(v,e))') >= 0);
+// --- the grid ----------------------------------------------------------------
+//
+// Boxes union by OVERLAPPING, so a few units of misalignment leaves a seam nothing draws
+// and nothing reports: the relic reads as one connected space in the editor and is two on
+// the bridge. A grid removes the whole class of it.
+check('a drag lands on a grid', sel.indexOf('const GRID=50;') >= 0);
+check('...and ALT is the way past it, for the odd number somebody means',
+  sel.indexOf('if(e&&e.altKey)return Math.round(v);') >= 0);
+check('...which a new part starts on too', sel.indexOf('x:snap(w.x),y:snap(w.y)') >= 0);
+
 check('a stuck size drag is cleared with everything else',
   sel.indexOf('move||orbit||pan||size') >= 0);
 
@@ -559,7 +570,7 @@ check('a point is drawn', V3.body(rel, cam).indexOf('data-key="mouth"') >= 0);
 check('...an entrance is called out, because it is the one a crew has to find',
   /data-key="mouth"[\s\S]{0,300}#7dcfff/.test(V3.body(rel, cam)));
 check('...it can be selected and moved',
-  sel.indexOf('REL.chambers.concat(REL.boxes,REL.solids,REL.points)') >= 0);
+  sel.indexOf('REL.points') >= 0);
 check('...but has no size to drag', (() => {
   const t = rel.points[0];
   return G.sizeHandles(t, cam, V3.project).length === 0
@@ -679,6 +690,66 @@ check('the page script parses', (() => {
   try { new Function(sel.replace('acquireVsCodeApi()', '({postMessage:function(){}})')); return true; }
   catch (e) { return false; }
 })());
+
+// --- a way that is SHUT -------------------------------------------------------
+//
+// A barrier is not navigable space and not subtracted from it either: it severs the routes
+// that CROSS it until something opens it. It is authored as a thing in the world - position
+// and size - because that is what lets it be dressed with a prop and pointed at by a
+// boarder's tools. Nothing about a route is ever authored.
+
+const barDoc = [
+  '## [Relics](relics)', '',
+  '### [The Ruin](ruin)', '---', 'Atmosphere: purple', '---', '',
+  '### [the hall](hall)', '---', 'Relic: ruin', 'Box: 0, 0, 0, 1600, 300, 300', '---', '',
+  '### [the hatch](hatch)', '---', 'Relic: ruin', 'Barrier: 0, 0, 0, 240',
+  'Clear with: beam', '---', '',
+  '### [the wall](wall)', '---', 'Relic: ruin', 'Barrier: 900, 0, 0, 200', '---', '',
+  '### [the cache](cache)', '---', 'Relic: ruin', 'Point: 1200, 0, 0', 'Hidden: yes',
+  '---', '',
+].join('\n');
+const barRel = R.parse(barDoc).relics[0];
+
+check('a barrier is parsed as its own kind of part',
+  barRel.barriers.length === 2 && barRel.barriers[0].kind === 'barrier');
+check('...carrying centre, size and what opens it',
+  barRel.barriers[0].x === 0 && barRel.barriers[0].r === 240
+  && barRel.barriers[0].clearWith === 'beam');
+check('...and is NOT counted as navigable space',
+  barRel.boxes.length === 1 && barRel.chambers.length === 0
+  && barRel.solids.length === 0);
+
+const barSvg = V3.body(barRel, cam);
+check('a barrier is drawn', barSvg.indexOf('- shut') >= 0);
+check('...saying what can open it', barSvg.indexOf('clear with beam') >= 0);
+check('...and calling out one that NOTHING can open, which lint also complains about',
+  barSvg.indexOf('NOTHING can open it') >= 0);
+
+check('a barrier moves and resizes like a chamber - the same four numbers',
+  R.setPart(barDoc, barRel.barriers[0], { x: 500, r: 300 })
+    .split('\n').indexOf('Barrier: 500, 0, 0, 300') >= 0);
+
+check('Add barrier is offered, on the toolbar and in the menu',
+  V.render([barRel], 'n', 0).indexOf('id="addbarrier"') >= 0
+  && sel.indexOf('Add barrier here') >= 0);
+
+check('a new barrier can be opened by something, because a wall nobody can pass is'
+  + ' rarely what the button meant',
+  R.addBarrier(barDoc, barRel, 'fall', 100, 0, 0, 180, 'a fall')
+    .indexOf('Clear with: beam') >= 0);
+
+// A SECRET, and it is a property of the LIST rather than of the ruin: a route still passes
+// THROUGH a hidden place, because stumbling into one on the way somewhere else is the point.
+check('a hidden point is parsed', barRel.points[0].hidden === true);
+check('...and drawn differently, so it reads as a place to FIND',
+  barSvg.indexOf('#bb9af7') >= 0);
+
+// A PASSAGE JOINS TWO ROOMS. The drag used to light up on a point or a barrier and write
+// `Passage to: <point> 200`, which builds nothing at all and surfaced afterwards as
+// `relic-dangling-passage` rather than here, where it could simply have refused.
+check('a passage can only be dragged to a room',
+  sel.indexOf('const rooms=[].concat(REL.chambers||[],REL.boxes||[]);') >= 0
+  && sel.indexOf('rooms.some(function(c){return c.key===k2;})') >= 0);
 
 console.log('\n' + (fail ? fail + ' FAILED' : 'all relicView3d tests passed') + '\n');
 process.exit(fail ? 1 : 0);

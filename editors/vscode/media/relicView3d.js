@@ -113,7 +113,16 @@ function scene(rel, cam) {
     // anything else at the same depth would swallow it.
     items.push({ kind: 'point', at: q, depth: q.depth - 2, key: t.key,
                  label: t.name || t.key, roles: t.roles || [],
+                 hidden: !!t.hidden,
                  hasContents: !!t.hasContents });
+  }
+  for (const b of (rel.barriers || [])) {
+    const q = project(b, cam);
+    // -3, in front of everything including a point: a barrier is the thing in the way,
+    // and the whole reason to look at one is to see WHAT it is in the way of.
+    items.push({ kind: 'barrier', at: q, depth: q.depth - 3, r: b.r || 0, key: b.key,
+                 label: b.name || b.key, opensWhen: b.opensWhen || '',
+                 clearWith: b.clearWith || '' });
   }
   for (const s of (rel.solids || [])) {
     const q = project(s, cam);
@@ -370,7 +379,10 @@ function body(rel, cam) {
       // Cyan for the way in, amber for everything else - NOT the box green, which would
       // make an entrance read as a small room at a glance.
       const isWay = (it.roles || []).indexOf('entrance') >= 0;
-      const col = isWay ? '#7dcfff' : '#e0af68';
+      // Purple for a SECRET, so it reads at a glance as a place the crew has to find
+      // rather than one the device offers them. Cyan is the way in, amber is everything
+      // else, and neither is the box green - an entrance must not read as a small room.
+      const col = it.hidden ? '#bb9af7' : (isWay ? '#7dcfff' : '#e0af68');
       const rr = 90;
       out += '<g class="p3" data-key="' + esc(it.key) + '">'
         + '<title>' + esc(it.label)
@@ -380,6 +392,35 @@ function body(rel, cam) {
         + '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
         + ' r="' + (rr * 2.4) + '" fill="none" stroke="' + col + '"'
         + ' stroke-opacity="' + (Number(a) * 0.5).toFixed(3) + '" stroke-width="14"/></g>';
+    } else if (it.kind === 'barrier') {
+      // A WAY THAT IS SHUT, drawn as a barred disc. Red because it is the one thing on
+      // the plan that STOPS something, and hatched rather than filled because it is not
+      // a room and must not read as one.
+      //
+      // A barrier that nothing can open is drawn solid, because that is the case `sbs
+      // lint` complains about and the difference is worth seeing before the lint says
+      // so: a puzzle and a wall look different here.
+      const hard = !it.opensWhen && !it.clearWith;
+      const col = '#f7768e';
+      out += '<g class="p3" data-key="' + esc(it.key) + '">'
+        + '<title>' + esc(it.label) + ' - shut'
+        + (it.clearWith ? ', clear with ' + esc(it.clearWith) : '')
+        + (it.opensWhen ? ', opens when ' + esc(it.opensWhen) : '')
+        + (hard ? ' - and NOTHING can open it' : '') + '</title>'
+        + '<circle cx="' + it.at.x.toFixed(1) + '" cy="' + it.at.y.toFixed(1) + '"'
+        + ' r="' + it.r + '" fill="' + col + '" fill-opacity="'
+        + (Number(a) * (hard ? 0.34 : 0.14)).toFixed(3) + '"'
+        + ' stroke="' + col + '" stroke-opacity="' + a + '" stroke-width="10"'
+        + (hard ? '' : ' stroke-dasharray="90 70"') + '/>';
+      // Two bars across it - the universal "this does not open" mark, and it survives
+      // being small on screen where a dash pattern does not.
+      const d = it.r * 0.62;
+      for (const k of [-1, 1]) {
+        out += '<line x1="' + (it.at.x - d).toFixed(1) + '" y1="' + (it.at.y + k * d * 0.45).toFixed(1)
+          + '" x2="' + (it.at.x + d).toFixed(1) + '" y2="' + (it.at.y + k * d * 0.45).toFixed(1)
+          + '" stroke="' + col + '" stroke-opacity="' + a + '" stroke-width="14"/>';
+      }
+      out += '</g>';
     } else if (it.kind === 'solid') {
       // A subtracted mass, drawn as a HOLE - dashed and unfilled at the rim. Filling it
       // solidly would read as another room, which is the exact opposite of what it is.

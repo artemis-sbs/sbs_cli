@@ -33,7 +33,9 @@ function sceneData(rel) {
     chambers: (rel.chambers || []).map((c) => ({ key: c.key, name: c.name, x: c.x, y: c.y, z: c.z, r: c.r })),
     boxes: (rel.boxes || []).map((b) => ({ key: b.key, name: b.name, x: b.x, y: b.y, z: b.z, hx: b.hx, hy: b.hy, hz: b.hz })),
     solids: (rel.solids || []).map((s) => ({ key: s.key, name: s.name, kind: s.kind, x: s.x, y: s.y, z: s.z, r: s.r })),
-    points: (rel.points || []).map((t) => ({ key: t.key, name: t.name, x: t.x, y: t.y, z: t.z, roles: t.roles })),
+    points: (rel.points || []).map((t) => ({ key: t.key, name: t.name, x: t.x, y: t.y, z: t.z, roles: t.roles, hidden: t.hidden })),
+    barriers: (rel.barriers || []).map((b) => ({ key: b.key, name: b.name, x: b.x, y: b.y, z: b.z, r: b.r,
+      opensWhen: b.opensWhen, clearWith: b.clearWith })),
     passages: (rel.passages || []).map((p) => ({ from: p.from, to: p.to, radius: p.radius })),
   };
 }
@@ -73,8 +75,17 @@ function script(rel, cam, vb, sel) {
     // Every movable part by key. Passages are NOT here on purpose: a passage has no
     // position of its own - it is defined by the two chambers it joins, so moving one
     // would have to mean moving them, which the plan view already does better.
+    // The grid a drag lands on, and the way past it. 50 is fine enough to place a
+    // room by eye and coarse enough that two walls meant to meet actually do.
+    + 'const GRID=50;'
+    + 'function snap(v,e){if(e&&e.altKey)return Math.round(v);'
+    + 'return Math.round(v/GRID)*GRID;}'
     + 'function partOf(k){if(!k)return null;'
-    + 'return REL.chambers.concat(REL.boxes,REL.solids,REL.points).find(function(p){return p.key===k;})||null;}'
+    // Barriers go in the lookup too, or one cannot be selected, dragged or resized.
+    // A part missing from here reads as the DRAG being broken rather than as the part
+    // being unknown, which is exactly how points behaved before they were added.
+    + 'return REL.chambers.concat(REL.boxes,REL.solids,REL.points,REL.barriers||[])'
+    + '.find(function(p){return p.key===k;})||null;}'
     // Handle length in WORLD units, taken from the current zoom so the gizmo stays the
     // same size on screen however far in you are.
     + 'function gizL(){return vb.w*0.09;}'
@@ -212,18 +223,22 @@ function script(rel, cam, vb, sel) {
     // is stored as centre plus half-extents.
     + 'v=size.orig+size.sign*disp/2;'
     + 'const c=size.axis==="x"?"x":(size.axis==="y"?"y":"z");'
-    + 'size.p[c]=Math.round(size.oc[c]+disp/2);'
+    + 'size.p[c]=snap(size.oc[c]+disp/2,e);'
     + '}'
     // A size of zero or less builds a chamber enclosing nothing, which lint reports and
     // the volume refuses. Stop at 1 rather than write a number the file cannot hold.
-    + 'v=Math.max(1,Math.round(v));'
+    // SNAP. Boxes union by OVERLAPPING, so a few units of misalignment leaves a seam
+    // nothing draws and nothing reports - the relic reads as one connected space in
+    // the editor and is two on the bridge. A grid removes the whole class of it, and
+    // ALT bypasses the grid for the one time in ten somebody means an odd number.
+    + 'v=Math.max(1,snap(v,e));'
     + 'size.p[size.field]=v;size.moved=true;draw();return;}'
     + 'if(move){const q=pt(e);'
     + 'const t=along(move.h,q.x-move.x0,q.y-move.y0);'
     + 'const d=t*move.L;'
-    + 'move.p.x=Math.round(move.ox+(move.axis==="x"?d:0));'
-    + 'move.p.y=Math.round(move.oy+(move.axis==="y"?d:0));'
-    + 'move.p.z=Math.round(move.oz+(move.axis==="z"?d:0));'
+    + 'move.p.x=snap(move.ox+(move.axis==="x"?d:0),e);'
+    + 'move.p.y=snap(move.oy+(move.axis==="y"?d:0),e);'
+    + 'move.p.z=snap(move.oz+(move.axis==="z"?d:0),e);'
     + 'move.moved=true;draw();return;}'
     // A SHIFT-DRAG HAS TO SHOW ITSELF. Without a line following the cursor the gesture is
     // invisible until it succeeds - and when it fails, indistinguishable from having done
@@ -234,7 +249,13 @@ function script(rel, cam, vb, sel) {
     + 'const k2=t?t.dataset.key:null;'
     // A solid is subtracted space, not a room, so it can never be an end of a passage.
     // Saying that by not lighting it up beats refusing on release.
-    + 'const good=k2&&k2!==link.from&&!REL.solids.some(function(s){return s.key===k2;});'
+    // A PASSAGE JOINS TWO ROOMS. Anything else is not an end it can have: a solid is
+    // subtracted space, a point is a label with no extent, a barrier is a thing in the
+    // way. Allowing them wrote `Passage to: <point> 200`, which builds nothing at all
+    // and surfaced later as `relic-dangling-passage` rather than here, where the drag
+    // could simply have refused to light up.
+    + 'const rooms=[].concat(REL.chambers||[],REL.boxes||[]);'
+    + 'const good=k2&&k2!==link.from&&rooms.some(function(c){return c.key===k2;});'
     + 'link.to=good?k2:null;'
     + 'document.querySelectorAll(".tgt").forEach(function(n){n.classList.remove("tgt");});'
     + 'if(good&&t)t.classList.add("tgt");'
@@ -386,23 +407,28 @@ function script(rel, cam, vb, sel) {
     // is the only one the author has expressed an opinion about.
     + 'if(ab)ab.addEventListener("click",function(){'
     + 'const w=unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y));'
-    + 'vscode.postMessage({type:"add",x:Math.round(w.x),y:Math.round(w.y),'
-    + 'z:Math.round(w.z)});});'
+    + 'vscode.postMessage({type:"add",x:snap(w.x),y:snap(w.y),'
+    + 'z:snap(w.z)});});'
     + 'const bb=document.getElementById("addbox");'
     + 'if(bb)bb.addEventListener("click",function(){'
     + 'const w=unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y));'
-    + 'vscode.postMessage({type:"addbox",x:Math.round(w.x),y:Math.round(w.y),'
-    + 'z:Math.round(w.z)});});'
+    + 'vscode.postMessage({type:"addbox",x:snap(w.x),y:snap(w.y),'
+    + 'z:snap(w.z)});});'
     + 'const pb2=document.getElementById("addpoint");'
     + 'if(pb2)pb2.addEventListener("click",function(){'
     + 'const w=unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y));'
-    + 'vscode.postMessage({type:"addpoint",x:Math.round(w.x),y:Math.round(w.y),'
-    + 'z:Math.round(w.z)});});'
+    + 'vscode.postMessage({type:"addpoint",x:snap(w.x),y:snap(w.y),'
+    + 'z:snap(w.z)});});'
+    + 'const br2=document.getElementById("addbarrier");'
+    + 'if(br2)br2.addEventListener("click",function(){const w=unproject('
+    + '{x:vb.x+vb.w/2,y:vb.y+vb.h/2},cam,pivot().y);'
+    + 'vscode.postMessage({type:"addbarrier",x:snap(w.x),y:snap(w.y),'
+    + 'z:snap(w.z)});});'
     + 'const sb2=document.getElementById("addsolid");'
     + 'if(sb2)sb2.addEventListener("click",function(){'
     + 'const w=unproject(vb.x+vb.w/2,vb.y+vb.h/2,cam,Math.round(pivot().y));'
-    + 'vscode.postMessage({type:"addsolid",x:Math.round(w.x),y:Math.round(w.y),'
-    + 'z:Math.round(w.z)});});'
+    + 'vscode.postMessage({type:"addsolid",x:snap(w.x),y:snap(w.y),'
+    + 'z:snap(w.z)});});'
     + 'const db=document.getElementById("del");'
     + 'if(db)db.addEventListener("click",function(){'
     + 'if(sel)vscode.postMessage({type:"remove",key:sel});});'
@@ -431,6 +457,8 @@ function script(rel, cam, vb, sel) {
     + 'ctx.appendChild(document.createElement("hr"));}'
     + 'item("Add point here",function(){vscode.postMessage({type:"addpoint",'
     + 'x:Math.round(w.x),y:Math.round(w.y),z:Math.round(w.z)});});'
+    + 'item("Add barrier here",function(){vscode.postMessage({type:"addbarrier",'
+    + 'x:snap(w.x),y:snap(w.y),z:snap(w.z)});hide();});'
     + 'item("Add solid here",function(){vscode.postMessage({type:"addsolid",'
     + 'x:Math.round(w.x),y:Math.round(w.y),z:Math.round(w.z)});});'
     + 'item("Add box here",function(){vscode.postMessage({type:"addbox",'

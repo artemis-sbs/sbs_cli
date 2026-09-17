@@ -4940,9 +4940,11 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     }
     if (msg && msg.type === 'remove') {
       await applyRelicStructure(doc, index, (text: string, rel: any) => {
-        // POINTS TOO. They are drawn and draggable, so leaving them out of the lookup made
-        // a drag silently do nothing - the edit found no part and returned.
-        const part = [...rel.chambers, ...rel.boxes, ...rel.solids, ...rel.points]
+        // POINTS AND BARRIERS TOO. Everything drawn is draggable, so a part left out of
+        // the lookup makes the drag silently do nothing - the edit finds no part and
+        // returns. That is how points behaved until they were added here.
+        const part = [...rel.chambers, ...rel.boxes, ...rel.solids, ...rel.points,
+                      ...(rel.barriers || [])]
           .find((p: RelicPart) => p.key === msg.key);
         return part ? RelicModel.removePart(text, rel, part) : text;
       });
@@ -4993,6 +4995,20 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
         // none, and the panel's roles box is right there.
         return RelicModel.addPoint(text, rel, 'point' + n,
           msg.x, msg.y, msg.z, 'point ' + n, '');
+      });
+      return;
+    }
+    if (msg && msg.type === 'addbarrier') {
+      await applyRelicStructure(doc, index, (text: string, rel: any) => {
+        const taken = new Set([...rel.chambers, ...rel.boxes, ...rel.solids,
+                               ...(rel.barriers || [])].map((p: RelicPart) => p.key));
+        let n = taken.size + 1;
+        while (taken.has('barrier' + n)) { n++; }
+        // `addBarrier` writes `Clear with: beam` alongside it. A barrier that nothing can
+        // open is the one case `sbs lint` complains about, and it is almost never what
+        // somebody reaching for this button meant - deleting the line makes it a wall.
+        return RelicModel.addBarrier(text, rel, 'barrier' + n,
+          msg.x, msg.y, msg.z, 240, 'barrier ' + n);
       });
       return;
     }
@@ -5109,9 +5125,10 @@ async function showRelic(uriArg?: string, column: vscode.ViewColumn = vscode.Vie
     const model = RelicModel.parse(d.getText());
     const rel = model.relics[idx];
     if (!rel) { return; }
-    // POINTS TOO. They are drawn and draggable, so leaving them out of the lookup made
-        // a drag silently do nothing - the edit found no part and returned.
-        const part = [...rel.chambers, ...rel.boxes, ...rel.solids, ...rel.points]
+    // POINTS AND BARRIERS TOO. Everything drawn is draggable, so a part left out of the
+    // lookup makes the drag silently do nothing - the edit finds no part and returns.
+    const part = [...rel.chambers, ...rel.boxes, ...rel.solids, ...rel.points,
+                  ...(rel.barriers || [])]
       .find((p: RelicPart) => p.key === key);
     if (!part) { return; }
     const text = d.getText();

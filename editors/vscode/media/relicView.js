@@ -181,6 +181,10 @@ function render(relics, nonce, index, view, live, cam, sel3, items) {
     // A place rather than a shape: where an item is found, where NPCs arrive, the
     // way in. What it is FOR is its roles.
     + '<button id="addpoint" title="A named place - an item, a spawn, the way in">Add point</button>'
+    // A way that is SHUT. Not navigable space and not subtracted from it either -
+    // it severs the routes that cross it until something opens it, which is what
+    // makes a ruin a dungeon rather than a set of rooms.
+    + '<button id="addbarrier" title="A shut way - severs the routes through it until it is opened">Add barrier</button>'
     + '<button id="del">Delete</button>'
     // Named for what they SHOW, with the axis spelled out - Cosmos is Y-up and
     // Blender is Z-up, so anyone arriving from there will otherwise reach for
