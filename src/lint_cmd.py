@@ -101,6 +101,30 @@ def _library_mast_globals():
     return names
 
 
+def _mast_global_names():
+    """Every name in `MastGlobals.globals` once the library has registered itself.
+
+    That table is exactly what `core_nodes/assign.py` refuses a hard assignment to
+    ("Variable assignment to a keyword"), which compiles the whole story to 0 labels. It
+    is wider than `_library_mast_globals` - it includes the `procedural.gui` package
+    re-exports and MAST's own builtins. Registering needs an `sbs` module; outside the
+    engine that is the cosmos_dev mock when it can be found. Best-effort: on any failure
+    the library half of the check is skipped rather than reporting nonsense.
+    """
+    try:
+        if "sbs" not in sys.modules:
+            try:
+                import cosmos_dev.mock.sbs as _mock_sbs
+                sys.modules["sbs"] = _mock_sbs
+            except Exception:
+                return set()
+        from sbs_utils.mast_sbs import mast_sbs_procedural  # noqa: F401 - registers
+        from sbs_utils.mast.mast_globals import MastGlobals
+        return set(MastGlobals.globals)
+    except Exception:
+        return set()
+
+
 def _load_signal_lint(missions, mission):
     """Import `signal_lint` - working tree first, else the mission's own sbslib."""
     _prefer_working_tree_sbs_utils(missions, mission)
@@ -547,7 +571,12 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
             except OSError:
                 continue
         if py_sources:
-            project = namespace_lint_project(py_sources, ns_mast, _library_mast_globals())
+            try:
+                project = namespace_lint_project(py_sources, ns_mast, _library_mast_globals(),
+                                                 mast_globals=_mast_global_names())
+            except TypeError:
+                # An older sbs_utils whose namespace_lint predates `mast_globals`.
+                project = namespace_lint_project(py_sources, ns_mast, _library_mast_globals())
             by_file = {}
             for rel, f in project:
                 by_file.setdefault(rel, []).append(f)
