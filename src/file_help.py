@@ -336,9 +336,11 @@ def release_asset_candidates(local_name):
     A lib is stored in `__lib__/` (and referenced from story.json) as
     `{user}.{repo}.{folder}.{version}.{ext}`, but repos do not all PUBLISH it under that
     name. sbs_utils' workflow interpolates owner+repo, so its sbslib asset matches the
-    local name; LegendaryMissions' workflow interpolates only the bare folder, so
-    `artemis-sbs.LegendaryMissions.hangar.v1.4.0.mastlib` is published as
-    `hangar.v1.4.0.mastlib`. Both conventions are live and neither is going away.
+    local name. LegendaryMissions' workflow now does too (`main.yml` publishes
+    `{owner}.{repo}.{addon}.{tag}.mastlib`), but its OLDER releases published the bare
+    folder - `artemis-sbs.LegendaryMissions.hangar.v1.4.0.mastlib` as
+    `hangar.v1.4.0.mastlib` - and another repo's workflow may still do that, so the bare
+    name stays as the fallback.
 
     Returns a LIST, most likely first, so a caller can fall back rather than 404 and give
     up: the two repos already disagree and either could change, and the fallback costs one
