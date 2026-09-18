@@ -132,7 +132,10 @@ function startClient(): void {
   const exec = resolveServer();
   const serverOptions: ServerOptions = { run: exec, debug: exec };
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: 'file', language: 'amd' }],
+    // .mast too, for its lint diagnostics only (a stray statement in an `await ...:`
+    // block, unguarded data_set reads, side effects in //signal routes); the server
+    // answers every other request on a .mast file with nothing.
+    documentSelector: [{ scheme: 'file', language: 'amd' }, { scheme: 'file', language: 'mast' }],
     outputChannel: output,
     // The server re-reads a mission's .mast on each check; watching them lets an
     // editor nudge it after cross-file edits.

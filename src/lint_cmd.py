@@ -138,6 +138,24 @@ def _load_signal_lint(missions, mission):
         return signal_lint
 
 
+def _load_await_lint(missions, mission):
+    """Import `await_lint` - working tree first, else the mission's own sbslib.
+
+    Returns None when the mission's sbs_utils predates the rule."""
+    _prefer_working_tree_sbs_utils(missions, mission)
+    sys.path.insert(0, mission)
+    try:
+        from sbs_utils.procedural.await_lint import await_lint
+        return await_lint
+    except Exception:
+        try:
+            sbs_lib_import(missions, mission)
+            from sbs_utils.procedural.await_lint import await_lint
+            return await_lint
+        except Exception:
+            return None
+
+
 def _load_blob_lint(missions, mission):
     """Import `blob_lint` - working tree first, else the mission's own sbslib.
 
@@ -393,6 +411,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
         amd_lint = _load_amd_lint(missions, mission)
         signal_lint = None if no_signals else _load_signal_lint(missions, mission)
         blob_lint = _load_blob_lint(missions, mission)
+        await_lint = _load_await_lint(missions, mission)
     except Exception as e:
         print(f"ERROR: could not load sbs_utils to lint ({e})")
         raise SystemExit(2)
@@ -461,11 +480,16 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
         else:  # json
             bundle.extend(f.to_dict(file=rel) for f in findings)
 
-    # MAST data_set pass: a blob read compared or `in`-tested with no None guard. Same
-    # printing rule as the signal pass below - only files WITH findings.
-    if blob_lint is not None:
+    # MAST data_set pass: a blob read compared or `in`-tested with no None guard, and
+    # the await pass: a statement directly in an `await ...:` block (it never runs).
+    # Same printing rule as the signal pass below - only files WITH findings.
+    per_file_mast = [r for r in (blob_lint, await_lint) if r is not None]
+    if per_file_mast:
         for path in mast_files:
-            findings = blob_lint(file_path=path)
+            findings = []
+            for rule in per_file_mast:
+                findings += rule(file_path=path)
+            findings.sort(key=lambda f: f.line)
             if not findings:
                 continue
             rel = os.path.relpath(path, mission)
