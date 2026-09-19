@@ -1,4 +1,5 @@
 from cli_cmd import cli, zipapp_dir
+from engine_exe import cosmos_root, engine_options, resolve_engine_exe
 import click
 
 import subprocess
@@ -93,13 +94,15 @@ def _window_of(pid, timeout=15.0):
                    "The console each client opens on travels through a single shared file, "
                    "so seeding the next window too early takes it away from the one still "
                    "reading. Raise it if windows come up on the wrong console.")
-def run(consoles, extra, mission, ip, no_auto, dry_run, settle):
+@engine_options
+def run(consoles, extra, mission, ip, no_auto, dry_run, settle, debug, exe):
     """Launch a server and a set of console clients.
 
         sbs run                                  server + the five standard consoles
         sbs run comms,weapons                    just those two
         sbs run comms map=sandbox profile=soak   pass anything else straight through
         sbs run --dry-run                        show the command lines, launch nothing
+        sbs run --debug                          the same, on the engine's debug build
 
     The mission comes from `--mission` rather than whatever `preferences.json` happens to
     hold - a launch should say what it is launching rather than mutate a shared file to
@@ -121,11 +124,8 @@ def run(consoles, extra, mission, ip, no_auto, dry_run, settle):
     # update setup.json
     # starts sevrer and clients
     import os 
-    missions = os.path.dirname(os.path.realpath(__file__))
-    if os.path.basename(missions)!="missions":
-        missions = os.path.dirname(missions)
+    cosmos_path, missions = cosmos_root()
     data_path = os.path.dirname(missions)
-    cosmos_path = os.path.dirname(data_path)
     os.chdir(cosmos_path)
     # LAUNCH BY ABSOLUTE PATH, not by bare name. The chdir above is still needed - the
     # engine resolves its own data relative to the working directory - but it is NOT enough
@@ -133,9 +133,8 @@ def run(consoles, extra, mission, ip, no_auto, dry_run, settle):
     # `NoDefaultCurrentDirectoryInExePath` is unset, and MSYS2/Git-Bash exports it, so a bare
     # "Artemis3-x64-release.exe" died with WinError 2 for anyone launching from Git Bash (or
     # any terminal descended from one) while working perfectly from cmd.
-    exe = os.path.join(cosmos_path, "Artemis3-x64-release.exe")
-    if not os.path.isfile(exe):
-        raise click.ClickException(f"engine not found: {exe}")
+    # `--debug` / `--exe` pick another build; the install root stays the working directory.
+    exe = resolve_engine_exe(cosmos_path, debug, exe)
     #
     #
     #

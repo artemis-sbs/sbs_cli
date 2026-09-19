@@ -27,28 +27,10 @@ import tempfile
 import click
 
 from cli_cmd import cli, zipapp_dir
+from engine_exe import cosmos_root, engine_options, resolve_engine_exe
 from file_help import derived_art_status, derived_art_files
 
-EXE = "Artemis3-x64-release.exe"
-
-
-def _cosmos_root():
-    """(install root, missions folder), from this tool's own location.
-
-    WALK UP TO THE FOLDER NAMED `missions` rather than counting levels. Deployed, this file
-    lives in `…/data/missions/sbs.pyz/art_cmd.py`, one level down. In a source checkout it is
-    `…/data/missions/sbs_cli/src/art_cmd.py`, two. `run_cmd` gets away with a single
-    `dirname` because it only ever runs from the zipapp; anything that also runs from source
-    has to search.
-    """
-    here = os.path.dirname(os.path.realpath(__file__))
-    missions = here
-    while os.path.basename(missions).lower() != "missions":
-        parent = os.path.dirname(missions)
-        if parent == missions:                      # hit the drive root - give up cleanly
-            return os.path.dirname(os.path.dirname(here)), here
-        missions = parent
-    return os.path.dirname(os.path.dirname(missions)), missions
+_cosmos_root = cosmos_root
 
 
 def _art_dirs(base):
@@ -381,7 +363,7 @@ def _write_bake_mission(cosmos, missions, keys, dwell):
     return folder
 
 
-def _bake_batch(cosmos, missions, targets, settle, dwell):
+def _bake_batch(cosmos, missions, targets, settle, dwell, exe):
     """Bake a whole batch in ONE engine run. Returns {root: "baked"|"crashed"|"timeout"}.
 
     BATCHED, not one run per hull. The original did one engine start each, to stop a crash
@@ -393,11 +375,8 @@ def _bake_batch(cosmos, missions, targets, settle, dwell):
     """
     keys = [k for _d, _r, k in targets]
     _write_bake_mission(cosmos, missions, keys, dwell)
-    exe = os.path.join(cosmos, EXE)
-    if not os.path.isfile(exe):
-        raise click.ClickException(f"engine not found: {exe}")
-    # ABSOLUTE PATH, not a bare name: CreateProcess only searches the working directory
-    # when `NoDefaultCurrentDirectoryInExePath` is unset, and MSYS2/Git-Bash exports it.
+    # `exe` is ABSOLUTE (resolve_engine_exe): CreateProcess only searches the working
+    # directory when `NoDefaultCurrentDirectoryInExePath` is unset, and Git-Bash exports it.
     proc = subprocess.Popen([exe, "autostartserver", "defaultmission=_sbs_art_bake"],
                             cwd=cosmos)
     done = {}
@@ -438,7 +417,8 @@ def _bake_batch(cosmos, missions, targets, settle, dwell):
 @click.option("--dwell", default=3.0, show_default=True, metavar="SECONDS",
               help="Sim-seconds each hull is held in front of the camera.")
 @click.option("--dry-run", is_flag=True, help="Show what would be baked, launch nothing.")
-def art_bake(folder, undrawn, settle, dwell, dry_run):
+@engine_options
+def art_bake(folder, undrawn, settle, dwell, dry_run, debug, exe):
     """Clear half-baked art and drive the engine to bake it again.
 
     BATCHED: every hull is paraded past one camera in a SINGLE engine run. It used to be
@@ -464,6 +444,8 @@ def art_bake(folder, undrawn, settle, dwell, dry_run):
     "17 undrawn" reading as "17 to bake" is exactly the wrong impression.
     """
     cosmos, missions = _cosmos_root()
+    # Resolved up front so a missing exe fails before any half-baked file is cleared.
+    exe = None if dry_run else resolve_engine_exe(cosmos, debug, exe)
     wanted = ("half", "unbaked") if undrawn else ("half",)
     rows = [r for r in _scan(folder) if r[3]["state"] in wanted]
     if not rows:
@@ -489,7 +471,7 @@ def art_bake(folder, undrawn, settle, dwell, dry_run):
             for f in derived_art_files(d, root):
                 os.remove(os.path.join(d, f))
         print(f"  baking {len(todo)} hull(s) in one run ...", flush=True)
-        done = _bake_batch(cosmos, missions, todo, settle, dwell)
+        done = _bake_batch(cosmos, missions, todo, settle, dwell, exe)
         left = [t for t in todo if done.get(t[1]) != "baked"]
         baked += [t[1] for t in todo if done.get(t[1]) == "baked"]
         # RETRY THE REMAINDER ONE AT A TIME. A batch that died says nothing about WHICH
@@ -500,7 +482,7 @@ def art_bake(folder, undrawn, settle, dwell, dry_run):
             for f in derived_art_files(d, root):
                 os.remove(os.path.join(d, f))
             print(f"    {root} ...", end="", flush=True)
-            one = _bake_batch(cosmos, missions, [(d, root, key)], settle, dwell)
+            one = _bake_batch(cosmos, missions, [(d, root, key)], settle, dwell, exe)
             state = one.get(root, "timeout")
             print(f" {state}")
             if state == "baked":

@@ -140,6 +140,19 @@ a shared file that the next run has to undo.
 sbs run comms,weapons --ip 192.168.1.50
 ```
 
+**Which build of the game?** The normal release build unless you say otherwise. The
+debug build is the one to use when you are chasing a crash:
+
+```
+sbs run --debug                   # Artemis3-x64-debug.exe
+sbs run --exe release-1.3.4       # Artemis3-x64-release-1.3.4.exe - short for the full name
+sbs run --exe D:\cosmos\Artemis3-x64-debug.exe    # or any path
+```
+
+To use one build for everything in a terminal, set `SBS_ENGINE_EXE` (for example
+`set SBS_ENGINE_EXE=debug`); a flag on the command still wins. Ask for a build you don't
+have and `sbs run` lists the ones you do. `sbs art bake` takes the same options.
+
 ### Passing things through to the mission
 
 Anything you add on the end is handed to every window as-is, so a mission can read
@@ -558,9 +571,11 @@ is completely normal — that's just art nobody has looked at yet, and it is **n
 a problem.
 
 `clear` deletes only the files the game made. Your `.obj` and your textures are
-never touched. `bake` then starts the game once per ship to rebuild them, and tells
-you at the end if any ship still won't build — which turns "the server keeps dying"
-into a short list of names.
+never touched. `bake` then starts the game once and shows it every ship in turn to
+rebuild them. If the game dies partway, the ships that didn't finish are retried one at
+a time, and it tells you at the end if any ship still won't build — which turns "the
+server keeps dying" into a short list of names. Add `--debug` (or `--exe`, as for
+`sbs run`) to bake with the debug build.
 
 `--undrawn` builds ahead of time, so the game never has to do it mid-match — every
 build that already happened is one that can't go wrong while people are playing.
@@ -568,9 +583,9 @@ It reaches fewer ships than the count suggests, and says so: most never-drawn ar
 is leftovers nothing can put on screen (older versions of a hull, pieces of a
 larger model, backdrops), and the game can only build art it can actually spawn.
 
-> Art that a **mod** carries can't be rebuilt where it sits, and `sbs art` says so
-> rather than trying. The rebuilt file remembers where its textures were, so it has
-> to be built in the game's own `data/graphics/ships` and copied back.
+> Art that a **mod** carries is rebuilt where it sits, like everything else. (Older
+> versions of this tool refused and said to build it in `data/graphics/ships` and copy
+> it back; since engine 1.3.6 that is no longer needed.)
 
 ---
 
