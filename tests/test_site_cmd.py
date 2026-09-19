@@ -223,7 +223,7 @@ class TestRecords(_Fixture):
         page = os.path.join(self.mission, "mkdocs", "docs", "records",
                             "maps", "bosses", "warlord.md")
         self.assertTrue(os.path.isfile(page))
-        self.assertIn("{#warlord}", self.read(page))
+        self.assertIn("{: #warlord}", self.read(page))
 
     def test_the_section_gets_an_index(self):
         # `navigation.indexes` is on in both shipped repos, so a group without a
