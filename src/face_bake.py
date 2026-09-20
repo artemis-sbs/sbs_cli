@@ -30,6 +30,8 @@ import hashlib
 import os
 import re
 
+#: Fallback grid for an atlas nothing declares - every mod sheet in the wild is 8x8.
+GRID_COLS = 8
 GRID_ROWS = 8
 DEFAULT_HEIGHT = 96
 
@@ -66,10 +68,14 @@ class FaceBaker:
             self._alias = face_alias_table() or {}
         return self._alias
 
-    def _grid_cols(self, alias):
-        """Read from `face.js`'s own `gridCols`, because the Terran sheet is 15 columns
-        wide and every other one is 8 - a constant copied here would misalign every
-        Terran face the day that changes."""
+    def _grid(self):
+        """{alias: (cols, rows)} read from `face.js`'s own STOCK_GRID table.
+
+        Scraped rather than copied, because every stock sheet now has its OWN size and
+        its own row-per-layer meaning - a constant duplicated here would misalign every
+        face of whichever race changed next. This used to parse a `ter ? 15 : 8`
+        ternary, which was the same idea while only Terran was the odd one out.
+        """
         if self._cols is None:
             self._cols = {}
             from sbs_utils.procedural.amd_assets import face_js_path
@@ -81,15 +87,19 @@ class FaceBaker:
                         src = f.read()
                 except OSError:
                     src = ""
-            m = re.search(r"gridCols\s*\([^)]*\)\s*\{\s*return\s+"
-                          r"(?P<var>\w+)\s*===\s*'(?P<alias>\w+)'\s*\?\s*"
-                          r"(?P<wide>\d+)\s*:\s*(?P<normal>\d+)", src)
-            if m:
-                self._cols = {"__default__": int(m.group("normal")),
-                              m.group("alias"): int(m.group("wide"))}
-            else:
-                self._cols = {"__default__": GRID_ROWS}
-        return self._cols.get(alias, self._cols.get("__default__", GRID_ROWS))
+            block = re.search(r"STOCK_GRID\s*=\s*\{(?P<body>.*?)\}\s*;", src, re.S)
+            if block:
+                for m in re.finditer(r"(?P<alias>\w+)\s*:\s*\{\s*cols\s*:\s*(?P<cols>\d+)"
+                                     r"\s*,\s*rows\s*:\s*(?P<rows>\d+)",
+                                     block.group("body")):
+                    self._cols[m.group("alias")] = (int(m.group("cols")),
+                                                    int(m.group("rows")))
+        return self._cols
+
+    def _grid_of(self, alias):
+        """(cols, rows) for an alias. A mod atlas we were never told about falls back to
+        8x8, which is what every mod sheet in the wild actually is."""
+        return self._grid().get(alias, (GRID_COLS, GRID_ROWS))
 
     # --- baking -------------------------------------------------------------
 
@@ -147,8 +157,8 @@ class FaceBaker:
             atlas = self._open(table.get(layer["alias"]))
             if atlas is None:
                 continue
-            cols = self._grid_cols(layer["alias"])
-            cw, ch = atlas.width / cols, atlas.height / GRID_ROWS
+            cols, rows = self._grid_of(layer["alias"])
+            cw, ch = atlas.width / cols, atlas.height / rows
             sx = layer["col"] * cw + layer["ox"]
             sy = layer["row"] * ch + layer["oy"]
             box = (int(round(sx)), int(round(sy)),
@@ -163,9 +173,15 @@ class FaceBaker:
             cell = cell.resize(out.size, Image.LANCZOS)
             rgb = layer["rgb"]
             if rgb != (255, 255, 255):
-                # face.js: multiply the tint through, then mask back to the sprite's
-                # own alpha - so the tint colors the glyph and not its transparent
-                # surround.
+                # Multiply the tint through each channel, then restore the sprite's
+                # own alpha - so the tint colors the glyph and not its surround.
+                #
+                # PIL works in STRAIGHT (un-premultiplied) alpha, so this is already the
+                # correct operation and matches the engine. Worth saying because the
+                # BROWSER compositor was not: canvas stores premultiplied, and its
+                # multiply blend left a tint-coloured halo on every soft edge until
+                # face.js was moved to a per-pixel tint. Do not "align" this with
+                # whatever face.js did historically.
                 tint = Image.new("RGB", cell.size, rgb)
                 tinted = ImageChops.multiply(cell.convert("RGB"), tint).convert("RGBA")
                 tinted.putalpha(cell.getchannel("A"))
