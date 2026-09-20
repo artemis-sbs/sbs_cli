@@ -179,7 +179,7 @@ class FaceBaker:
                 # PIL works in STRAIGHT (un-premultiplied) alpha, so this is already the
                 # correct operation and matches the engine. Worth saying because the
                 # BROWSER compositor was not: canvas stores premultiplied, and its
-                # multiply blend left a tint-coloured halo on every soft edge until
+                # multiply blend left a tint-colored halo on every soft edge until
                 # face.js was moved to a per-pixel tint. Do not "align" this with
                 # whatever face.js did historically.
                 tint = Image.new("RGB", cell.size, rgb)
