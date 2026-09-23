@@ -3,6 +3,7 @@ import os
 import sys
 import glob
 import json
+import re
 import zipfile
 
 from cli_cmd import cli, zipapp_dir
@@ -354,6 +355,76 @@ def _report_missing(missions, mission, amd_files, known_keys, fmt):
     return 0
 
 
+def _addon_py_sources(mission):
+    """[(rel, text)] for every non-test .py under an addon (a dir with __init__.mast)."""
+    out = []
+    for ini in sorted(glob.glob(os.path.join(mission, "*", "__init__.mast"))):
+        d = os.path.dirname(ini)
+        for path in sorted(glob.glob(os.path.join(d, "**", "*.py"), recursive=True)):
+            if os.path.basename(path).startswith("test_"):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    out.append((os.path.relpath(path, mission), fh.read()))
+            except OSError:
+                continue
+    return out
+
+
+def _report_private(mission, fmt):
+    """`--private`: public addon defs used only in their own file. Always exits 0."""
+    try:
+        import sbs_utils
+        from sbs_utils.procedural.namespace_lint import namespace_lint_private_candidates
+    except Exception as e:
+        print(f"ERROR: this sbs_utils has no --private support ({e})")
+        return 2
+    py_sources = _addon_py_sources(mission)
+    mine = {rel for rel, _ in py_sources}
+    refs = []
+    for ext in ("py", "mast", "amd", "yaml", "json"):
+        for path in glob.glob(os.path.join(mission, "**", "*." + ext), recursive=True):
+            rel = os.path.relpath(path, mission)
+            if rel in mine or os.path.basename(path).startswith("test_"):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    refs.append((rel, fh.read()))
+            except OSError:
+                continue
+    lib_words = set()
+    lib_root = os.path.dirname(sbs_utils.__file__)
+    for path in glob.glob(os.path.join(lib_root, "**", "*.*"), recursive=True):
+        if os.path.splitext(path)[1] not in (".py", ".mast"):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                lib_words.update(re.findall(r"[A-Za-z_]\w*", fh.read()))
+        except OSError:
+            continue
+    found = namespace_lint_private_candidates(py_sources, refs, lib_words)
+    by_file = {}
+    for rel, f in found:
+        by_file.setdefault(rel, []).append(f)
+    bundle = []
+    for rel in sorted(by_file):
+        if fmt == "text":
+            print(f"== {rel} ==")
+            for f in by_file[rel]:
+                print(f"  {f}")
+        elif fmt == "compact":
+            for f in by_file[rel]:
+                print(f.compact(rel))
+        else:
+            bundle.extend(f.to_dict(file=rel) for f in by_file[rel])
+    if fmt == "json":
+        import json
+        print(json.dumps(bundle, indent=2))
+    elif fmt == "text":
+        print(f"\n{len(found)} public function(s) in {len(by_file)} file(s) could be private")
+    return 0
+
+
 @cli.command(short_help="Validate a mission's AMD (.amd) files")
 @click.argument("folder", default=".")
 @click.option("--strict", is_flag=True, help="Exit non-zero on warnings too (not just errors).")
@@ -369,7 +440,10 @@ def _report_missing(missions, mission, amd_files, known_keys, fmt):
 @click.option("--missing", is_flag=True,
               help="List what is REFERENCED but not written yet, grouped by target, "
                    "and exit 0. A work list, not a failure.")
-def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
+@click.option("--private", "private", is_flag=True,
+              help="List public addon functions nothing outside their own file uses "
+                   "(candidates for a leading underscore), and exit 0. A work list.")
+def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
     """Lint a mission FOLDER: its .amd files AND its .mast signal routes.
 
     AMD: structural problems (broken headings, unclosed `---` fences, heading-level
@@ -439,6 +513,9 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing):
 
     if missing:
         raise SystemExit(_report_missing(missions, mission, amd_files, known_keys, fmt))
+
+    if private:
+        raise SystemExit(_report_private(mission, fmt))
 
     total_err = total_warn = 0
     bundle = []
