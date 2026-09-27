@@ -23,6 +23,7 @@ from site_cmd import site
 from art_cmd import art
 from osc_cmd import osc
 from osc_layout_cmd import layout as osc_layout
+from osc_web_cmd import web as osc_web
 import click
 
 
