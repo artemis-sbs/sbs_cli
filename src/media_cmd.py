@@ -206,7 +206,12 @@ def unpack_all(lib_dir, force=False, quiet=False, pinned=None):
     keep = None if pinned is None else {os.path.basename(p) for p in pinned}
     n = 0
     for f in sorted(os.listdir(lib_dir)):
-        if not (f.lower().endswith(".zip") and ".media." in f.lower()):
+        if not f.lower().endswith(".zip"):
+            continue
+        # A media pack is a zip NAMED like one (`<owner>.<repo>.media.<tag>.zip`) - or
+        # any zip a mission pins as media: a repo that releases several packs names
+        # them after the pack (`artemis-sbs.Cosmos-Tiles.frontier.v0.1.0.zip`).
+        if ".media." not in f.lower() and not (keep and f in keep):
             continue
         if keep is not None and f not in keep:
             continue

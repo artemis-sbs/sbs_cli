@@ -78,6 +78,21 @@ class Unpacking(unittest.TestCase):
         self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.1.0", "casino", "old.png")))
         self.assertTrue(os.path.exists(self._at("u.Demo.media.v1.4.0", "casino", "new.png")))
 
+    def test_A_PINNED_PACK_NAMED_AFTER_ITSELF_IS_UNPACKED(self):
+        """A repo that releases several packs names each after the pack
+        (`u.Tiles.frontier.v0.1.0.zip`), with no `.media.` in it. Pinned, it is media."""
+        self._pack("u.Tiles.frontier.v0.1.0.zip", ["tileart/frontier/manifest.json"])
+        self._pack("u.Other.stuff.v1.0.0.zip", ["x.txt"])
+        n = M.unpack_all(self.lib, pinned=["u.Tiles.frontier.v0.1.0.zip"])
+        self.assertEqual(n, 1)
+        self.assertTrue(os.path.exists(self._at("u.Tiles.frontier.v0.1.0", "tileart",
+                                                "frontier", "manifest.json")))
+        self.assertFalse(os.path.exists(self._at("u.Other.stuff.v1.0.0")))
+
+    def test_an_unpinned_zip_not_named_media_is_left_alone(self):
+        self._pack("u.Tiles.frontier.v0.1.0.zip", ["tileart/frontier/manifest.json"])
+        self.assertEqual(M.unpack_all(self.lib), 0)
+
     def test_second_run_is_a_no_op(self):
         p = self._pack("u.Demo.media.v1.0.0.zip", ["casino/x.png"])
         self.assertTrue(M.unpack_media(p, self.lib))

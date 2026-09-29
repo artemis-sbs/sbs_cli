@@ -169,8 +169,11 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
             # ...and unpack the art once, beside the libraries, so a fetched dependency
             # lands in the same layout a locally built one does.
             try:
-                from media_cmd import unpack_all
-                unpack_all(os.path.join(zipapp_dir, "__lib__"))
+                from media_cmd import unpack_all, pinned_packs
+                # Pass what the missions pin, so a pack named after itself rather than
+                # `.media.` (a repo releasing several packs) is unpacked too.
+                unpack_all(os.path.join(zipapp_dir, "__lib__"),
+                           pinned=pinned_packs(zipapp_dir))
             except Exception as e:
                 print(f"WARNING: could not unpack media: {e}")
 
