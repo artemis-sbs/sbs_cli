@@ -74,6 +74,14 @@ function detectCosmosRoot(): string | undefined {
       starts.push(folder.uri.fsPath);
     }
   }
+  // Any open document too. A .tiles or .tileset opens in a CUSTOM editor, so there is no
+  // active TEXT editor - and with no Cosmos workspace folder the server fell back to
+  // `sbs` on PATH. The custom editor's document is still an open TextDocument.
+  for (const doc of vscode.workspace.textDocuments) {
+    if (doc.uri.scheme === 'file') {
+      starts.push(path.dirname(doc.uri.fsPath));
+    }
+  }
   for (const start of starts) {
     const root = walkUpForCosmos(start);
     if (root) {
@@ -5196,7 +5204,25 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  startClient();
+  // Opening a .tiles/.tileset FIRST activates the extension for its custom editor before
+  // that document exists, so there is nothing yet to find the Cosmos install from - and
+  // the `sbs`-on-PATH fallback crashed five times and was never retried (seen in a real
+  // extension host). With nothing to go on, wait for the first document that is inside
+  // an install, or is one of ours, and start then.
+  const explicit = (vscode.workspace.getConfiguration('amd').get<string>('server.command') || '').trim();
+  if (explicit || detectCosmosRoot()) {
+    startClient();
+  } else {
+    const waiter = vscode.workspace.onDidOpenTextDocument((doc) => {
+      if (doc.uri.scheme !== 'file') { return; }
+      const ours = /\.(amd|mast|mastlib|tiles|tileset)$/i.test(doc.uri.fsPath);
+      if (!ours && !walkUpForCosmos(path.dirname(doc.uri.fsPath))) { return; }
+      waiter.dispose();
+      output.appendLine(`Starting the language server for ${doc.uri.fsPath}`);
+      startClient();                     // detectCosmosRoot now sees this document
+    });
+    context.subscriptions.push(waiter);
+  }
 }
 
 export function deactivate(): Thenable<void> | undefined {
