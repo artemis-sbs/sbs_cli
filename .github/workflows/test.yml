@@ -27,10 +27,10 @@ jobs:
     # runs here too, so the tests meet the same platform that ships.
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           # The engine embeds 3.11 and sbs.pyz runs on it; test on what ships.
           python-version: "3.11"

@@ -7,3 +7,4 @@ tsconfig.json
 .gitignore
 *.vsix
 node_modules/.bin/**
+test/**
