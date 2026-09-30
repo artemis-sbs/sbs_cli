@@ -21,9 +21,11 @@ jobs:
         with:
           node-version: "18"
 
+      # `npm install`, not `npm ci`: package-lock.json is gitignored in editors/vscode,
+      # and `npm ci` refuses to run without one (that is what failed amd-vscode-v0.8.0).
       - name: Install
         working-directory: editors/vscode
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Set version from tag
         working-directory: editors/vscode

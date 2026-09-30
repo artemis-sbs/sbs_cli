@@ -2,7 +2,7 @@
   "name": "amd-language",
   "displayName": "Artemis AMD",
   "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, diagnostics/navigation/formatting via the sbs AMD language server, plus a MAST source debugger.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "artemis-sbs",
   "license": "MIT",
   "repository": {
