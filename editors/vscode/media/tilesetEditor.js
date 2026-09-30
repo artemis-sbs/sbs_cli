@@ -150,10 +150,8 @@
       render();
       return;
     }
-    const used = ((S.preview || {}).usage || {})[oldName] || 0;
-    $('status').textContent = name !== oldName && used
-      ? 'Renamed - the ' + used + ' cells the areas draw as ' + oldName + ' still say ' + oldName + ' in their legends.'
-      : '';
+    // A rename is followed into the areas' legends by the extension, which says so.
+    $('status').textContent = name !== oldName ? 'Renaming ' + oldName + ' to ' + name + '...' : '';
     S.sel = name;
     send('setKind', { oldName, name, rules: rulesOf(tr) });
   });

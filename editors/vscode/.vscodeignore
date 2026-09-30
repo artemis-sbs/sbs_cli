@@ -8,3 +8,4 @@ tsconfig.json
 *.vsix
 node_modules/.bin/**
 test/**
+node_modules/**

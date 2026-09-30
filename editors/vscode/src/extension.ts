@@ -2892,6 +2892,9 @@ class TilesetEditorProvider implements vscode.CustomTextEditorProvider {
 
     let seq = 0;
     let timer: NodeJS.Timeout | undefined;
+    // The areas that use this tileset, from the last preview - where a renamed kind has
+    // to be renamed too.
+    let areaPaths: Record<string, string> = {};
     const preview = (delay = 150) => {
       clearTimeout(timer);
       timer = setTimeout(async () => {
@@ -2904,6 +2907,7 @@ class TilesetEditorProvider implements vscode.CustomTextEditorProvider {
           const data = await client!.sendRequest<TilesPreview>('tiles/tilesetPreview',
             { textDocument: { uri: document.uri.toString() }, text: document.getText() });
           if (my !== seq) { return; }
+          areaPaths = (data?.areaPaths as Record<string, string>) || {};
           const sheets: Record<string, string> = {};
           for (const sp of Object.values(data?.sprites || {})) {
             sheets[sp.sheet] = panel.webview.asWebviewUri(vscode.Uri.file(sp.sheet)).toString();
@@ -2928,9 +2932,34 @@ class TilesetEditorProvider implements vscode.CustomTextEditorProvider {
       switch (msg?.type) {
         case 'ready': sendDoc(); preview(0); break;
         case 'refresh': preview(0); break;
-        case 'setKind':
-          await applyTileEdits(document, [TilesetModel.kindEdit(model(), msg.oldName, msg.name, msg.rules || {})]);
+        case 'setKind': {
+          const edit: TileEdit = TilesetModel.kindEdit(model(), msg.oldName, msg.name, msg.rules || {});
+          if (!msg.oldName || msg.oldName === msg.name) {
+            await applyTileEdits(document, [edit]);
+            break;
+          }
+          // A RENAME follows the kind into every area that draws it: one WorkspaceEdit,
+          // so it lands - and undoes - as one change across the files. Nothing is saved;
+          // the areas it touched are left for Save All with the tileset.
+          const we = new vscode.WorkspaceEdit();
+          we.replace(document.uri, document.validateRange(new vscode.Range(edit.start, 0, edit.end, 0)), edit.text);
+          let files = 0, lines = 0;
+          for (const p of Object.values(areaPaths)) {
+            const area = await vscode.workspace.openTextDocument(vscode.Uri.file(p));
+            const edits: TileEdit[] = TilesModel.renameKindEdits(TilesModel.parse(area.getText()), msg.oldName, msg.name);
+            if (!edits.length) { continue; }
+            files += 1;
+            lines += edits.length;
+            for (const e of edits) {
+              we.replace(area.uri, area.validateRange(new vscode.Range(e.start, 0, e.end, 0)), e.text);
+            }
+          }
+          await vscode.workspace.applyEdit(we);
+          post({ type: 'status', text: files
+            ? `Renamed ${msg.oldName} to ${msg.name} here and in ${lines} legend line(s) of ${files} area file(s) - unsaved; Save All keeps it. Code that names the kind is not changed.`
+            : `Renamed ${msg.oldName} to ${msg.name}. No area draws it.` });
           break;
+        }
         case 'addKind':
           await applyTileEdits(document, [TilesetModel.addEdit(model(), msg.name, msg.rules || {})]);
           break;

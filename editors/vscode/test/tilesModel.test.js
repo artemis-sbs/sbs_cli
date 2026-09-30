@@ -140,5 +140,15 @@ check('... and with no plain `deck` it leaves what surrounds it', moved[1][1] ==
 out = T.applyEdits(PAD, T.rowEdits(mp, moved));
 check('it writes as ordinary row edits (so undo covers it)', T.parse(out).rows[3] === ',,pp,');
 
+console.log('\nrenaming a kind');
+const renamed = T.applyEdits(AREA, T.renameKindEdits(m, 'dust', 'dirt'));
+check('every legend line that draws it, and only the word',
+  renamed.includes('  .: dirt\n') && renamed.includes('  L: dirt   @landing\n'));
+check('other kinds, the map and the header are untouched',
+  renamed.includes('  #: rock\n') && renamed.includes('  :: salt\n')
+  && renamed.split('---')[1] === AREA.split('---')[1] && renamed.startsWith('# a comment'));
+check('a kind the area does not use is no edit', T.renameKindEdits(m, 'lava', 'magma').length === 0);
+check('an exit line is not a legend line', T.renameKindEdits(m, 'colony', 'town').length === 0);
+
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);

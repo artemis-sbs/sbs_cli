@@ -181,7 +181,8 @@ covers. **Face S** previews figures facing each way.
 **Open a `.tileset` file** and it opens as the **Tileset Editor**: one row per kind, with
 Walk/See/Tall checkboxes, its look (with a picture from the art sets), tint, `over`, and
 how many cells of the areas use it. Pick a kind, then click a look in the gallery below to
-put it on. Each edit rewrites one line, lined up with the file's own columns.
+put it on. Each edit rewrites one line, lined up with the file's own columns. Renaming a
+kind renames it in every area legend that draws it, as one undoable edit (Save All keeps it).
 
 A stroke rewrites only the rows it changed, and undo works as usual. `.tiles` and
 `.tileset` files are also highlighted and checked as you type. Full guide:

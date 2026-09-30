@@ -320,6 +320,33 @@
     return out;
   }
 
+  /**
+   * A kind renamed in the tileset, followed into this area's legend: an edit for every
+   * legend line that draws `oldKind`, replacing ONLY that word - so the line's own
+   * spacing, its character and its mark stay exactly as written.
+   */
+  function renameKindEdits(m, oldKind, newKind) {
+    const edits = [];
+    if (m.legendLine < 0) { return edits; }
+    const from = norm(oldKind);
+    for (let i = m.legendLine + 1; i < m.lines.length; i++) {
+      const raw = m.lines[i];
+      if (raw.trim().startsWith('---')) { break; }
+      if (!raw.trim()) { continue; }
+      if (raw[0] !== ' ' && raw[0] !== '\t') { break; }   // the next header key ends the block
+      const at = raw.length - raw.trimStart().length;     // the key character
+      if (raw[at + 1] !== ':') { continue; }
+      let s = at + 2;
+      while (s < raw.length && (raw[s] === ' ' || raw[s] === '\t')) { s++; }
+      let e = s;
+      while (e < raw.length && !/[\s@]/.test(raw[e])) { e++; }
+      if (raw.slice(s, e).toLowerCase() === from) {
+        edits.push({ start: i, end: i + 1, text: raw.slice(0, s) + norm(newKind) + raw.slice(e) + m.eol });
+      }
+    }
+    return edits;
+  }
+
   /** `x, y` or `x y` -> [x, y], or null. What an At: or a Patrol point holds. */
   function parseCell(s) {
     const n = String(s || '').replace(/,/g, ' ').trim().split(/\s+/).map(Number);
@@ -334,5 +361,5 @@
   }
 
   return { parse, grid, rowEdits, applyEdits, headerEdit, legendAddEdit, legendSetEdit,
-           freeChar, paint, line, rect, fill, resize, cellOfLine, parseCell, moveMark, rowText };
+           freeChar, paint, line, rect, fill, resize, cellOfLine, parseCell, moveMark, renameKindEdits, rowText };
 });
