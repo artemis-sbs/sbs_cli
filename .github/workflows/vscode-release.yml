@@ -17,9 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 22, not 18: vsce's own dependencies (undici) now need the global `File` that
+      # Node 18 lacks, so packaging died on it (amd-vscode-v0.8.1).
       - uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "22"
 
       # `npm install`, not `npm ci`: package-lock.json is gitignored in editors/vscode,
       # and `npm ci` refuses to run without one (that is what failed amd-vscode-v0.8.0).
