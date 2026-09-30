@@ -109,12 +109,124 @@ def _page_data(mission, data, links, rels, profile):
         | {k for _, _, ks in data["fringes"] for k in ks} \
         | {t["look"] for t in things if t["look"]}
     sprites = {k: v for k, v in (data.get("sprites") or {}).items() if k in drawn}
+    # A generated deck's rooms are marks named `room:<name>`: labeled by the name.
+    labels = {m: m[5:].replace("-", " ") for m in marks if m.startswith("room:")}
+    if labels and "entry" in marks:
+        labels["entry"] = "way in"
     return {"area": data["area"], "tiles": data["tiles"], "looks": data["looks"],
             "fringes": data["fringes"], "sprites": sprites, "marks": marks,
-            "exits": exits, "things": things,
+            "exits": exits, "things": things, "labels": labels,
             "kinds": {k: {"walk": v.get("walk"), "see": v.get("see")}
                       for k, v in (data.get("kinds") or {}).items()},
             "missing": data.get("missing") or []}
+
+
+#: Where the ship deck pages go, and the nav groups both kinds of page are listed under.
+DECKS_DIR = "decks"
+MAPS_GROUP = "Maps"
+DECKS_GROUP = "Ship decks"
+
+
+def deck_title(ship):
+    """`tsn_light_cruiser` -> `TSN Light Cruiser`: a short first word is a faction's
+    initials."""
+    words = str(ship).replace("-", "_").split("_")
+    return " ".join(w.upper() if i == 0 and len(w) <= 3 else w.capitalize()
+                    for i, w in enumerate(words) if w)
+
+
+def collect_decks(mission, profile="author"):
+    """One entry per ship interior plan (`.grid`) the mission has: the boarding deck the
+    library generates from it (`tilemap_preview_deck`), as `{key, title, rel, data}`."""
+    import re
+    from sbs_utils.procedural.tilemap_preview import tilemap_preview_deck
+    plans = []
+    for root, dirs, files in os.walk(mission):
+        dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != "mkdocs")
+        plans += [os.path.join(root, f) for f in sorted(files) if f.endswith(".grid")]
+    out, seen = [], set()
+    for path in plans:
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        if not re.search(r"^ship\s*:", text, re.M):
+            continue
+        source = os.path.relpath(path, mission).replace(os.sep, "/")
+        try:
+            data = tilemap_preview_deck(text, mission)
+        except Exception as e:                           # noqa: BLE001
+            data = {"ok": False, "error": str(e)}
+        ship = (data.get("ship") if data.get("ok") else None) or \
+            os.path.splitext(os.path.basename(path))[0]
+        key = str(ship).lower()
+        n = 2
+        while key in seen:
+            key = f"{str(ship).lower()}-{n}"
+            n += 1
+        seen.add(key)
+        entry = {"key": f"deck-{key}", "title": deck_title(ship),
+                 "rel": f"{DECKS_DIR}/{key}.html", "source": source, "deck": True,
+                 "data": None, "error": data.get("error")}
+        if data.get("ok"):
+            entry["data"] = _page_data(mission, data, {}, {}, profile)
+        out.append(entry)
+    return sorted(out, key=lambda m: m["title"])
+
+
+def extra_pages(maps, decks):
+    """The site pages for the maps and decks: each map in the nav under Maps; the decks
+    - there can be a hundred - through ONE index page in the nav, not a hundred entries."""
+    pages = [{"title": m["title"], "rel": m["rel"], "body": page_body(m),
+              "group": MAPS_GROUP, "kind": "Map"} for m in maps]
+    if decks:
+        pages.append({"title": "Every ship deck", "rel": f"{DECKS_DIR}/index.html",
+                      "body": decks_index_body(decks), "group": DECKS_GROUP,
+                      "kind": "Ship decks"})
+        pages += [{"title": f'{d["title"]} deck', "rel": d["rel"], "body": page_body(d),
+                   "group": None, "kind": "Ship deck"} for d in decks]
+    return pages
+
+
+def home_markdown(maps, decks):
+    """What the home page says about the maps and decks, as markdown."""
+    lines = []
+    if maps:
+        lines += ["## Maps", "", "| Map | Size |", "|---|---|"]
+        for m in maps:
+            a = (m.get("data") or {}).get("area") or {}
+            size = f'{a["w"]} x {a["h"]}' if a else "unreadable"
+            lines.append(f'| [{m["title"]}]({m["rel"]}) | {size} |')
+        lines.append("")
+    if decks:
+        lines += ["## Ship decks", "",
+                  f"The boarding deck of each of the {len(decks)} ship interiors, as a "
+                  f"boarding party would walk it: [every ship deck]({DECKS_DIR}/index.html).",
+                  ""]
+    return "\n".join(lines)
+
+
+def decks_index_body(decks):
+    e = html.escape
+    out = ["<h1>Ship decks</h1>",
+           '<p>The deck a boarding party walks on each ship, generated from its interior '
+           'plan: rooms furnished by what they are for, walls, doors and the way in.</p>',
+           "<table><tr><th>Ship</th><th>Size</th><th>Rooms</th><th>Plan</th></tr>"]
+    for d in decks:
+        name = os.path.basename(d["rel"])
+        if d["data"]:
+            a = d["data"]["area"]
+            rooms = len(d["data"].get("labels") or {})
+            out.append(f'<tr><td><a href="{e(name)}">{e(d["title"])}</a></td>'
+                       f'<td>{a["w"]} x {a["h"]}</td><td>{rooms}</td>'
+                       f'<td><code>{e(d["source"])}</code></td></tr>')
+        else:
+            out.append(f'<tr><td>{e(d["title"])}</td><td colspan="2">unreadable: '
+                       f'{e(d.get("error") or "")}</td><td><code>{e(d["source"])}</code>'
+                       f'</td></tr>')
+    out.append("</table>")
+    return "\n".join(out)
 
 
 def stage_sheets(maps, media_dir):
@@ -173,21 +285,29 @@ def page_body(m):
                 f'{e(m.get("error") or "")} (<code>{e(m["source"])}</code>).</p>')
     d = m["data"]
     a = d["area"]
-    out = [f'<h1>{e(m["title"])}</h1>',
-           f'<p class="map-meta">{a["w"]} x {a["h"]} tiles - tileset '
-           f'<code>{e(a.get("tileset") or "")}</code> - <code>{e(m["source"])}</code></p>']
+    deck = m.get("deck")
+    if deck:
+        out = [f'<h1>{e(m["title"])} deck</h1>',
+               f'<p class="map-meta">{a["w"]} x {a["h"]} tiles - generated from the ship\'s '
+               f'interior plan <code>{e(m["source"])}</code> - '
+               f'<a href="index.html">every ship deck</a></p>']
+    else:
+        out = [f'<h1>{e(m["title"])}</h1>',
+               f'<p class="map-meta">{a["w"]} x {a["h"]} tiles - tileset '
+               f'<code>{e(a.get("tileset") or "")}</code> - <code>{e(m["source"])}</code></p>']
     if d.get("missing"):
         out.append('<p class="map-meta">No art found for set(s): '
                    + ", ".join(f"<code>{e(s)}</code>" for s in d["missing"]) + "</p>")
+    patrols = "" if deck else \
+        '<label><input type="checkbox" data-layer="patrols" checked> Patrols</label>\n'
     out.append(f'''<div class="tile-map" data-map="{e(m["key"])}">
 <div class="map-tools">
 <button type="button" data-zoom="-1" title="Zoom out">-</button>
 <button type="button" data-zoom="1" title="Zoom in">+</button>
 <button type="button" data-fit title="Fit the width">Fit</button>
-<label><input type="checkbox" data-layer="marks" checked> Marks</label>
-<label><input type="checkbox" data-layer="things" checked> Things</label>
-<label><input type="checkbox" data-layer="patrols" checked> Patrols</label>
-<label><input type="checkbox" data-layer="grid"> Grid</label>
+<label><input type="checkbox" data-layer="marks" checked> {"Rooms" if deck else "Marks"}</label>
+<label><input type="checkbox" data-layer="things" checked> {"Furniture" if deck else "Things"}</label>
+{patrols}<label><input type="checkbox" data-layer="grid"> Grid</label>
 <span class="map-hover"></span>
 </div>
 <div class="map-scroll"><canvas></canvas></div>
@@ -200,7 +320,14 @@ def page_body(m):
             link = f'<a href="{e(x["href"])}">{name}</a>' if x["href"] else name
             out.append(f"<li><code>@{e(mark)}</code> to {link}</li>")
         out.append("</ul>")
-    if d["things"]:
+    if deck:
+        # A deck's things are its furniture - a hundred bunks and doors say nothing a
+        # list could. Its ROOMS are what a reader looks for.
+        rooms = sorted(set((d.get("labels") or {}).values()))
+        if rooms:
+            out.append('<h2 id="rooms">Rooms</h2><p>' + ", ".join(e(r) for r in rooms)
+                       + "</p>")
+    elif d["things"]:
         out.append('<h2 id="things">On this map</h2><ul class="map-list">')
         for t in sorted(d["things"], key=lambda t: (t["kind"] or "", t["name"])):
             name = e(t["name"])
@@ -211,7 +338,7 @@ def page_body(m):
                        f'{e(", ".join(n for n in notes if n))} at {t["cell"][0]}, '
                        f'{t["cell"][1]}</span></li>')
         out.append("</ul>")
-    if d["kinds"]:
+    if d["kinds"] and not deck:
         out.append('<h2 id="ground">Ground</h2><table><tr><th>Kind</th><th>Walked</th>'
                    '<th>Seen through</th></tr>')
         for kind, rules in sorted(d["kinds"].items()):
@@ -418,7 +545,8 @@ TILEMAP_JS = r"""// Draws a tile map from the data `sbs site` wrote. It makes NO
           ctx.stroke();
           var c0 = cells[0];
           if (c0 && z >= 12) {
-            var label = exit ? '> ' + (exit.title || exit.area) : '@' + m;
+            var label = exit ? '> ' + (exit.title || exit.area)
+                             : (d.labels && d.labels[m]) || '@' + m;
             var lh = z * .55, tw = ctx.measureText(label).width;
             // Above the mark, or inside it when it is on the top row.
             var ly = c0[1] > 0 ? c0[1] * z - lh : c0[1] * z;

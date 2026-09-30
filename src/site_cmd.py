@@ -517,12 +517,12 @@ def _emit_site(mission, out_dir, layout_path, profile, faces, no_search, do_open
     media_dir = os.path.join(out, "_media")
     media = _media_renderer_for_site(mission, media_dir, faces)
 
-    # The maps' sheets go into the media folder BEFORE the pages render: the site
-    # publishes that folder whole, replacing whatever `media/` held.
+    # The maps' and decks' sheets go into the media folder BEFORE the pages render: the
+    # site publishes that folder whole, replacing whatever `media/` held.
     maps = site_maps.collect(mission, pages, amd_markdown, profile=profile)
-    site_maps.stage_sheets(maps, media_dir)
-    for m in maps:
-        m["body"] = site_maps.page_body(m)
+    decks = site_maps.collect_decks(mission, profile=profile)
+    site_maps.stage_sheets(maps + decks, media_dir)
+    extra = site_maps.extra_pages(maps, decks)
 
     def markdown_of(page):
         ctx = amd_markdown.amd_markdown_context(
@@ -535,10 +535,11 @@ def _emit_site(mission, out_dir, layout_path, profile, faces, no_search, do_open
             pages, markdown_of, out,
             title=layout.get("nav_title") or os.path.basename(mission),
             media_root=media_dir, search=not no_search,
-            intro=layout.get("index_intro"), maps=maps)
+            intro=layout.get("index_intro"), extra=extra,
+            home_extra=site_maps.home_markdown(maps, decks))
     except site_out.RendererUnavailable as e:
         raise click.ClickException(str(e))
-    site_maps.write_assets(maps, out)
+    site_maps.write_assets(maps + decks, out)
     if os.path.isdir(media_dir):
         import shutil
         shutil.rmtree(media_dir, ignore_errors=True)
@@ -548,10 +549,11 @@ def _emit_site(mission, out_dir, layout_path, profile, faces, no_search, do_open
         pdfs, browser = site_maps.print_pdfs(maps, out)
     if not quiet:
         click.echo(f"{len(written)} page(s), {len(index)} record(s) indexed -> {out}")
-        if maps:
-            bad = [m["key"] for m in maps if not m["data"]]
-            click.echo(f"{len(maps)} map(s)" + (f", unreadable: {', '.join(bad)}"
-                                                 if bad else ""))
+        for what, got in (("map", maps), ("ship deck", decks)):
+            if got:
+                bad = [m["source"] for m in got if not m["data"]]
+                click.echo(f"{len(got)} {what}(s)" + (f", unreadable: {', '.join(bad)}"
+                                                        if bad else ""))
         if no_search:
             click.echo("search: not built (--no-search)")
     if maps_pdf:

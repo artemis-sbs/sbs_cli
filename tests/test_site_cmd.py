@@ -460,6 +460,59 @@ class TestMapPages(_Fixture):
         self.assertEqual(gb["patrol"], [[1, 2], [2, 2]])
 
 
+PLAN = """ship: test_ship
+size: 8x5
+legend:
+  q: crew-quarters
+  i: impulse
+  c: cargo
+---
+qq..ii
+qq..ii
+..cc..
+..cc..
+"""
+
+
+class TestDeckPages(_Fixture):
+    """Each ship interior plan (`.grid`) becomes the deck a boarding party would walk -
+    a page each, reached through ONE index page in the nav."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.mission, "races"), exist_ok=True)
+        self.write(os.path.join(self.mission, "races", "test_ship.grid"), PLAN)
+        self.out = os.path.join(self.tmp.name, "site")
+
+    def build(self):
+        r = self.site("--emit", "site", "-o", self.out, "--no-search")
+        self.assertEqual(r.exit_code, 0, r.output)
+        return r
+
+    def test_a_plan_becomes_a_deck_page_listed_on_the_index(self):
+        r = self.build()
+        self.assertIn("1 ship deck(s)", r.output)
+        page = self.read(os.path.join(self.out, "decks", "test_ship.html"))
+        self.assertIn("Test Ship deck", page)
+        self.assertIn('data-map="deck-test_ship"', page)
+        self.assertIn("crew quarters", page)                    # the rooms list
+        index = self.read(os.path.join(self.out, "decks", "index.html"))
+        self.assertIn('href="test_ship.html"', index)
+        self.assertTrue(os.path.isfile(os.path.join(self.out, "assets", "maps",
+                                                    "deck-test_ship.js")))
+
+    def test_THE_NAV_HAS_ONE_ENTRY_FOR_ALL_THE_DECKS(self):
+        self.build()
+        home = self.read(os.path.join(self.out, "index.html"))
+        self.assertIn("decks/index.html", home)
+        self.assertNotIn(">Test Ship deck<", home.split("<main")[0])  # not in the nav
+
+    def test_a_grid_that_is_not_a_ship_plan_is_left_alone(self):
+        self.write(os.path.join(self.mission, "races", "notes.grid"), "just a grid\n")
+        r = self.build()
+        self.assertIn("1 ship deck(s)", r.output)
+
+
 class TestTheShippedRepos(unittest.TestCase):
     """The repos next door must actually be up to date.
 

@@ -74,16 +74,19 @@ def _heading_ids(state):
 
 
 def render_site(pages, markdown_of, out_dir, title, media_root=None, search=True,
-                intro=None, maps=()):
-    """Write the whole site. `markdown_of(page)` returns that page's markdown. `maps`
-    are the tile map pages (`site_maps.collect`): `{key, title, rel, body}` each, listed
-    under Maps in the nav and on the home page.
+                intro=None, extra=(), home_extra=""):
+    """Write the whole site. `markdown_of(page)` returns that page's markdown.
+
+    `extra` are pages built elsewhere - the tile maps and ship decks (`site_maps`):
+    `{title, rel, body, group}` each, `group` naming the nav group it is listed under
+    (None: not in the nav). `home_extra` is markdown added to the home page.
 
     Returns `(written_paths, search_entries)`."""
     md = make_renderer()
     nav = _nav_tree(pages)
-    if maps:
-        nav[MAPS_GROUP] = [(m["title"], m["rel"]) for m in maps]
+    for e in extra:
+        if e.get("group"):
+            nav.setdefault(e["group"], []).append((e["title"], e["rel"]))
     written = []
     index = []
 
@@ -100,16 +103,16 @@ def render_site(pages, markdown_of, out_dir, title, media_root=None, search=True
         written.append(rel)
         index += _index_entries(page, rel, text)
 
-    for m in maps:
-        html_out = _shell(title, {"title": m["title"]}, nav, m["body"],
-                          "../" * m["rel"].count("/"), m["rel"], search)
-        target = os.path.join(out_dir, m["rel"].replace("/", os.sep))
+    for e in extra:
+        html_out = _shell(title, {"title": e["title"]}, nav, e["body"],
+                          "../" * e["rel"].count("/"), e["rel"], search)
+        target = os.path.join(out_dir, e["rel"].replace("/", os.sep))
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, "w", encoding="utf-8", newline="\n") as f:
             f.write(html_out)
-        written.append(m["rel"])
-        index.append({"t": m["title"], "p": m["rel"], "a": "", "s": "Map",
-                      "g": "Maps"})
+        written.append(e["rel"])
+        index.append({"t": e["title"], "p": e["rel"], "a": "", "s": e.get("kind", ""),
+                      "g": e.get("group") or e.get("kind", "")})
 
     _write_assets(out_dir, index, search)
 
@@ -121,7 +124,7 @@ def render_site(pages, markdown_of, out_dir, title, media_root=None, search=True
     # the site still points at - silently, because the file is still there.
     if "index.html" not in written:
         root = {"title": title, "path": "index.md"}
-        body = md.render(_home_markdown(pages, title, intro, maps))
+        body = md.render(_home_markdown(pages, title, intro, home_extra))
         with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8",
                   newline="\n") as f:
             f.write(_shell(title, root, nav, body, "", "index.html", search))
@@ -138,7 +141,7 @@ def render_site(pages, markdown_of, out_dir, title, media_root=None, search=True
     return written, index
 
 
-def _home_markdown(pages, title, intro, maps=()):
+def _home_markdown(pages, title, intro, extra=""):
     lines = [f"# {title}", "",
              intro or "Every record this mission ships, generated from its `.amd` "
                       "files.", "",
@@ -146,12 +149,8 @@ def _home_markdown(pages, title, intro, maps=()):
     for page in pages:
         rel = page["path"][:-3] + ".html"
         lines.append(f'| [{page.get("title") or rel}]({rel}) | {len(page["nodes"])} |')
-    if maps:
-        lines += ["", "## Maps", "", "| Map | Size |", "|---|---|"]
-        for m in maps:
-            a = (m.get("data") or {}).get("area") or {}
-            size = f'{a["w"]} x {a["h"]}' if a else "unreadable"
-            lines.append(f'| [{m["title"]}]({m["rel"]}) | {size} |')
+    if extra:
+        lines += ["", extra.rstrip("\n")]
     return "\n".join(lines) + "\n"
 
 
@@ -183,10 +182,6 @@ def _nav_tree(pages):
         folder = os.path.dirname(page["path"])
         groups.setdefault(folder, []).append((page.get("title") or rel, rel))
     return groups
-
-
-#: The nav group the tile map pages are listed under (`site_maps`).
-MAPS_GROUP = "Maps"
 
 
 def _nav_html(nav, up, current):
