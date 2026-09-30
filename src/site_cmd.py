@@ -229,9 +229,12 @@ def _pages(roots):
 @click.option("--no-search", is_flag=True, help="Build the site without a search box.")
 @click.option("--open", "do_open", is_flag=True,
               help="Open the built site in a browser.")
+@click.option("--maps-pdf", is_flag=True,
+              help="With `--emit site`: also print each tile map page to a PDF, using "
+                   "an installed Edge or Chrome.")
 @click.option("-q", "--quiet", is_flag=True, help="Only report changes and problems.")
 def site(folder, emit, docs_dir, root, layout_path, profile, nav_path, no_nav,
-         faces, out_dir, no_search, do_open, check, quiet):
+         faces, out_dir, no_search, do_open, maps_pdf, check, quiet):
     mission = os.path.abspath(folder)
     missions = os.path.dirname(mission)
     if not os.path.isdir(mission):
@@ -245,7 +248,8 @@ def site(folder, emit, docs_dir, root, layout_path, profile, nav_path, no_nav,
                              amd_core, amd_markdown)
     if emit == "site":
         return _emit_site(mission, out_dir, layout_path, profile, faces,
-                          no_search, do_open, quiet, amd_core, amd_markdown)
+                          no_search, do_open, quiet, amd_core, amd_markdown,
+                          maps_pdf=maps_pdf)
 
     roots = _docs_dirs(mission, docs_dir)
     if not roots:
@@ -491,13 +495,17 @@ def _up_to_root(ctx):
 
 
 def _emit_site(mission, out_dir, layout_path, profile, faces, no_search, do_open,
-               quiet, amd_core, amd_markdown):
+               quiet, amd_core, amd_markdown, maps_pdf=False):
     """A standalone folder of HTML - no server, no CDN, double-click and read.
 
     It does NOT get its own renderer. `amd_markdown_page` produces exactly the markdown
     the mkdocs pages are written from, and `site_out` parses that. So the two outputs
-    cannot drift: any bug here is a bug there."""
+    cannot drift: any bug here is a bug there.
+
+    Each `.tiles` area also gets a page of its own: the whole map drawn with its art
+    (`site_maps`)."""
     import site_out
+    import site_maps
 
     layout = _layout(mission, layout_path)
     out = os.path.abspath(out_dir or os.path.join(mission, "__site__"))
@@ -508,6 +516,13 @@ def _emit_site(mission, out_dir, layout_path, profile, faces, no_search, do_open
 
     media_dir = os.path.join(out, "_media")
     media = _media_renderer_for_site(mission, media_dir, faces)
+
+    # The maps' sheets go into the media folder BEFORE the pages render: the site
+    # publishes that folder whole, replacing whatever `media/` held.
+    maps = site_maps.collect(mission, pages, amd_markdown, profile=profile)
+    site_maps.stage_sheets(maps, media_dir)
+    for m in maps:
+        m["body"] = site_maps.page_body(m)
 
     def markdown_of(page):
         ctx = amd_markdown.amd_markdown_context(
@@ -520,17 +535,31 @@ def _emit_site(mission, out_dir, layout_path, profile, faces, no_search, do_open
             pages, markdown_of, out,
             title=layout.get("nav_title") or os.path.basename(mission),
             media_root=media_dir, search=not no_search,
-            intro=layout.get("index_intro"))
+            intro=layout.get("index_intro"), maps=maps)
     except site_out.RendererUnavailable as e:
         raise click.ClickException(str(e))
+    site_maps.write_assets(maps, out)
     if os.path.isdir(media_dir):
         import shutil
         shutil.rmtree(media_dir, ignore_errors=True)
 
+    pdfs, browser = ([], None)
+    if maps_pdf and maps:
+        pdfs, browser = site_maps.print_pdfs(maps, out)
     if not quiet:
         click.echo(f"{len(written)} page(s), {len(index)} record(s) indexed -> {out}")
+        if maps:
+            bad = [m["key"] for m in maps if not m["data"]]
+            click.echo(f"{len(maps)} map(s)" + (f", unreadable: {', '.join(bad)}"
+                                                 if bad else ""))
         if no_search:
             click.echo("search: not built (--no-search)")
+    if maps_pdf:
+        if browser is None:
+            click.echo("maps pdf: no Edge or Chrome found - print a map page from a "
+                       "browser instead", err=True)
+        else:
+            click.echo(f"maps pdf: {len(pdfs)} written")
     if do_open:
         import webbrowser
         webbrowser.open("file:///" + os.path.join(out, "index.html").replace("\\", "/"))

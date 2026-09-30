@@ -306,6 +306,160 @@ class TestRecords(_Fixture):
         self.assertIn("no .amd files", res.output)
 
 
+TILESET = """tileset: test
+kinds:
+  dirt:  walk see
+  rock:
+"""
+
+RIDGE = """area: ridge
+title: Landing Ridge
+tileset: test
+entry: landing
+legend:
+  .: dirt
+  #: rock
+  L: dirt @landing
+  c: dirt @to_colony
+---
+######
+#.L.c#
+#....#
+######
+"""
+
+COLONY = """area: colony
+tileset: test
+legend:
+  .: dirt
+  #: rock
+  r: dirt @to_ridge
+---
+#####
+#r..#
+#####
+"""
+
+THINGS = """\
+# [Ridge things](ridge_things)
+
+## [Props](props)
+
+### [Drone](drone)
+---
+Area: ridge
+Mark: landing
+Sprite: prop:drone
+---
+A wrecked survey drone.
+
+### [Cache](cache)
+---
+Area: ridge
+At: 3, 2
+Sprite: prop:drone
+Hidden until: lp_found
+---
+A buried cache.
+
+## [Hostiles](hostiles)
+
+### [Glassback](gb)
+---
+Area: ridge
+At: 1, 2
+Patrol: 1 2; 2 2
+Sprite: fig:gb
+---
+"""
+
+ART = {"sheets": {"s": "s.png"},
+       "sprites": {"g:dirt": {"sheet": "s", "rect": [0, 0, 8, 8]},
+                   "g:rock": {"sheet": "s", "rect": [8, 0, 16, 8]},
+                   "prop:drone": {"sheet": "s", "rect": [16, 0, 24, 8]},
+                   "fig:gb": {"sheet": "s", "rect": [24, 0, 32, 8]}},
+       "ground": {"dirt": {"cell": "g:dirt"}, "rock": {"cell": "g:rock"}}}
+
+
+class TestMapPages(_Fixture):
+    """Each `.tiles` area becomes a page of the site: the whole map drawn with its art,
+    linked to the records that stand on it - and, for a player, nothing a player should
+    not see."""
+
+    def setUp(self):
+        super().setUp()
+        import json
+        surface = os.path.join(self.mission, "surface")
+        art = os.path.join(self.mission, "media", "tileart", "builtin")
+        os.makedirs(surface, exist_ok=True)
+        os.makedirs(art, exist_ok=True)
+        self.write(os.path.join(surface, "test.tileset"), TILESET)
+        self.write(os.path.join(surface, "ridge.tiles"), RIDGE)
+        self.write(os.path.join(surface, "colony.tiles"), COLONY)
+        self.write(os.path.join(self.mission, "things.amd"), THINGS)
+        self.write(os.path.join(art, "manifest.json"), json.dumps(ART))
+        with open(os.path.join(art, "s.png"), "wb") as f:
+            f.write(b"\x89PNG\r\n\x1a\nnot really")
+        self.out = os.path.join(self.tmp.name, "site")
+
+    def build(self, *args):
+        r = self.site("--emit", "site", "-o", self.out, "--no-search", *args)
+        self.assertEqual(r.exit_code, 0, r.output)
+        return r
+
+    def data(self, key):
+        import json
+        text = self.read(os.path.join(self.out, "assets", "maps", key + ".js"))
+        return json.loads(text[text.index("] = ") + 4:].rstrip().rstrip(";"))
+
+    def test_each_area_gets_a_page_listed_under_maps(self):
+        r = self.build()
+        self.assertIn("2 map(s)", r.output)
+        page = self.read(os.path.join(self.out, "tilemaps", "ridge.html"))
+        self.assertIn('data-map="ridge"', page)
+        self.assertIn("../assets/maps/ridge.js", page)
+        self.assertIn("../assets/tilemap.js", page)
+        self.assertTrue(os.path.isfile(os.path.join(self.out, "assets", "tilemap.js")))
+        home = self.read(os.path.join(self.out, "index.html"))
+        self.assertIn("tilemaps/ridge.html", home)
+        self.assertIn("Landing Ridge", home)
+
+    def test_THE_ART_TRAVELS_WITH_THE_SITE(self):
+        self.build()
+        d = self.data("ridge")
+        self.assertEqual(d["looks"][1][1], "g:dirt")
+        sheet = d["sprites"]["g:dirt"]["sheet"]
+        self.assertEqual(sheet, "../media/tileart/builtin/s.png")
+        self.assertTrue(os.path.isfile(os.path.normpath(
+            os.path.join(self.out, "tilemaps", sheet))))
+
+    def test_a_thing_links_to_its_record_and_an_exit_to_its_map(self):
+        self.build()
+        d = self.data("ridge")
+        drone = next(t for t in d["things"] if t["key"] == "drone")
+        self.assertEqual(drone["cell"], [2, 1])
+        href = drone["href"]
+        page, _, anchor = href.partition("#")
+        self.assertTrue(os.path.isfile(os.path.normpath(
+            os.path.join(self.out, "tilemaps", page))), href)
+        self.assertIn(f'id="{anchor}"', self.read(os.path.normpath(
+            os.path.join(self.out, "tilemaps", page))))
+        self.assertEqual(d["exits"]["to_colony"]["href"], "colony.html")
+
+    def test_A_PLAYER_SEES_NO_SECRETS(self):
+        self.build("--profile", "player")
+        d = self.data("ridge")
+        self.assertEqual({t["key"] for t in d["things"]}, {"drone"})   # not hidden/hostile
+        self.assertEqual(set(d["marks"]), {"to_colony"})                # ways out only
+
+    def test_the_author_sees_everything(self):
+        self.build()
+        d = self.data("ridge")
+        self.assertEqual({t["key"] for t in d["things"]}, {"drone", "cache", "gb"})
+        gb = next(t for t in d["things"] if t["key"] == "gb")
+        self.assertEqual(gb["patrol"], [[1, 2], [2, 2]])
+
+
 class TestTheShippedRepos(unittest.TestCase):
     """The repos next door must actually be up to date.
 

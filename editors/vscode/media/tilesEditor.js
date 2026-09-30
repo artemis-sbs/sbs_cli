@@ -116,11 +116,16 @@
     if (!img.complete || !img.naturalWidth) { return null; }
     const id = uri + '|' + sp.rect.join(',') + '|' + (color || '');
     if (cut[id]) { return cut[id]; }
-    const [x0, y0, x1, y1] = sp.rect;
+    // A rect that runs BACKWARDS is a mirrored look (a figure's derived side, a prop's
+    // twin): the engine draws it flipped, so the cut is flipped too.
+    const [ra, rb, rc, rd] = sp.rect;
+    const x0 = Math.min(ra, rc), y0 = Math.min(rb, rd);
+    const flipX = rc < ra, flipY = rd < rb;
     const c = document.createElement('canvas');
-    c.width = x1 - x0;
-    c.height = y1 - y0;
+    c.width = Math.abs(rc - ra);
+    c.height = Math.abs(rd - rb);
     const g = c.getContext('2d');
+    g.setTransform(flipX ? -1 : 1, 0, 0, flipY ? -1 : 1, flipX ? c.width : 0, flipY ? c.height : 0);
     g.drawImage(img, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
     if (color) {
       g.globalCompositeOperation = 'multiply';

@@ -74,12 +74,16 @@ def _heading_ids(state):
 
 
 def render_site(pages, markdown_of, out_dir, title, media_root=None, search=True,
-                intro=None):
-    """Write the whole site. `markdown_of(page)` returns that page's markdown.
+                intro=None, maps=()):
+    """Write the whole site. `markdown_of(page)` returns that page's markdown. `maps`
+    are the tile map pages (`site_maps.collect`): `{key, title, rel, body}` each, listed
+    under Maps in the nav and on the home page.
 
     Returns `(written_paths, search_entries)`."""
     md = make_renderer()
     nav = _nav_tree(pages)
+    if maps:
+        nav[MAPS_GROUP] = [(m["title"], m["rel"]) for m in maps]
     written = []
     index = []
 
@@ -96,6 +100,17 @@ def render_site(pages, markdown_of, out_dir, title, media_root=None, search=True
         written.append(rel)
         index += _index_entries(page, rel, text)
 
+    for m in maps:
+        html_out = _shell(title, {"title": m["title"]}, nav, m["body"],
+                          "../" * m["rel"].count("/"), m["rel"], search)
+        target = os.path.join(out_dir, m["rel"].replace("/", os.sep))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8", newline="\n") as f:
+            f.write(html_out)
+        written.append(m["rel"])
+        index.append({"t": m["title"], "p": m["rel"], "a": "", "s": "Map",
+                      "g": "Maps"})
+
     _write_assets(out_dir, index, search)
 
     # A real landing page, not a copy of whichever page sorted first: the root of a
@@ -106,7 +121,7 @@ def render_site(pages, markdown_of, out_dir, title, media_root=None, search=True
     # the site still points at - silently, because the file is still there.
     if "index.html" not in written:
         root = {"title": title, "path": "index.md"}
-        body = md.render(_home_markdown(pages, title, intro))
+        body = md.render(_home_markdown(pages, title, intro, maps))
         with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8",
                   newline="\n") as f:
             f.write(_shell(title, root, nav, body, "", "index.html", search))
@@ -123,7 +138,7 @@ def render_site(pages, markdown_of, out_dir, title, media_root=None, search=True
     return written, index
 
 
-def _home_markdown(pages, title, intro):
+def _home_markdown(pages, title, intro, maps=()):
     lines = [f"# {title}", "",
              intro or "Every record this mission ships, generated from its `.amd` "
                       "files.", "",
@@ -131,6 +146,12 @@ def _home_markdown(pages, title, intro):
     for page in pages:
         rel = page["path"][:-3] + ".html"
         lines.append(f'| [{page.get("title") or rel}]({rel}) | {len(page["nodes"])} |')
+    if maps:
+        lines += ["", "## Maps", "", "| Map | Size |", "|---|---|"]
+        for m in maps:
+            a = (m.get("data") or {}).get("area") or {}
+            size = f'{a["w"]} x {a["h"]}' if a else "unreadable"
+            lines.append(f'| [{m["title"]}]({m["rel"]}) | {size} |')
     return "\n".join(lines) + "\n"
 
 
@@ -162,6 +183,10 @@ def _nav_tree(pages):
         folder = os.path.dirname(page["path"])
         groups.setdefault(folder, []).append((page.get("title") or rel, rel))
     return groups
+
+
+#: The nav group the tile map pages are listed under (`site_maps`).
+MAPS_GROUP = "Maps"
 
 
 def _nav_html(nav, up, current):
@@ -230,11 +255,12 @@ def _shell(site_title, page, nav, body, up, rel, search):
 
 
 def _write_assets(out_dir, index, search=True):
+    from site_maps import MAPS_CSS
     assets = os.path.join(out_dir, "assets")
     os.makedirs(assets, exist_ok=True)
     with open(os.path.join(assets, "site.css"), "w", encoding="utf-8",
               newline="\n") as f:
-        f.write(SITE_CSS)
+        f.write(SITE_CSS + MAPS_CSS)
     with open(os.path.join(assets, "site.js"), "w", encoding="utf-8",
               newline="\n") as f:
         f.write(SITE_JS)
