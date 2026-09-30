@@ -46,6 +46,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           allowUpdates: true
           makeLatest: false   # never become the repo's "latest" release — `sbs update` reads that for sbs.pyz
+          # ...and makeLatest alone did NOT stop it: amd-vscode-v0.8.2 became "latest" anyway
+          # and `sbs update` lost sbs.bat until 0.7 was re-marked. GitHub never makes a
+          # PRERELEASE the latest release, so this is the setting that actually holds.
+          prerelease: true
           name: "Artemis AMD (VS Code) ${{ github.ref_name }}"
           generateReleaseNotes: true
           body: |
