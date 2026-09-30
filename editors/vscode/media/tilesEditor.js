@@ -21,12 +21,14 @@
     tool: saved.tool || 'paint', brush: saved.brush || null,
     mode: saved.mode || 'kinds', zoom: saved.zoom || 28,
     grid: saved.grid !== false, marks: saved.marks !== false, chars: !!saved.chars,
+    things: saved.things !== false,
     stroke: null, hover: null, pendingText: null,
+    drag: null, sel: null,               // a thing (or patrol point) being moved; the selected key
   };
 
   function keep() {
     vscode.setState({ tool: S.tool, brush: S.brush, mode: S.mode, zoom: S.zoom,
-                      grid: S.grid, marks: S.marks, chars: S.chars });
+                      grid: S.grid, marks: S.marks, chars: S.chars, things: S.things });
   }
 
   // --- the document ------------------------------------------------------------------
@@ -101,16 +103,141 @@
     return S.images[uri];
   }
 
+  // A sprite cut from its sheet, TINTED the way the game tints: each channel multiplied
+  // by the color, alpha untouched (preview_map.py's `tint`). Cached per rect and color.
+  const cut = {};
+  function spriteCanvas(key, color) {
+    const sp = S.preview && S.preview.sprites[key];
+    if (!sp) { return null; }
+    const uri = S.sheets[sp.sheet];
+    if (!uri) { return null; }
+    const img = image(uri);
+    if (!img.complete || !img.naturalWidth) { return null; }
+    const id = uri + '|' + sp.rect.join(',') + '|' + (color || '');
+    if (cut[id]) { return cut[id]; }
+    const [x0, y0, x1, y1] = sp.rect;
+    const c = document.createElement('canvas');
+    c.width = x1 - x0;
+    c.height = y1 - y0;
+    const g = c.getContext('2d');
+    g.drawImage(img, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+    if (color) {
+      g.globalCompositeOperation = 'multiply';
+      g.fillStyle = color;
+      g.fillRect(0, 0, c.width, c.height);
+      g.globalCompositeOperation = 'destination-in';          // put the alpha back
+      g.drawImage(img, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+    }
+    cut[id] = c;
+    return c;
+  }
+
   function drawSprite(ctx, key, px, py, z) {
     const sp = S.preview && S.preview.sprites[key];
-    if (!sp) { return false; }
-    const uri = S.sheets[sp.sheet];
-    if (!uri) { return false; }
-    const img = image(uri);
-    if (!img.complete || !img.naturalWidth) { return false; }
-    const [x0, y0, x1, y1] = sp.rect;
-    ctx.drawImage(img, x0, y0, x1 - x0, y1 - y0, px, py, z, z);
+    const c = sp && spriteCanvas(key, sp.color);
+    if (!c) { return false; }
+    ctx.drawImage(c, px, py, z, z);
     return true;
+  }
+
+  // --- things: the props, people and hostiles the mission's .amd stands here -----------
+
+  function things() { return (S.preview && S.preview.placements) || []; }
+
+  /** Where a thing stands right now - the drag's cell while it is being moved. */
+  function thingCell(t) {
+    if (S.drag && S.drag.thing === t && S.drag.patrol === null) { return S.drag.to; }
+    return t.cell;
+  }
+
+  function patrolCell(t, i) {
+    if (S.drag && S.drag.thing === t && S.drag.patrol === i) { return S.drag.to; }
+    return [t.patrol[i].x, t.patrol[i].y];
+  }
+
+  function drawFigure(ctx, t, cell, z) {
+    const sp = t.look && S.preview.sprites[t.look];
+    const c = sp && spriteCanvas(t.look, t.color || sp.color);
+    if (!c) { return false; }
+    const [fw, fh] = sp.cells || [1, 1];
+    const [ax, ay] = sp.anchor || [0.5, 1];
+    const footX = (cell[0] + 0.5) * z, footY = (cell[1] + 1) * z;
+    ctx.drawImage(c, footX - ax * fw * z, footY - ay * fh * z, fw * z, fh * z);
+    return true;
+  }
+
+  function drawIcon(ctx, t, cell, z) {
+    const cx = cell[0] * z + z / 2, cy = cell[1] * z + z / 2, r = z * 0.36;
+    ctx.fillStyle = t.kind === 'prop' ? '#e8b04a' : t.calm ? '#5c5' : '#e44';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (t.kind === 'prop') { ctx.rect(cx - r, cy - r, 2 * r, 2 * r); }
+    else { ctx.arc(cx, cy, r, 0, Math.PI * 2); }
+    ctx.fill();
+    ctx.stroke();
+    if (z >= 16) {
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold ' + Math.floor(z * 0.42) + 'px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText((t.display || t.key).trim()[0].toUpperCase(), cx, cy + 1);
+    }
+  }
+
+  function drawThings(ctx, z) {
+    const items = things();
+    // Patrol routes first, under the figures: a closed loop through each point.
+    for (const t of items) {
+      if (!t.patrol.length) { continue; }
+      const pts = t.patrol.map((_p, i) => patrolCell(t, i));
+      ctx.strokeStyle = t.key === S.sel ? '#fff' : 'rgba(255,90,90,0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => { const px = x * z + z / 2, py = y * z + z / 2; if (i) { ctx.lineTo(px, py); } else { ctx.moveTo(px, py); } });
+      if (pts.length > 2) { ctx.closePath(); }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const [x, y] of pts) {
+        ctx.fillStyle = '#f66';
+        ctx.beginPath();
+        ctx.arc(x * z + z / 2, y * z + z / 2, Math.max(2, z * 0.14), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // Figures in row order, so whoever stands further south is drawn over.
+    const placed = items.map((t) => [t, thingCell(t)]).filter(([, c]) => c)
+      .sort((a, b) => a[1][1] - b[1][1] || a[1][0] - b[1][0]);
+    for (const [t, cell] of placed) {
+      ctx.globalAlpha = t.hidden ? 0.45 : 1;
+      if (!(S.mode === 'art' && drawFigure(ctx, t, cell, z))) { drawIcon(ctx, t, cell, z); }
+      ctx.globalAlpha = 1;
+      if (t.problems.length || t.key === S.sel) {
+        ctx.strokeStyle = t.key === S.sel ? '#fff' : '#f33';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(cell[0] * z + 1, cell[1] * z + 1, z - 2, z - 2);
+      }
+    }
+  }
+
+  /** What the Move tool would grab at a cell: a patrol point first, then a thing. */
+  function grabAt(cell) {
+    const [x, y] = cell;
+    const items = things();
+    for (let k = items.length - 1; k >= 0; k--) {
+      const t = items[k];
+      for (let i = 0; i < t.patrol.length; i++) {
+        if (t.patrol[i].x === x && t.patrol[i].y === y && !(t.cell && t.cell[0] === x && t.cell[1] === y)) {
+          return { thing: t, patrol: i };
+        }
+      }
+    }
+    for (let k = items.length - 1; k >= 0; k--) {
+      const t = items[k];
+      if (t.cell && t.cell[0] === x && t.cell[1] === y) { return { thing: t, patrol: null }; }
+    }
+    return null;
   }
 
   // --- marks, entry, problems (from the LIVE grid, so they follow the brush) -----------
@@ -211,6 +338,7 @@
     }
     const marks = marksNow();
     if (S.marks) { drawMarks(ctx, marks, z); }
+    if (S.things) { drawThings(ctx, z); }
     const entry = entryCell(marks);
     if (entry) { drawEntry(ctx, entry, z); }
     for (const key of S.problemCells.keys()) {
@@ -383,6 +511,13 @@
         : JSON.stringify(ch) + ' is not in the legend');
       const p = S.problemCells.get(x + ',' + y);
       if (p) { t += '  -  ' + p; }
+      for (const th of things()) {
+        if (th.cell && th.cell[0] === x && th.cell[1] === y) {
+          t += '  |  ' + th.display + ' (' + (th.kind === 'prop' ? 'prop' : th.calm ? 'person' : 'hostile')
+            + (th.how === 'mark' ? ', Mark: ' + th.mark : '') + (th.hidden ? ', hidden' : '') + ')'
+            + (th.problems.length ? ' - ' + th.problems[0] : '');
+        }
+      }
     }
     $('hover').textContent = t;
     const w = S.cells.length ? S.cells[0].length : 0;
@@ -411,12 +546,38 @@
     if (el) { send('reveal', { line: Number(el.dataset.line) }); }
   });
 
+  /** The sidebar list of things standing in this area - including any that are NOT on
+   *  the map (a Mark: that is not there, an At: off the edge), which the canvas cannot show. */
+  function renderThings() {
+    const items = things();
+    $('thingsHead').style.display = items.length ? '' : 'none';
+    $('things').innerHTML = items.map((t) => {
+      const where = t.cell ? t.cell[0] + ', ' + t.cell[1] : 'not on the map';
+      const what = t.kind === 'prop' ? 'prop' : t.calm ? 'person' : 'hostile';
+      return '<div class="thing' + (t.key === S.sel ? ' on' : '') + (t.problems.length ? ' bad' : '')
+        + '" data-key="' + esc(t.key) + '" title="' + esc(t.problems.join('\n') || 'Click to edit in the Inspector') + '">'
+        + '<span class="dot ' + what + '"></span><span class="k">' + esc(t.display) + '</span>'
+        + '<span class="r">' + esc(where) + (t.hidden ? ', hidden' : '') + '</span></div>';
+    }).join('');
+  }
+
+  $('things').addEventListener('click', (ev) => {
+    const el = ev.target.closest('.thing');
+    if (!el) { return; }
+    const t = things().find((x) => x.key === el.dataset.key);
+    if (!t) { return; }
+    S.sel = t.key;
+    renderThings();
+    draw();
+    send('openThing', { uri: t.uri, key: t.key });
+  });
+
   // --- tools -------------------------------------------------------------------------
 
   function setTool(t) {
     S.tool = t;
     document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
-    $('map').style.cursor = t === 'pick' ? 'copy' : t === 'entry' ? 'cell' : 'crosshair';
+    $('map').style.cursor = t === 'pick' ? 'copy' : t === 'entry' ? 'cell' : t === 'move' ? 'grab' : 'crosshair';
     keep();
   }
 
@@ -434,6 +595,8 @@
   $('tGrid').addEventListener('click', () => { S.grid = !S.grid; $('tGrid').classList.toggle('on', S.grid); keep(); draw(); });
   $('tMarks').addEventListener('click', () => { S.marks = !S.marks; $('tMarks').classList.toggle('on', S.marks); keep(); draw(); });
   $('tChars').addEventListener('click', () => { S.chars = !S.chars; $('tChars').classList.toggle('on', S.chars); keep(); draw(); });
+  $('tThings').addEventListener('click', () => { S.things = !S.things; $('tThings').classList.toggle('on', S.things); keep(); draw(); });
+  $('undoMove').addEventListener('click', () => send('undoMove'));
   $('openText').addEventListener('click', () => send('openText'));
   $('refresh').addEventListener('click', () => send('refresh'));
   $('resize').addEventListener('click', () => {
@@ -482,6 +645,24 @@
     ev.preventDefault();
     const erase = ev.button === 2;
     const brush = erase ? ' ' : S.brush;
+    if (S.tool === 'move') {
+      const g = S.things && grabAt(c);
+      if (!g) { S.sel = null; renderThings(); draw(); return; }
+      S.sel = g.thing.key;
+      if (g.patrol === null && g.thing.how !== 'at') {
+        // Placed by a mark: the mark IS the place (a scene may belong to it too), so the
+        // thing moves when the mark is painted somewhere else - not from here.
+        $('status').textContent = g.thing.display + ' stands on Mark: ' + g.thing.mark
+          + ' - paint that mark elsewhere to move it.';
+        S.drag = { thing: g.thing, patrol: null, from: c, to: c, locked: true };
+      } else {
+        $('status').textContent = '';
+        S.drag = { thing: g.thing, patrol: g.patrol, from: c, to: c, locked: false };
+      }
+      renderThings();
+      draw();
+      return;
+    }
     if (S.tool === 'pick' || ev.altKey) {
       S.brush = S.cells[c[1]][c[0]];
       keep();
@@ -509,6 +690,7 @@
     const c = cellAt(ev);
     const moved = (c && S.hover ? c[0] !== S.hover[0] || c[1] !== S.hover[1] : c !== S.hover);
     S.hover = c;
+    if (S.drag && c && !S.drag.locked) { S.drag.to = c; }
     if (S.stroke && c) {
       if (S.stroke.tool === 'paint') {
         for (const p of M.line(S.stroke.last[0], S.stroke.last[1], c[0], c[1])) { paintAt(p, S.stroke.brush); }
@@ -517,10 +699,38 @@
         S.stroke.to = c;
       }
     }
-    if (moved || S.stroke) { renderInfo(); draw(); }
+    if (moved || S.stroke || S.drag) { renderInfo(); draw(); }
   });
 
+  function dropThing() {
+    const d = S.drag;
+    S.drag = null;
+    const t = d.thing;
+    const same = d.to[0] === d.from[0] && d.to[1] === d.from[1];
+    if (same) {                                   // a click, not a drag: edit it
+      send('openThing', { uri: t.uri, key: t.key });
+      draw();
+      return;
+    }
+    // Write the new cell where the old one is written: `At: x, y`, or one point of a
+    // `Patrol: x y; x y` in that list's own style. Optimistically show it there until
+    // the language server answers with the .amd as it now reads.
+    if (d.patrol === null) {
+      send('moveThing', { uri: t.uri, line: t.at.line, start: t.at.start, end: t.at.end,
+                          from: d.from, text: d.to[0] + ', ' + d.to[1] });
+      t.cell = d.to.slice();
+    } else {
+      const p = t.patrol[d.patrol];
+      send('moveThing', { uri: t.uri, line: p.line, start: p.start, end: p.end,
+                          from: d.from, text: d.to[0] + ' ' + d.to[1] });
+      p.x = d.to[0];
+      p.y = d.to[1];
+    }
+    draw();
+  }
+
   window.addEventListener('mouseup', (ev) => {
+    if (S.drag) { dropThing(); return; }
     const st = S.stroke;
     if (!st) { return; }
     S.stroke = null;
@@ -550,6 +760,7 @@
     else if (k === 'f') { setTool('fill'); }
     else if (k === 'i') { setTool('pick'); }
     else if (k === 'e') { setTool('entry'); }
+    else if (k === 'm') { setTool('move'); }
     else if (k === 'a') { setMode(S.mode === 'art' ? 'kinds' : 'art'); }
     else if (k === '+' || k === '=') { zoom(1); }
     else if (k === '-') { zoom(-1); }
@@ -577,9 +788,13 @@
       mapProblems();
       renderPalette();
       renderInfo();
+      renderThings();
       draw();
     } else if (msg.type === 'status') {
       $('status').textContent = msg.text || '';
+    } else if (msg.type === 'moves') {
+      $('undoMove').style.display = msg.count ? '' : 'none';
+      $('undoMove').textContent = 'Undo move' + (msg.count > 1 ? ' (' + msg.count + ')' : '');
     }
   });
 
@@ -588,5 +803,6 @@
   $('tGrid').classList.toggle('on', S.grid);
   $('tMarks').classList.toggle('on', S.marks);
   $('tChars').classList.toggle('on', S.chars);
+  $('tThings').classList.toggle('on', S.things);
   send('ready');
 })();

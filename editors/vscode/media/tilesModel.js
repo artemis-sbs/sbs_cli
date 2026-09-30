@@ -281,6 +281,12 @@
     return out;
   }
 
+  /** `x, y` or `x y` -> [x, y], or null. What an At: or a Patrol point holds. */
+  function parseCell(s) {
+    const n = String(s || '').replace(/,/g, ' ').trim().split(/\s+/).map(Number);
+    return n.length >= 2 && n.every(Number.isFinite) ? [n[0], n[1]] : null;
+  }
+
   /** The cell each lint finding points at, when it points into the map. */
   function cellOfLine(m, line, character) {
     if (m.sep < 0 || line <= m.sep) { return null; }
@@ -289,5 +295,5 @@
   }
 
   return { parse, grid, rowEdits, applyEdits, headerEdit, legendAddEdit, legendSetEdit,
-           freeChar, paint, line, rect, fill, resize, cellOfLine, rowText };
+           freeChar, paint, line, rect, fill, resize, cellOfLine, parseCell, rowText };
 });

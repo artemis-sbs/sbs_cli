@@ -2602,6 +2602,14 @@ function tilesEditorHtml(webview: vscode.Webview, nonce: string): string {
   footer #hover { flex: 1; }
   .miss { color: var(--vscode-editorWarning-foreground); }
   #empty { display: none; opacity: .7; padding: 20px; }
+  .thing { display: flex; gap: 6px; align-items: center; padding: 2px 4px; cursor: pointer; border-radius: 2px; }
+  .thing.on { outline: 1px solid var(--vscode-focusBorder); }
+  .thing.bad .k { color: var(--vscode-errorForeground); }
+  .thing .k { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thing .r { font-size: 10px; opacity: .6; white-space: nowrap; }
+  .dot { width: 10px; height: 10px; flex: none; border: 1px solid #0008; }
+  .dot.prop { background: #e8b04a; } .dot.person { background: #5c5; border-radius: 50%; }
+  .dot.hostile { background: #e44; border-radius: 50%; }
 </style></head><body>
 <div class="bar">
   <button data-tool="paint" title="Paint (B). Right button erases.">Paint</button>
@@ -2609,12 +2617,14 @@ function tilesEditorHtml(webview: vscode.Webview, nonce: string): string {
   <button data-tool="fill" title="Fill a region (F)">Fill</button>
   <button data-tool="pick" title="Pick a cell's legend entry (I, or Alt+click)">Pick</button>
   <button data-tool="entry" title="Set where a party beams in (E)">Entry</button>
+  <button data-tool="move" title="Move a prop, person or patrol point from the .amd (M). A click opens it in the Inspector.">Move</button>
+  <button id="undoMove" style="display:none" title="Put back the last thing moved">Undo move</button>
   <span class="sep"></span>
   <button data-mode="kinds" title="Color by kind; hatched cannot be walked (A toggles)">Kinds</button>
   <button data-mode="art" title="Draw with the mission's art sets, as the game does (A toggles)">Art</button>
   <span class="sep"></span>
   <button id="zout" title="Zoom out (-, Ctrl+wheel)">-</button><button id="zin" title="Zoom in (+)">+</button>
-  <button id="tGrid">Grid</button><button id="tMarks">Marks</button><button id="tChars" title="Show each cell's legend character">Chars</button>
+  <button id="tGrid">Grid</button><button id="tMarks">Marks</button><button id="tChars" title="Show each cell's legend character">Chars</button><button id="tThings" title="Show the props, people and hostiles the .amd puts here">Things</button>
   <span class="sep"></span>
   <input id="rw" size="3" title="width"> x <input id="rh" size="3" title="height"><button id="resize">Resize</button>
   <span class="sep"></span>
@@ -2637,6 +2647,8 @@ function tilesEditorHtml(webview: vscode.Webview, nonce: string): string {
     </form>
     <h4>Problems</h4>
     <div id="problems"></div>
+    <h4 id="thingsHead">Things here</h4>
+    <div id="things"></div>
   </aside>
   <div id="scroll"><div id="empty">No map yet. Pick a legend entry, set a size and press Resize to start one.</div><canvas id="map"></canvas></div>
 </main>
@@ -2693,8 +2705,9 @@ class TilesEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.workspace.onDidChangeTextDocument((e) => {
         const u = e.document.uri;
         if (u.toString() === document.uri.toString()) { sendDoc(); preview(); }
-        // Another area (exits) or the tileset (what can be walked) changed.
-        else if (/\.(tiles|tileset)$/i.test(u.fsPath)) { preview(400); }
+        // Another area (exits), the tileset (what can be walked) or an .amd (who stands
+        // where) changed.
+        else if (/\.(tiles|tileset|amd)$/i.test(u.fsPath)) { preview(400); }
       }),
       vscode.workspace.onDidSaveTextDocument((d) => {
         if (/\.(tiles|tileset)$/i.test(d.uri.fsPath) && d.uri.toString() !== document.uri.toString()) { preview(0); }
@@ -2702,9 +2715,65 @@ class TilesEditorProvider implements vscode.CustomTextEditorProvider {
     ];
     panel.onDidDispose(() => { clearTimeout(timer); subs.forEach((s) => s.dispose()); });
 
+    // Moving a prop or person edits the .AMD, not this file, so the tile editor's own
+    // undo cannot reach it. Keep what each move replaced, newest last; "Undo move" puts
+    // it back - but only while the text is still what the move left.
+    const moves: { uri: vscode.Uri; line: number; start: number; text: string; old: string }[] = [];
+    const postMoves = () => post({ type: 'moves', count: moves.length });
+    const cellOf = (s: string): number[] | null => TilesModel.parseCell(s);
+    // An .amd nobody had unsaved changes in is saved again after a move, so a drag does
+    // not leave a file dirty in the background; one with the author's own edits pending
+    // is left for them to save.
+    const writeAmd = async (uri: vscode.Uri, range: vscode.Range, text: string) => {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const wasDirty = doc.isDirty;
+      const we = new vscode.WorkspaceEdit();
+      we.replace(uri, range, text);
+      const ok = await vscode.workspace.applyEdit(we);
+      if (ok && !wasDirty) { await doc.save(); }
+      return ok;
+    };
+
     panel.webview.onDidReceiveMessage(async (msg) => {
       const model = () => TilesModel.parse(document.getText());
       switch (msg?.type) {
+        case 'moveThing': {
+          const uri = vscode.Uri.parse(String(msg.uri));
+          const doc = await vscode.workspace.openTextDocument(uri);
+          const range = new vscode.Range(msg.line, msg.start, msg.line, msg.end);
+          const old = doc.getText(range);
+          const at = cellOf(old);
+          // The .amd moved on since the map was drawn: refuse rather than write a
+          // number into the wrong place.
+          if (!at || at[0] !== msg.from[0] || at[1] !== msg.from[1]) {
+            post({ type: 'status', text: `${path.basename(uri.fsPath)} changed since the map was drawn - try again.` });
+            preview(0);
+            break;
+          }
+          if (await writeAmd(uri, range, String(msg.text))) {
+            moves.push({ uri, line: msg.line, start: msg.start, text: String(msg.text), old });
+            postMoves();
+          }
+          preview(0);
+          break;
+        }
+        case 'undoMove': {
+          const m = moves.pop();
+          postMoves();
+          if (!m) { break; }
+          const doc = await vscode.workspace.openTextDocument(m.uri);
+          const range = new vscode.Range(m.line, m.start, m.line, m.start + m.text.length);
+          if (doc.getText(range) !== m.text) {
+            post({ type: 'status', text: `${path.basename(m.uri.fsPath)} changed since that move - not undone.` });
+            break;
+          }
+          await writeAmd(m.uri, range, m.old);
+          preview(0);
+          break;
+        }
+        case 'openThing':
+          await showInspector(String(msg.uri), String(msg.key));
+          break;
         case 'ready': sendDoc(); preview(0); break;
         case 'refresh': preview(0); break;
         case 'setRows': {

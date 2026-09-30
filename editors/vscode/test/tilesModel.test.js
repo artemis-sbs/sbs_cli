@@ -119,5 +119,10 @@ check('paint off the map is nothing', T.paint(g, 9, 9, '#') === g);
 check('lint line -> cell', JSON.stringify(T.cellOfLine(m, 14, 2)) === '{"x":2,"y":1}'
   && T.cellOfLine(m, 3, 0) === null);
 
+console.log('\nplacements');
+check('a cell reads as At: or as a patrol point', JSON.stringify(T.parseCell('18, 3')) === '[18,3]'
+  && JSON.stringify(T.parseCell(' 25 4 ')) === '[25,4]');
+check('a word is not a cell', T.parseCell('landing') === null && T.parseCell('') === null);
+
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);

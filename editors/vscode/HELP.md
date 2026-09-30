@@ -171,6 +171,12 @@ and hatches what cannot be walked. **Art** (`A` toggles) draws the mission's art
 the looks computed by the game's own code over your unsaved text. Marks are outlined and
 exits are labeled. Problems are listed and marked on their cells.
 
+**Things** draws the props, people and hostiles your `.amd` places there, with patrol
+routes. **Move** (`M`) drags one, or a single patrol point, and rewrites its `At:` or that
+patrol point in the `.amd`; clicking one opens it in the Inspector. A thing placed by
+`Mark:` moves with its mark. **Undo move** puts back the last move, since the `.amd` is a
+different file than the one the editor's own undo covers.
+
 A stroke rewrites only the rows it changed, and undo works as usual. `.tiles` and
 `.tileset` files are also highlighted and checked as you type. Full guide:
 *Tooling > Tile Map Editor* in the sbs_utils docs.
