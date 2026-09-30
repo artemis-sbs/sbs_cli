@@ -135,7 +135,10 @@ function startClient(): void {
     // .mast too, for its lint diagnostics only (a stray statement in an `await ...:`
     // block, unguarded data_set reads, side effects in //signal routes); the server
     // answers every other request on a .mast file with nothing.
-    documentSelector: [{ scheme: 'file', language: 'amd' }, { scheme: 'file', language: 'mast' }],
+    // Tile areas and tilesets (.tiles/.tileset) likewise: their lint, plus the Tile Map
+    // Editor's own `tiles/preview` request.
+    documentSelector: [{ scheme: 'file', language: 'amd' }, { scheme: 'file', language: 'mast' },
+                       { scheme: 'file', language: 'tiles' }],
     outputChannel: output,
     // The server re-reads a mission's .mast on each check; watching them lets an
     // editor nudge it after cross-file edits.
@@ -2515,6 +2518,231 @@ class GuiFileEditorProvider implements vscode.CustomTextEditorProvider {
   }
 }
 
+// --- Tile Map Editor (experimental): a custom editor on *.tiles ------------------
+// A tile AREA file is an ASCII map with a one-character legend (sbs_utils
+// procedural/tilemap.py). The document stays the source of truth: the page paints a
+// parsed copy (media/tilesModel.js) and each stroke comes back as the changed ROWS,
+// written line by line - so VS Code's own undo, dirty state and save all just work.
+// What a cell looks like in the game (edges, fringes, variants) comes from the language
+// server's `tiles/preview`, which runs the game's Python over the unsaved text.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const TilesModel = require(path.join(__dirname, '..', 'media', 'tilesModel.js'));
+
+interface TileEdit { start: number; end: number; text: string; }
+interface TilesPreview {
+  ok: boolean; error?: string | null;
+  sprites?: Record<string, { sheet: string; rect: number[]; color?: string | null }>;
+  [key: string]: unknown;
+}
+
+/** The folder that holds the missions (and `__lib__`, and sibling art repos) - where a
+ *  tile editor's art sheets can come from. */
+function missionsDirFor(uri: vscode.Uri): string {
+  let dir = path.dirname(uri.fsPath);
+  for (let i = 0; i < 16; i++) {
+    for (const marker of ['story.json', 'story.mast', '__lib__.json']) {
+      if (fs.existsSync(path.join(dir, marker))) { return path.dirname(dir); }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) { break; }
+    dir = parent;
+  }
+  return path.dirname(uri.fsPath);
+}
+
+async function applyTileEdits(document: vscode.TextDocument, edits: TileEdit[]): Promise<void> {
+  if (!edits.length) { return; }
+  const we = new vscode.WorkspaceEdit();
+  for (const e of edits) {
+    we.replace(document.uri, document.validateRange(new vscode.Range(e.start, 0, e.end, 0)), e.text);
+  }
+  await vscode.workspace.applyEdit(we);
+}
+
+function tilesEditorHtml(webview: vscode.Webview, nonce: string): string {
+  const js = (f: string) => extensionUri
+    ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', f)).toString() : f;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; color: var(--vscode-foreground); background: var(--vscode-editor-background);
+         font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
+  .bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 4px 6px;
+         border-bottom: 1px solid var(--vscode-panel-border); }
+  .bar .sep { width: 1px; height: 18px; background: var(--vscode-panel-border); margin: 0 4px; }
+  button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
+           border: 1px solid transparent; padding: 2px 8px; cursor: pointer; border-radius: 2px; }
+  button.on { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  button:hover { filter: brightness(1.15); }
+  input { background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+          border: 1px solid var(--vscode-input-border, transparent); padding: 2px 4px; }
+  .exp { color: var(--vscode-editorWarning-foreground); font-size: 11px; margin-left: auto; }
+  main { flex: 1; display: flex; min-height: 0; }
+  aside { width: 250px; overflow: auto; border-right: 1px solid var(--vscode-panel-border); padding: 6px; }
+  #scroll { flex: 1; overflow: auto; padding: 8px; }
+  canvas { display: block; image-rendering: auto; }
+  h4 { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; opacity: .7; }
+  .entry { display: flex; gap: 6px; align-items: center; padding: 2px 4px; cursor: pointer; border-radius: 2px; }
+  .entry.on { outline: 1px solid var(--vscode-focusBorder); background: var(--vscode-list-activeSelectionBackground); }
+  .entry.bad .k { color: var(--vscode-errorForeground); }
+  .entry .sw { width: 14px; height: 14px; border: 1px solid #0006; flex: none; }
+  .entry code { width: 1.2em; text-align: center; }
+  .entry .k { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entry .k b { color: #fd6; font-weight: normal; }
+  .entry .r { font-size: 10px; opacity: .6; white-space: nowrap; }
+  #form { display: none; border: 1px solid var(--vscode-panel-border); padding: 6px; margin: 6px 0; }
+  #form label { display: block; margin: 3px 0; }
+  #form input { width: 100%; box-sizing: border-box; }
+  .prob { padding: 2px 4px; cursor: pointer; font-size: 12px; border-left: 3px solid; margin: 2px 0; }
+  .prob.err { border-color: var(--vscode-errorForeground); }
+  .prob.warn { border-color: var(--vscode-editorWarning-foreground); }
+  .ok { opacity: .6; font-size: 12px; }
+  footer { display: flex; gap: 12px; padding: 3px 8px; border-top: 1px solid var(--vscode-panel-border); font-size: 12px; min-height: 18px; }
+  footer #hover { flex: 1; }
+  .miss { color: var(--vscode-editorWarning-foreground); }
+  #empty { display: none; opacity: .7; padding: 20px; }
+</style></head><body>
+<div class="bar">
+  <button data-tool="paint" title="Paint (B). Right button erases.">Paint</button>
+  <button data-tool="rect" title="Rectangle (R). Hold Shift on release for an outline.">Rect</button>
+  <button data-tool="fill" title="Fill a region (F)">Fill</button>
+  <button data-tool="pick" title="Pick a cell's legend entry (I, or Alt+click)">Pick</button>
+  <button data-tool="entry" title="Set where a party beams in (E)">Entry</button>
+  <span class="sep"></span>
+  <button data-mode="kinds" title="Color by kind; hatched cannot be walked (A toggles)">Kinds</button>
+  <button data-mode="art" title="Draw with the mission's art sets, as the game does (A toggles)">Art</button>
+  <span class="sep"></span>
+  <button id="zout" title="Zoom out (-, Ctrl+wheel)">-</button><button id="zin" title="Zoom in (+)">+</button>
+  <button id="tGrid">Grid</button><button id="tMarks">Marks</button><button id="tChars" title="Show each cell's legend character">Chars</button>
+  <span class="sep"></span>
+  <input id="rw" size="3" title="width"> x <input id="rh" size="3" title="height"><button id="resize">Resize</button>
+  <span class="sep"></span>
+  <button id="refresh" title="Ask the language server again (art, rules, problems)">Refresh</button>
+  <button id="openText" title="Edit as text">Text</button>
+  <span class="exp">Experimental</span>
+</div>
+<main>
+  <aside>
+    <h4>Legend</h4>
+    <div id="legend"></div>
+    <button id="addEntry" title="Add a character to the legend">+ Entry</button>
+    <form id="form">
+      <div id="fTitle"></div>
+      <label>Kind <input id="fKind" list="kinds" autocomplete="off"></label>
+      <datalist id="kinds"></datalist>
+      <label>Mark (optional) <input id="fMark" autocomplete="off" placeholder="to_colony, landing..."></label>
+      <label>Character <input id="fChar" maxlength="1" autocomplete="off"></label>
+      <button type="submit">OK</button> <button type="button" id="fCancel">Cancel</button>
+    </form>
+    <h4>Problems</h4>
+    <div id="problems"></div>
+  </aside>
+  <div id="scroll"><div id="empty">No map yet. Pick a legend entry, set a size and press Resize to start one.</div><canvas id="map"></canvas></div>
+</main>
+<footer><span id="hover"></span><span id="size"></span><span id="sets"></span><span id="status" class="miss"></span></footer>
+<script nonce="${nonce}" src="${js('tilesModel.js')}"></script>
+<script nonce="${nonce}" src="${js('tilesEditor.js')}"></script>
+</body></html>`;
+}
+
+class TilesEditorProvider implements vscode.CustomTextEditorProvider {
+  public static register(): vscode.Disposable {
+    return vscode.window.registerCustomEditorProvider('amd.tilesEditor', new TilesEditorProvider(),
+      { webviewOptions: { retainContextWhenHidden: true } });
+  }
+
+  resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+    const roots = mediaRoots();
+    roots.push(vscode.Uri.file(missionsDirFor(document.uri)));
+    panel.webview.options = { enableScripts: true, localResourceRoots: roots };
+    const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+    panel.webview.html = tilesEditorHtml(panel.webview, nonce);
+    const post = (m: object) => { void panel.webview.postMessage(m); };
+
+    // Ask for the look of the CURRENT text, debounced; an older answer that arrives
+    // after a newer question is dropped.
+    let seq = 0;
+    let timer: NodeJS.Timeout | undefined;
+    const preview = (delay = 150) => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const my = ++seq;
+        const text = document.getText();
+        if (!(await ensureClientReady())) {
+          post({ type: 'status', text: 'The AMD language server is not running - no art, rules or problems.' });
+          return;
+        }
+        try {
+          const data = await client!.sendRequest<TilesPreview>('tiles/preview',
+            { textDocument: { uri: document.uri.toString() }, text });
+          if (my !== seq) { return; }
+          const sheets: Record<string, string> = {};
+          for (const sp of Object.values(data?.sprites || {})) {
+            sheets[sp.sheet] = panel.webview.asWebviewUri(vscode.Uri.file(sp.sheet)).toString();
+          }
+          post({ type: 'preview', data, sheets, text });
+        } catch (e) {
+          post({ type: 'status', text: `tiles/preview failed: ${e}` });
+        }
+      }, delay);
+    };
+
+    const sendDoc = () => post({ type: 'doc', text: document.getText() });
+    const subs = [
+      vscode.workspace.onDidChangeTextDocument((e) => {
+        const u = e.document.uri;
+        if (u.toString() === document.uri.toString()) { sendDoc(); preview(); }
+        // Another area (exits) or the tileset (what can be walked) changed.
+        else if (/\.(tiles|tileset)$/i.test(u.fsPath)) { preview(400); }
+      }),
+      vscode.workspace.onDidSaveTextDocument((d) => {
+        if (/\.(tiles|tileset)$/i.test(d.uri.fsPath) && d.uri.toString() !== document.uri.toString()) { preview(0); }
+      }),
+    ];
+    panel.onDidDispose(() => { clearTimeout(timer); subs.forEach((s) => s.dispose()); });
+
+    panel.webview.onDidReceiveMessage(async (msg) => {
+      const model = () => TilesModel.parse(document.getText());
+      switch (msg?.type) {
+        case 'ready': sendDoc(); preview(0); break;
+        case 'refresh': preview(0); break;
+        case 'setRows': {
+          const rows: string[] = Array.isArray(msg.rows) ? msg.rows : [];
+          const m = model();
+          const edits: TileEdit[] = TilesModel.rowEdits(m, rows.map((r) => String(r).split('')));
+          // A resize pins the size (rowEdits already keeps an existing size: in step).
+          if (Array.isArray(msg.size) && !m.size) {
+            edits.push(TilesModel.headerEdit(m, 'size', `${msg.size[0]}x${msg.size[1]}`));
+          }
+          await applyTileEdits(document, edits);
+          break;
+        }
+        case 'addLegend':
+          await applyTileEdits(document, [TilesModel.legendAddEdit(model(), msg.ch, msg.kind, msg.mark)]);
+          break;
+        case 'setLegend':
+          await applyTileEdits(document, [TilesModel.legendSetEdit(model(), msg.ch, msg.kind, msg.mark)]);
+          break;
+        case 'setEntry':
+          await applyTileEdits(document, [TilesModel.headerEdit(model(), 'entry', String(msg.value))]);
+          break;
+        case 'reveal': {
+          const line = Math.max(0, Number(msg.line) || 0);
+          await vscode.window.showTextDocument(document, {
+            viewColumn: vscode.ViewColumn.Beside, preview: true,
+            selection: new vscode.Range(line, 0, line, 0),
+          });
+          break;
+        }
+        case 'openText':
+          await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+          break;
+      }
+    });
+  }
+}
+
 // Replace a `# <gui-designer> … # </gui-designer>` block in the active .mast
 // (regenerating only what the editor owns), or insert at the cursor if there's
 // no such block — the safe marked-region strategy from the plan.
@@ -4684,6 +4912,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand('amd.openGuiEditor', (uri?: vscode.Uri) => {
     const target = uri || vscode.window.activeTextEditor?.document.uri;
     if (target) { void vscode.commands.executeCommand('vscode.openWith', target, 'amd.guiFileEditor'); }
+  }));
+  context.subscriptions.push(TilesEditorProvider.register());     // *.tiles opens as the Tile Map Editor
+  context.subscriptions.push(vscode.commands.registerCommand('amd.openTilesEditor', (uri?: vscode.Uri) => {
+    const target = uri || vscode.window.activeTextEditor?.document.uri;
+    if (target) { void vscode.commands.executeCommand('vscode.openWith', target, 'amd.tilesEditor'); }
   }));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));

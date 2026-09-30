@@ -177,6 +177,24 @@ def _load_blob_lint(missions, mission):
             return None
 
 
+def _load_tilemap_lint(missions, mission):
+    """Import `tilemap_lint_mission` - working tree first, else the mission's own sbslib.
+
+    Returns None when the mission's sbs_utils predates tile maps."""
+    _prefer_working_tree_sbs_utils(missions, mission)
+    sys.path.insert(0, mission)
+    try:
+        from sbs_utils.procedural.tilemap_lint import tilemap_lint_mission
+        return tilemap_lint_mission
+    except Exception:
+        try:
+            sbs_lib_import(missions, mission)
+            from sbs_utils.procedural.tilemap_lint import tilemap_lint_mission
+            return tilemap_lint_mission
+        except Exception:
+            return None
+
+
 def lint_self_packaging(mission, user="artemis-sbs"):
     """Check a repo that ships its OWN addons keeps its three lists in step.
 
@@ -486,6 +504,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
         signal_lint = None if no_signals else _load_signal_lint(missions, mission)
         blob_lint = _load_blob_lint(missions, mission)
         await_lint = _load_await_lint(missions, mission)
+        tilemap_lint_mission = _load_tilemap_lint(missions, mission)
     except Exception as e:
         print(f"ERROR: could not load sbs_utils to lint ({e})")
         raise SystemExit(2)
@@ -695,6 +714,28 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
                         print(f.compact(rel))
                 else:  # json
                     bundle.extend(f.to_dict(file=rel) for f in findings)
+
+    # Tile world pass: area files, tileset files, and where the .amd puts props and
+    # people on them. Every one of these fails SILENTLY at runtime (an area skipped, a
+    # prop never placed), which is the whole reason to lint them.
+    if tilemap_lint_mission is not None:
+        by_file = {}
+        for rel, f in tilemap_lint_mission(mission):
+            by_file.setdefault(rel, []).append(f)
+            if f.is_error():
+                total_err += 1
+            else:
+                total_warn += 1
+        for rel, findings in by_file.items():
+            if fmt == "text":
+                print(f"== {rel} (tiles) ==")
+                for f in findings:
+                    print(f"  {f}")
+            elif fmt == "compact":
+                for f in findings:
+                    print(f.compact(rel))
+            else:  # json
+                bundle.extend(f.to_dict(file=rel) for f in findings)
 
     if fmt == "json":
         import json

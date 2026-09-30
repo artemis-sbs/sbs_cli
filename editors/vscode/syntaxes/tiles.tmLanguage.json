@@ -1,0 +1,81 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Tile map",
+  "scopeName": "source.tiles",
+  "comment": "Tile AREA files (.tiles) and TILESET files (.tileset) - sbs_utils/procedural/tilemap.py. A header of `key: value` lines, indented `legend:` / `exits:` / `kinds:` blocks, and in an area file `---` then the map, which is not highlighted (every character in it is data).",
+  "patterns": [
+    { "include": "#map" },
+    { "include": "#comment" },
+    { "include": "#block-key" },
+    { "include": "#header" },
+    { "include": "#legend-entry" },
+    { "include": "#exit-entry" },
+    { "include": "#kind-entry" }
+  ],
+  "repository": {
+    "map": {
+      "comment": "Everything after the separator is the map, to the end of the file.",
+      "begin": "^(---)\\s*$",
+      "beginCaptures": { "1": { "name": "keyword.control.separator.tiles" } },
+      "end": "(?!)",
+      "contentName": "string.unquoted.map.tiles"
+    },
+    "comment": {
+      "match": "^\\s*#(?!:).*$|^#.*$",
+      "name": "comment.line.number-sign.tiles"
+    },
+    "block-key": {
+      "match": "^(legend|exits|kinds)(:)\\s*$",
+      "captures": {
+        "1": { "name": "keyword.other.block.tiles" },
+        "2": { "name": "punctuation.separator.key-value.tiles" }
+      }
+    },
+    "header": {
+      "match": "^([A-Za-z_][\\w ]*)(:)\\s*(.*)$",
+      "captures": {
+        "1": { "name": "entity.name.tag.tiles" },
+        "2": { "name": "punctuation.separator.key-value.tiles" },
+        "3": { "name": "string.unquoted.tiles" }
+      }
+    },
+    "legend-entry": {
+      "comment": "  c: kind @mark  - the key is ONE character, which may itself be ':' or '#'.",
+      "match": "^([ \\t]+)(\\S)(:)[ \\t]*([\\w-]+)?[ \\t]*(@[\\w-]+)?[ \\t]*$",
+      "captures": {
+        "2": { "name": "constant.character.legend.tiles" },
+        "3": { "name": "punctuation.separator.key-value.tiles" },
+        "4": { "name": "support.type.kind.tiles" },
+        "5": { "name": "variable.other.mark.tiles" }
+      }
+    },
+    "kind-entry": {
+      "comment": "  dust: walk see look=dirt  - a tileset kind and the rules it has.",
+      "match": "^([ \\t]+)([\\w-]{2,})(:)(.*)$",
+      "captures": {
+        "2": { "name": "support.type.kind.tiles" },
+        "3": { "name": "punctuation.separator.key-value.tiles" },
+        "4": {
+          "patterns": [
+            { "match": "\\s#.*$", "name": "comment.line.number-sign.tiles" },
+            { "match": "\\b(walk|see|tall)\\b", "name": "keyword.other.rule.tiles" },
+            { "match": "\\b(look|cell|color|over)(=)(\\S+)",
+              "captures": {
+                "1": { "name": "variable.parameter.tiles" },
+                "2": { "name": "keyword.operator.assignment.tiles" },
+                "3": { "name": "string.unquoted.tiles" } } },
+            { "match": "@[\\w-]+", "name": "variable.other.mark.tiles" }
+          ]
+        }
+      }
+    },
+    "exit-entry": {
+      "match": "^([ \\t]+)(to_[\\w-]+)(:)(.*)$",
+      "captures": {
+        "2": { "name": "variable.other.mark.tiles" },
+        "3": { "name": "punctuation.separator.key-value.tiles" },
+        "4": { "patterns": [ { "match": "@[\\w-]+", "name": "variable.other.mark.tiles" } ] }
+      }
+    }
+  }
+}

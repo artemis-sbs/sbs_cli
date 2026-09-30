@@ -160,6 +160,21 @@ click it to jump to the target, right-click to edit or delete that link. Great f
 overall shape of a conversation. Same navigation as the map — fit-on-open, zoom, Fit,
 drag-to-pan, and the Overview minimap.
 
+### Tile Map Editor (experimental)
+
+**Open a `.tiles` file** (a ground tile map area) and it opens as the **Tile Map
+Editor**; **Text** on its toolbar goes back to the plain text. The legend is the palette:
+click an entry to paint with it, double-click to change it, **+ Entry** to add one. The tools
+are **Paint** (`B`, right button erases), **Rect** (`R`, Shift on release for an outline),
+**Fill** (`F`), **Pick** (`I` or Alt+click) and **Entry** (`E`). **Kinds** colors each kind
+and hatches what cannot be walked. **Art** (`A` toggles) draws the mission's art sets, with
+the looks computed by the game's own code over your unsaved text. Marks are outlined and
+exits are labeled. Problems are listed and marked on their cells.
+
+A stroke rewrites only the rows it changed, and undo works as usual. `.tiles` and
+`.tileset` files are also highlighted and checked as you type. Full guide:
+*Tooling > Tile Map Editor* in the sbs_utils docs.
+
 ### Format on save
 
 The extension provides a formatter (whitespace, heading spacing, `---` fences,
