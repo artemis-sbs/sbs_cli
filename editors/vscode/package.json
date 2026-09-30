@@ -2,7 +2,7 @@
   "name": "amd-language",
   "displayName": "Artemis AMD",
   "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, diagnostics/navigation/formatting via the sbs AMD language server, plus a MAST source debugger.",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "publisher": "artemis-sbs",
   "license": "MIT",
   "repository": {
@@ -42,6 +42,16 @@
         "selector": [
           {
             "filenamePattern": "*.tiles"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "amd.tilesetEditor",
+        "displayName": "Tileset Editor (experimental)",
+        "selector": [
+          {
+            "filenamePattern": "*.tileset"
           }
         ],
         "priority": "default"
@@ -98,7 +108,7 @@
       },
       {
         "command": "amd.openTilesEditor",
-        "title": "Open in Tile Map Editor (experimental)",
+        "title": "Open in Tile Map / Tileset Editor (experimental)",
         "category": "Artemis AMD",
         "icon": "$(symbol-color)"
       },
@@ -198,7 +208,7 @@
         },
         {
           "command": "amd.openTilesEditor",
-          "when": "resourceExtname == .tiles"
+          "when": "(resourceExtname == .tiles || resourceExtname == .tileset)"
         },
         {
           "command": "amd.newFile"
@@ -257,7 +267,7 @@
         },
         {
           "command": "amd.openTilesEditor",
-          "when": "resourceExtname == .tiles && activeEditor == 'workbench.editors.files.textFileEditor'",
+          "when": "(resourceExtname == .tiles || resourceExtname == .tileset) && activeEditor == 'workbench.editors.files.textFileEditor'",
           "group": "navigation@9"
         }
       ]
@@ -458,7 +468,8 @@
     "test:view": "node test/relicView.test.js",
     "test:debug": "node test/debugCommand.test.js",
     "test:3d": "node test/relicView3d.test.js",
-    "test:tiles": "node test/tilesModel.test.js"
+    "test:tiles": "node test/tilesModel.test.js",
+    "test:tileset": "node test/tilesetModel.test.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

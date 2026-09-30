@@ -2617,14 +2617,14 @@ function tilesEditorHtml(webview: vscode.Webview, nonce: string): string {
   <button data-tool="fill" title="Fill a region (F)">Fill</button>
   <button data-tool="pick" title="Pick a cell's legend entry (I, or Alt+click)">Pick</button>
   <button data-tool="entry" title="Set where a party beams in (E)">Entry</button>
-  <button data-tool="move" title="Move a prop, person or patrol point from the .amd (M). A click opens it in the Inspector.">Move</button>
+  <button data-tool="move" title="Move a prop, person or patrol point (M): At: is rewritten in the .amd; a thing on a Mark: moves the mark. A click opens it in the Inspector.">Move</button>
   <button id="undoMove" style="display:none" title="Put back the last thing moved">Undo move</button>
   <span class="sep"></span>
   <button data-mode="kinds" title="Color by kind; hatched cannot be walked (A toggles)">Kinds</button>
   <button data-mode="art" title="Draw with the mission's art sets, as the game does (A toggles)">Art</button>
   <span class="sep"></span>
   <button id="zout" title="Zoom out (-, Ctrl+wheel)">-</button><button id="zin" title="Zoom in (+)">+</button>
-  <button id="tGrid">Grid</button><button id="tMarks">Marks</button><button id="tChars" title="Show each cell's legend character">Chars</button><button id="tThings" title="Show the props, people and hostiles the .amd puts here">Things</button>
+  <button id="tGrid">Grid</button><button id="tMarks">Marks</button><button id="tChars" title="Show each cell's legend character">Chars</button><button id="tThings" title="Show the props, people and hostiles the .amd puts here">Things</button><button id="tFacing" title="Preview figures facing each way (Art). The game places everyone facing south.">Face S</button>
   <span class="sep"></span>
   <input id="rw" size="3" title="width"> x <input id="rh" size="3" title="height"><button id="resize">Resize</button>
   <span class="sep"></span>
@@ -2801,6 +2801,151 @@ class TilesEditorProvider implements vscode.CustomTextEditorProvider {
           await vscode.window.showTextDocument(document, {
             viewColumn: vscode.ViewColumn.Beside, preview: true,
             selection: new vscode.Range(line, 0, line, 0),
+          });
+          break;
+        }
+        case 'openText':
+          await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+          break;
+      }
+    });
+  }
+}
+
+// --- Tileset Editor (experimental): a custom editor on *.tileset -------------------
+// A table of the kinds: the rules each has, the ground look it wears (from the art
+// sets, with a picture), a tint, and how many cells of the areas use it. Each edit
+// rewrites one line (media/tilesetModel.js), aligned to the file's own columns.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const TilesetModel = require(path.join(__dirname, '..', 'media', 'tilesetModel.js'));
+
+function tilesetEditorHtml(webview: vscode.Webview, nonce: string): string {
+  const js = (f: string) => extensionUri
+    ? webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', f)).toString() : f;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+  body { color: var(--vscode-foreground); background: var(--vscode-editor-background);
+         font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); margin: 0; padding: 8px 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .exp { color: var(--vscode-editorWarning-foreground); font-size: 11px; margin-left: auto; }
+  button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
+           border: 1px solid transparent; padding: 2px 8px; cursor: pointer; border-radius: 2px; }
+  input { background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+          border: 1px solid var(--vscode-input-border, transparent); padding: 2px 4px; }
+  input.bad { border-color: var(--vscode-errorForeground); }
+  table { border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; opacity: .7; font-weight: normal; padding: 2px 6px; }
+  td { padding: 2px 6px; border-top: 1px solid var(--vscode-panel-border); }
+  td.c { text-align: center; }
+  td.n { text-align: right; opacity: .8; } td.unused { opacity: .4; }
+  tr.on td { background: var(--vscode-list-activeSelectionBackground); }
+  canvas { display: block; image-rendering: auto; }
+  h4 { margin: 14px 0 4px; font-size: 11px; text-transform: uppercase; opacity: .7; }
+  #gallery { display: flex; flex-wrap: wrap; gap: 6px; }
+  .look { display: flex; flex-direction: column; align-items: center; width: 76px; cursor: pointer; font-size: 10px; }
+  .look span { width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+  .look:hover { outline: 1px solid var(--vscode-focusBorder); }
+  .prob { padding: 2px 4px; cursor: pointer; font-size: 12px; border-left: 3px solid; margin: 2px 0; }
+  .prob.err { border-color: var(--vscode-errorForeground); } .prob.warn { border-color: var(--vscode-editorWarning-foreground); }
+  .ok { opacity: .6; font-size: 12px; } .miss { color: var(--vscode-editorWarning-foreground); }
+  #status { color: var(--vscode-editorWarning-foreground); min-height: 1.2em; margin: 4px 0; }
+  #foot { font-size: 12px; opacity: .8; margin-top: 8px; }
+</style></head><body>
+<div class="bar">
+  <label>Tileset <input id="hName" size="12"></label>
+  <label>Title <input id="hTitle" size="24"></label>
+  <button id="refresh" title="Ask the language server again (art, usage, problems)">Refresh</button>
+  <button id="openText" title="Edit as text">Text</button>
+  <span class="exp">Experimental</span>
+</div>
+<table>
+  <thead><tr><th></th><th>Kind</th><th title="Can be walked on">Walk</th><th title="Can be seen across">See</th>
+    <th title="Stands up: the ground south of it is in its shade">Tall</th><th>Look</th><th>Tint</th>
+    <th title="Whose fringe goes on top where two kinds meet">Over</th><th title="Cells of the mission's areas drawn with it">Cells</th><th></th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<datalist id="looks"></datalist>
+<div class="bar" style="margin-top:6px"><input id="newName" placeholder="new kind" size="14" spellcheck="false"><button id="addKind">+ Kind</button></div>
+<div id="status"></div>
+<h4>Problems</h4><div id="problems"></div>
+<h4>Looks the art sets offer (select a kind, then click one)</h4><div id="gallery"></div>
+<div id="foot"></div>
+<script nonce="${nonce}" src="${js('tilesetModel.js')}"></script>
+<script nonce="${nonce}" src="${js('tilesetEditor.js')}"></script>
+</body></html>`;
+}
+
+class TilesetEditorProvider implements vscode.CustomTextEditorProvider {
+  public static register(): vscode.Disposable {
+    return vscode.window.registerCustomEditorProvider('amd.tilesetEditor', new TilesetEditorProvider(),
+      { webviewOptions: { retainContextWhenHidden: true } });
+  }
+
+  resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+    const roots = mediaRoots();
+    roots.push(vscode.Uri.file(missionsDirFor(document.uri)));
+    panel.webview.options = { enableScripts: true, localResourceRoots: roots };
+    const nonce = String(Date.now()) + Math.random().toString(36).slice(2);
+    panel.webview.html = tilesetEditorHtml(panel.webview, nonce);
+    const post = (m: object) => { void panel.webview.postMessage(m); };
+
+    let seq = 0;
+    let timer: NodeJS.Timeout | undefined;
+    const preview = (delay = 150) => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const my = ++seq;
+        if (!(await ensureClientReady())) {
+          post({ type: 'status', text: 'The AMD language server is not running - no art, usage or problems.' });
+          return;
+        }
+        try {
+          const data = await client!.sendRequest<TilesPreview>('tiles/tilesetPreview',
+            { textDocument: { uri: document.uri.toString() }, text: document.getText() });
+          if (my !== seq) { return; }
+          const sheets: Record<string, string> = {};
+          for (const sp of Object.values(data?.sprites || {})) {
+            sheets[sp.sheet] = panel.webview.asWebviewUri(vscode.Uri.file(sp.sheet)).toString();
+          }
+          post({ type: 'preview', data, sheets });
+        } catch (e) {
+          post({ type: 'status', text: `tiles/tilesetPreview failed: ${e}` });
+        }
+      }, delay);
+    };
+    const sendDoc = () => post({ type: 'doc', text: document.getText() });
+    const subs = [
+      vscode.workspace.onDidChangeTextDocument((e) => {
+        if (e.document.uri.toString() === document.uri.toString()) { sendDoc(); preview(); }
+        else if (/\.tiles$/i.test(e.document.uri.fsPath)) { preview(400); }   // usage moved
+      }),
+    ];
+    panel.onDidDispose(() => { clearTimeout(timer); subs.forEach((s) => s.dispose()); });
+
+    panel.webview.onDidReceiveMessage(async (msg) => {
+      const model = () => TilesetModel.parse(document.getText());
+      switch (msg?.type) {
+        case 'ready': sendDoc(); preview(0); break;
+        case 'refresh': preview(0); break;
+        case 'setKind':
+          await applyTileEdits(document, [TilesetModel.kindEdit(model(), msg.oldName, msg.name, msg.rules || {})]);
+          break;
+        case 'addKind':
+          await applyTileEdits(document, [TilesetModel.addEdit(model(), msg.name, msg.rules || {})]);
+          break;
+        case 'removeKind': {
+          const e = TilesetModel.removeEdit(model(), msg.name);
+          if (e) { await applyTileEdits(document, [e]); }
+          break;
+        }
+        case 'setHeader':
+          await applyTileEdits(document, [TilesetModel.headerEdit(model(), String(msg.key), String(msg.value))]);
+          break;
+        case 'reveal': {
+          const line = Math.max(0, Number(msg.line) || 0);
+          await vscode.window.showTextDocument(document, {
+            viewColumn: vscode.ViewColumn.Beside, preview: true, selection: new vscode.Range(line, 0, line, 0),
           });
           break;
         }
@@ -4983,9 +5128,12 @@ export function activate(context: vscode.ExtensionContext): void {
     if (target) { void vscode.commands.executeCommand('vscode.openWith', target, 'amd.guiFileEditor'); }
   }));
   context.subscriptions.push(TilesEditorProvider.register());     // *.tiles opens as the Tile Map Editor
+  context.subscriptions.push(TilesetEditorProvider.register());   // *.tileset opens as the Tileset Editor
   context.subscriptions.push(vscode.commands.registerCommand('amd.openTilesEditor', (uri?: vscode.Uri) => {
     const target = uri || vscode.window.activeTextEditor?.document.uri;
-    if (target) { void vscode.commands.executeCommand('vscode.openWith', target, 'amd.tilesEditor'); }
+    if (!target) { return; }
+    const view = /\.tileset$/i.test(target.fsPath) ? 'amd.tilesetEditor' : 'amd.tilesEditor';
+    void vscode.commands.executeCommand('vscode.openWith', target, view);
   }));
   context.subscriptions.push(vscode.commands.registerCommand('amd.showPreview', showPreview));
   context.subscriptions.push(vscode.commands.registerCommand('amd.previewInSession', previewInSession));

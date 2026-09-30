@@ -22,6 +22,7 @@
     mode: saved.mode || 'kinds', zoom: saved.zoom || 28,
     grid: saved.grid !== false, marks: saved.marks !== false, chars: !!saved.chars,
     things: saved.things !== false,
+    facing: 's',                         // preview only: the game places everyone facing south
     stroke: null, hover: null, pendingText: null,
     drag: null, sel: null,               // a thing (or patrol point) being moved; the selected key
   };
@@ -156,8 +157,9 @@
   }
 
   function drawFigure(ctx, t, cell, z) {
-    const sp = t.look && S.preview.sprites[t.look];
-    const c = sp && spriteCanvas(t.look, t.color || sp.color);
+    const key = (t.looks && t.looks[S.facing]) || t.look;
+    const sp = key && S.preview.sprites[key];
+    const c = sp && spriteCanvas(key, t.color || sp.color);
     if (!c) { return false; }
     const [fw, fh] = sp.cells || [1, 1];
     const [ax, ay] = sp.anchor || [0.5, 1];
@@ -597,6 +599,13 @@
   $('tChars').addEventListener('click', () => { S.chars = !S.chars; $('tChars').classList.toggle('on', S.chars); keep(); draw(); });
   $('tThings').addEventListener('click', () => { S.things = !S.things; $('tThings').classList.toggle('on', S.things); keep(); draw(); });
   $('undoMove').addEventListener('click', () => send('undoMove'));
+  const FACINGS = ['s', 'w', 'n', 'e'];
+  $('tFacing').addEventListener('click', () => {
+    S.facing = FACINGS[(FACINGS.indexOf(S.facing) + 1) % FACINGS.length];
+    $('tFacing').textContent = 'Face ' + S.facing.toUpperCase();
+    $('tFacing').classList.toggle('on', S.facing !== 's');
+    draw();
+  });
   $('openText').addEventListener('click', () => send('openText'));
   $('refresh').addEventListener('click', () => send('refresh'));
   $('resize').addEventListener('click', () => {
@@ -649,16 +658,11 @@
       const g = S.things && grabAt(c);
       if (!g) { S.sel = null; renderThings(); draw(); return; }
       S.sel = g.thing.key;
-      if (g.patrol === null && g.thing.how !== 'at') {
-        // Placed by a mark: the mark IS the place (a scene may belong to it too), so the
-        // thing moves when the mark is painted somewhere else - not from here.
-        $('status').textContent = g.thing.display + ' stands on Mark: ' + g.thing.mark
-          + ' - paint that mark elsewhere to move it.';
-        S.drag = { thing: g.thing, patrol: null, from: c, to: c, locked: true };
-      } else {
-        $('status').textContent = '';
-        S.drag = { thing: g.thing, patrol: g.patrol, from: c, to: c, locked: false };
-      }
+      $('status').textContent = '';
+      // A thing placed by Mark: stands on the mark, so dragging it moves the MARK (in
+      // this file); one placed by At: rewrites its At: in the .amd.
+      S.drag = { thing: g.thing, patrol: g.patrol, from: c, to: c,
+                 locked: g.patrol === null && g.thing.how !== 'at' && g.thing.how !== 'mark' };
       renderThings();
       draw();
       return;
@@ -709,6 +713,23 @@
     const same = d.to[0] === d.from[0] && d.to[1] === d.from[1];
     if (same) {                                   // a click, not a drag: edit it
       send('openThing', { uri: t.uri, key: t.key });
+      draw();
+      return;
+    }
+    if (d.patrol === null && t.how === 'mark') {
+      // Repaint the mark itself, shape and all, and write the rows: this file's own
+      // undo covers it. Everything standing on that mark moves with it.
+      const moved = M.moveMark(S.model, S.cells, t.mark, d.to[0] - d.from[0], d.to[1] - d.from[1]);
+      if (!moved) {
+        $('status').textContent = '@' + t.mark + ' would leave the map there.';
+        draw();
+        return;
+      }
+      moved.forEach((row, y) => row.forEach((ch, x) => { if (S.cells[y][x] !== ch) { touch(x, y); } }));
+      S.cells = moved;
+      t.cell = d.to.slice();
+      $('status').textContent = 'Moved @' + t.mark + ' - anything else on it moved too.';
+      commit();
       draw();
       return;
     }

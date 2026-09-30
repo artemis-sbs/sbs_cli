@@ -281,6 +281,45 @@
     return out;
   }
 
+  /**
+   * Move a MARK: every cell drawn with a character that carries `mark`, shifted by
+   * (dx, dy), each keeping its own character. What a thing placed by `Mark:` stands on
+   * is the mark, so moving the thing means repainting the mark.
+   *
+   * A vacated cell becomes the plain ground of the same kind (the legend character with
+   * that kind and no mark); failing that, the plain character most common around it;
+   * failing that, nothing. Returns the new grid, or null when the mark would leave the
+   * map or is not on it.
+   */
+  function moveMark(m, cells, mark, dx, dy) {
+    const byCh = {};
+    for (const e of m.legend) { byCh[e.ch] = e; }
+    const mine = [];
+    cells.forEach((row, y) => row.forEach((ch, x) => {
+      if (byCh[ch] && byCh[ch].mark === mark) { mine.push([x, y, ch]); }
+    }));
+    if (!mine.length) { return null; }
+    const h = cells.length, w = h ? cells[0].length : 0;
+    if (mine.some(([x, y]) => x + dx < 0 || y + dy < 0 || x + dx >= w || y + dy >= h)) { return null; }
+    const out = clone(cells);
+    const moving = new Set(mine.map(([x, y]) => x + ',' + y));
+    const plainOf = (kind) => (m.legend.find((e) => e.kind === kind && !e.mark) || {}).ch;
+    for (const [x, y, ch] of mine) {
+      let fill = plainOf(byCh[ch].kind);
+      if (!fill) {
+        const count = {};
+        for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
+          const c = cells[ny] && cells[ny][nx];
+          if (c && !moving.has(nx + ',' + ny) && byCh[c] && !byCh[c].mark) { count[c] = (count[c] || 0) + 1; }
+        }
+        fill = Object.keys(count).sort((a, b) => count[b] - count[a])[0] || ' ';
+      }
+      out[y][x] = fill;
+    }
+    for (const [x, y, ch] of mine) { out[y + dy][x + dx] = ch; }
+    return out;
+  }
+
   /** `x, y` or `x y` -> [x, y], or null. What an At: or a Patrol point holds. */
   function parseCell(s) {
     const n = String(s || '').replace(/,/g, ' ').trim().split(/\s+/).map(Number);
@@ -295,5 +334,5 @@
   }
 
   return { parse, grid, rowEdits, applyEdits, headerEdit, legendAddEdit, legendSetEdit,
-           freeChar, paint, line, rect, fill, resize, cellOfLine, parseCell, rowText };
+           freeChar, paint, line, rect, fill, resize, cellOfLine, parseCell, moveMark, rowText };
 });

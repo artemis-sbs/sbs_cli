@@ -173,9 +173,15 @@ exits are labeled. Problems are listed and marked on their cells.
 
 **Things** draws the props, people and hostiles your `.amd` places there, with patrol
 routes. **Move** (`M`) drags one, or a single patrol point, and rewrites its `At:` or that
-patrol point in the `.amd`; clicking one opens it in the Inspector. A thing placed by
-`Mark:` moves with its mark. **Undo move** puts back the last move, since the `.amd` is a
-different file than the one the editor's own undo covers.
+patrol point in the `.amd`; clicking one opens it in the Inspector. Dragging a thing placed
+by `Mark:` moves the mark itself, in the map (normal undo). **Undo move** puts back the
+last `.amd` move, since the `.amd` is a different file than the one the editor's own undo
+covers. **Face S** previews figures facing each way.
+
+**Open a `.tileset` file** and it opens as the **Tileset Editor**: one row per kind, with
+Walk/See/Tall checkboxes, its look (with a picture from the art sets), tint, `over`, and
+how many cells of the areas use it. Pick a kind, then click a look in the gallery below to
+put it on. Each edit rewrites one line, lined up with the file's own columns.
 
 A stroke rewrites only the rows it changed, and undo works as usual. `.tiles` and
 `.tileset` files are also highlighted and checked as you type. Full guide:

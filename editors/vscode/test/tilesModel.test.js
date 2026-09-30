@@ -124,5 +124,21 @@ check('a cell reads as At: or as a patrol point', JSON.stringify(T.parseCell('18
   && JSON.stringify(T.parseCell(' 25 4 ')) === '[25,4]');
 check('a word is not a cell', T.parseCell('landing') === null && T.parseCell('') === null);
 
+console.log('\nmoving a mark');
+// `L` is dust @landing; `.` is plain dust, so the vacated cell goes back to `.`.
+let moved = T.moveMark(m, T.grid(m), 'landing', 1, 0);
+check('the mark moves, the old cell is plain ground of its kind',
+  moved[1].join('') === '#..L#');
+check('off the map is refused', T.moveMark(m, T.grid(m), 'landing', 3, 0) === null);
+check('a mark that is not drawn is refused', T.moveMark(m, T.grid(m), 'nowhere', 1, 0) === null);
+const PAD = 'area: p\nlegend:\n  ,: grass\n  p: deck @pad\n---\n,,,,,\n,pp,,\n,pp,,\n,,,,,\n';
+const mp = T.parse(PAD);
+moved = T.moveMark(mp, T.grid(mp), 'pad', 1, 1);
+check('a many-cell mark moves as one shape, overlapping itself',
+  moved.map((r) => r.join('')).join('|') === ',,,,,|,,,,,|,,pp,|,,pp,');
+check('... and with no plain `deck` it leaves what surrounds it', moved[1][1] === ',');
+out = T.applyEdits(PAD, T.rowEdits(mp, moved));
+check('it writes as ordinary row edits (so undo covers it)', T.parse(out).rows[3] === ',,pp,');
+
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exit(failures ? 1 : 0);
