@@ -71,6 +71,28 @@ def _load_mission_vocabulary(mission):
     return load_mission_vocabulary(mission)
 
 
+def _shared_folder_owner(missions, folder):
+    """The mission that reads `folder`, when `folder` is a shared one (an author's own
+    files under `common_data`), else None. Needs an sbs_utils that knows the idea."""
+    _prefer_working_tree_sbs_utils(missions, folder)
+    try:
+        _ensure_sbs_utils_importable(missions)
+        from sbs_utils.procedural.amd_vocab import shared_folder_owner
+    except Exception:
+        return None
+    return shared_folder_owner(os.path.join(os.path.abspath(folder), "x.amd"))
+
+
+def _shared_amd_files(mission):
+    """The `.amd` files in the shared folders this mission reads. [] on an older
+    sbs_utils."""
+    try:
+        from sbs_utils.procedural.amd_vocab import shared_amd_files
+    except Exception:
+        return []
+    return shared_amd_files(mission)
+
+
 def _declared_addon_paths(mission_root):
     """Delegates to sbs_utils.procedural.amd_vocab (see _load_mission_vocabulary)."""
     from sbs_utils.procedural.amd_vocab import declared_addon_paths
@@ -499,6 +521,14 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
         print(f"ERROR: not a folder: {folder}")
         raise SystemExit(2)
 
+    # A SHARED folder (`common_data/bosses`) is not a mission, but its files are written
+    # in one mission's words. Lint them as part of that mission, and only them.
+    only_shared = None
+    owner = _shared_folder_owner(missions, mission)
+    if owner:
+        only_shared = os.path.abspath(mission)
+        mission = owner
+
     try:
         amd_lint = _load_amd_lint(missions, mission)
         signal_lint = None if no_signals else _load_signal_lint(missions, mission)
@@ -510,8 +540,17 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
         raise SystemExit(2)
 
     amd_files = sorted(glob.glob(os.path.join(mission, "**", "*.amd"), recursive=True))
+    # ...and the shared folders this mission reads: an author's own files, kept outside
+    # the mission folder so an update does not delete them.
+    shared_files = _shared_amd_files(mission)
+    amd_files += shared_files
     mast_files = [] if no_signals else sorted(
         glob.glob(os.path.join(mission, "**", "*.mast"), recursive=True))
+    if only_shared:
+        # Cross-file references still resolve against the whole mission (known_keys and
+        # mast_sources below are built before this narrows anything that feeds them).
+        no_signals = True
+        mast_files = []
     if not amd_files and not mast_files:
         if fmt == "json":
             print("[]")
@@ -529,6 +568,19 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
     # Mission-wide symbol table so cross-file references (a Scene/choice/reveal in
     # one .amd pointing at a node in another) don't false-positive as dangling.
     known_keys = _mission_amd_keys(amd_files)
+    if only_shared:
+        inside = os.path.normcase(only_shared) + os.sep
+        amd_files = [p for p in amd_files
+                     if os.path.normcase(os.path.abspath(p)).startswith(inside)]
+
+    shared_set = {os.path.normcase(os.path.abspath(p)) for p in shared_files}
+
+    def _rel(path):
+        # A shared file is named from the missions folder (`common_data/bosses/x.amd`),
+        # not as a climb out of the mission (`../common_data/...`).
+        if os.path.normcase(os.path.abspath(path)) in shared_set:
+            return os.path.relpath(path, os.path.dirname(os.path.abspath(mission)))
+        return os.path.relpath(path, mission)
 
     if missing:
         raise SystemExit(_report_missing(missions, mission, amd_files, known_keys, fmt))
@@ -541,7 +593,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
 
     # Packaging drift: a repo shipping its own addons must keep __lib__.json, story.json
     # and .gitattributes in step, or a FETCHED copy is quietly wrong.
-    packaging = lint_self_packaging(mission)
+    packaging = [] if only_shared else lint_self_packaging(mission)
     for severity, message in packaging:
         if severity == "error":
             total_err += 1
@@ -558,7 +610,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
     for path in amd_files:
         findings = amd_lint(file_path=path, mast_sources=mast_sources,
                             cross_file=not no_cross, known_keys=known_keys)
-        rel = os.path.relpath(path, mission)
+        rel = _rel(path)
         for f in findings:
             if f.is_error():
                 total_err += 1
@@ -669,7 +721,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
         from sbs_utils.procedural.namespace_lint import namespace_lint_project
     except Exception:
         namespace_lint_project = None
-    if namespace_lint_project is not None:
+    if namespace_lint_project is not None and not only_shared:
         addon_dirs = set()
         for ini in glob.glob(os.path.join(mission, "*", "__init__.mast")):
             addon_dirs.add(os.path.dirname(ini))
@@ -718,7 +770,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
     # Tile world pass: area files, tileset files, and where the .amd puts props and
     # people on them. Every one of these fails SILENTLY at runtime (an area skipped, a
     # prop never placed), which is the whole reason to lint them.
-    if tilemap_lint_mission is not None:
+    if tilemap_lint_mission is not None and not only_shared:
         by_file = {}
         for rel, f in tilemap_lint_mission(mission):
             by_file.setdefault(rel, []).append(f)
