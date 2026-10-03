@@ -179,6 +179,70 @@ def _load_await_lint(missions, mission):
             return None
 
 
+def _load_reach_lint(missions, mission):
+    """Import `reach_lint` (a line that can never run because the label already ended).
+
+    Returns None when the mission's sbs_utils predates the rule."""
+    _prefer_working_tree_sbs_utils(missions, mission)
+    try:
+        from sbs_utils.procedural.reach_lint import reach_lint
+        return reach_lint
+    except Exception:
+        return None
+
+
+_COMPILE_ERROR = re.compile(r"^Error: (?P<what>.*)$")
+_COMPILE_AT = re.compile(r"^at (?P<file>.+?) Line (?P<line>\d+) - (?P<text>.*)$")
+
+
+def _compile_errors(folder, mission):
+    """Compile the mission's story in a CHILD process and return its errors as
+    [(file relative to the mission, line, message)].
+
+    A story that does not compile runs NOTHING - no map, no ships, both logs empty - and
+    `sbs lint` said `clean`, because it never compiled anything. A writer has two tools,
+    lint and playing; this is the failure where playing shows a blank screen and lint
+    showed a green one.
+
+    A child process, not a call: compiling imports the mission's `script.py` and
+    registers its routes, which a lint run that goes on to other passes should not have
+    done to it. Returns None when it cannot be run at all (a source checkout with no
+    zipapp to re-enter).
+    """
+    import subprocess
+    app = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    if not (os.path.isfile(app) and app.lower().endswith(".pyz")):
+        return None
+    try:
+        run = subprocess.run([sys.executable, app, "compile", folder],
+                             capture_output=True, text=True, timeout=300)
+    except Exception:
+        return None
+    out = (run.stdout or "").splitlines()
+    if run.returncode == 0 and not any(l.startswith("FAILED:") for l in out):
+        return []
+    errors = []
+    for i, line in enumerate(out):
+        m = _COMPILE_ERROR.match(line.strip())
+        if not m:
+            continue
+        what, where, number = m.group("what").strip(), "story.mast", 1
+        at = _COMPILE_AT.match(out[i + 1].strip()) if i + 1 < len(out) else None
+        if at:
+            number = int(at.group("line"))
+            try:
+                where = os.path.relpath(at.group("file"), mission)
+            except ValueError:
+                where = at.group("file")
+            what = f"{what}: {at.group('text')}"
+        errors.append((where, number, what))
+    if not errors:
+        # It failed and said so in a shape this does not know. Still a failure.
+        tail = " ".join(l.strip() for l in out[-3:] if l.strip()) or "the compile failed"
+        errors.append(("story.mast", 1, tail))
+    return errors
+
+
 def _load_blob_lint(missions, mission):
     """Import `blob_lint` - working tree first, else the mission's own sbslib.
 
@@ -480,10 +544,12 @@ def _report_private(mission, fmt):
 @click.option("--missing", is_flag=True,
               help="List what is REFERENCED but not written yet, grouped by target, "
                    "and exit 0. A work list, not a failure.")
+@click.option("--no-compile", "no_compile", is_flag=True,
+              help="Skip the check that story.mast compiles.")
 @click.option("--private", "private", is_flag=True,
               help="List public addon functions nothing outside their own file uses "
                    "(candidates for a leading underscore), and exit 0. A work list.")
-def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
+def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_compile):
     """Lint a mission FOLDER: its .amd files AND its .mast signal routes.
 
     AMD: structural problems (broken headings, unclosed `---` fences, heading-level
@@ -534,6 +600,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
         signal_lint = None if no_signals else _load_signal_lint(missions, mission)
         blob_lint = _load_blob_lint(missions, mission)
         await_lint = _load_await_lint(missions, mission)
+        reach_lint = _load_reach_lint(missions, mission)
         tilemap_lint_mission = _load_tilemap_lint(missions, mission)
     except Exception as e:
         print(f"ERROR: could not load sbs_utils to lint ({e})")
@@ -631,7 +698,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
     # MAST data_set pass: a blob read compared or `in`-tested with no None guard, and
     # the await pass: a statement directly in an `await ...:` block (it never runs).
     # Same printing rule as the signal pass below - only files WITH findings.
-    per_file_mast = [r for r in (blob_lint, await_lint) if r is not None]
+    per_file_mast = [r for r in (blob_lint, await_lint, reach_lint) if r is not None]
     if per_file_mast:
         for path in mast_files:
             findings = []
@@ -712,6 +779,25 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private):
                         print(f.compact(rel))
                 else:  # json
                     bundle.extend(f.to_dict(file=rel) for f in findings)
+
+    # THE STORY HAS TO COMPILE. Everything above reads files; none of it runs the
+    # compiler, so a mission whose story.mast does not compile - one line pasted at the
+    # wrong indent is enough - was reported clean and then ran nothing at all.
+    if not no_compile and not only_shared \
+            and os.path.isfile(os.path.join(mission, "story.mast")):
+        errors = _compile_errors(folder, mission)
+        for rel, number, what in (errors or []):
+            total_err += 1
+            message = (f"{what}. The story does not compile, so NOTHING in this "
+                       f"mission runs until this is fixed")
+            if fmt == "text":
+                print(f"== {rel} (compile) ==\n  [ERROR] line {number}: {message} "
+                      f"(mast-compile)")
+            elif fmt == "compact":
+                print(f"{rel}:{number}:1: error: {message} (mast-compile)")
+            else:
+                bundle.append({"file": rel, "line": number, "severity": "error",
+                               "code": "mast-compile", "message": message})
 
     # Whole-mission namespace pass: MAST merges every addon's .py into ONE global
     # namespace and register_mission_functions overwrites silently, so a name defined
