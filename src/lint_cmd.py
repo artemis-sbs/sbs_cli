@@ -443,13 +443,13 @@ def _missing_amd_files(mission, mast_files):
                     os.path.join(root, "*.amd")))
                 hint = ""
                 if near:
-                    hint = (f" There is a `{near[0]}` in the folder: the name has to END "
+                    hint = (f". There is a `{near[0]}` in the folder: the name has to END "
                             f"in `.amd` (Windows may be hiding the last part)")
                 elif others:
-                    hint = f" The folder has: {', '.join(others[:4])}"
+                    hint = f". The folder has: {', '.join(others[:4])}"
                 out.append((os.path.relpath(path, root), number,
                             f"this line asks for `{name}`, and there is no file of that "
-                            f"name. The game stops here when the mission starts.{hint}"))
+                            f"name. The game stops here when the mission starts{hint}"))
     return out
 
 
@@ -938,15 +938,23 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
                 print("== story.mast (compile) ==\n  not checked: the library that "
                       "checks whether the story compiles is not on this machine. "
                       f"`sbs debug {folder}` fetches it")
+        headed = None
         for rel, number, what in (errors or []):
             total_err += 1
+            # Python's own tail on an error it raised while reading ONE line of the
+            # story: `(detected at line 1) (<mast:14>, line 1)`. Its "line 1" is the
+            # first line of that one statement, beside the real line number in front.
+            what = re.sub(r"\s*\(detected at line \d+\)", "", what)
+            what = re.sub(r"\s*\(<mast:\d+>, line \d+\)", "", what)
             message = (f"{what}. The story does not compile, so NOTHING in this "
                        f"mission runs until this is fixed")
             if fmt == "text":
-                print(f"== {rel} (compile) ==\n  [ERROR] line {number}: {message} "
-                      f"(mast-compile)")
+                if headed != rel:
+                    print(f"== {rel} (compile) ==")       # once per file, not per error
+                    headed = rel
+                print(f"  [ERROR] line {number}: {message} (mast-compile)")
             elif fmt == "compact":
-                print(f"{rel}:{number}:1: error: {message} (mast-compile)")
+                print(f"{rel}:{number}:1: error: {message} [mast-compile]")
             else:
                 bundle.append({"file": rel, "line": number, "severity": "error",
                                "code": "mast-compile", "message": message})
