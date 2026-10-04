@@ -358,7 +358,14 @@ def _read_text(path):
     These reads used a bare `open(path, "r")` - the locale's code page - inside an
     `except: pass`. So a UTF-8 file with one curly quote in it could not be read on some
     machines, was skipped without a word, and every key in it went missing from the
-    table that cross-file references are checked against."""
+    table that cross-file references are checked against.
+
+    Line ends come back as a text-mode open gave them: a Windows file is CRLF on
+    disk, and every pattern here is written against a bare newline."""
+    return _decode(path).replace(chr(13) + chr(10), chr(10))
+
+
+def _decode(path):
     with open(path, "rb") as f:
         data = f.read()
     if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
@@ -663,6 +670,15 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
     # that used to empty `mast.runtime.log` - the file a writer runs lint and then goes
     # to read. The child process that compiles the story inherits this.
     os.environ["MAST_LEAVE_LOGS"] = "1"
+    # A FINDING QUOTES WHAT THE WRITER TYPED, and what they typed may be a character the
+    # output cannot hold: with lint's output going to a file or to an editor's task
+    # runner it is the Windows code page, and one emoji in a mission file was a
+    # traceback out of `print` instead of the finding about the emoji.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except Exception:
+            pass
     missions = zipapp_dir
 
     if lsp:

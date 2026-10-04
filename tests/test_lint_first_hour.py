@@ -82,6 +82,10 @@ class ReadingAFile(_Folder):
                 path = self.write("mission.amd", self.TEXT, encoding)
                 self.assertEqual(lint_cmd._read_text(path), self.TEXT)
 
+    def test_windows_line_ends_come_back_as_plain_ones(self):
+        path = self.write("story.mast", self.TEXT.replace("\n", "\r\n"))
+        self.assertEqual(lint_cmd._read_text(path), self.TEXT)
+
 
 class WhatTheCompilerSaid(unittest.TestCase):
     def test_an_error_python_raised_is_an_error_too(self):
