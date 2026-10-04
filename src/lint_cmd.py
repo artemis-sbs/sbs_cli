@@ -191,7 +191,16 @@ def _load_reach_lint(missions, mission):
         return None
 
 
-_COMPILE_ERROR = re.compile(r"^Error: (?P<what>.*)$")
+# The compiler prints one of its own errors as `Error: ...` and one that Python raised
+# while reading a line as `Exception: ...` - an unclosed quote is the common one. Only
+# the first was matched, so that one came out as `line 1: FAILED: 1 compile error(s)`
+# with the real line thrown away.
+_COMPILE_ERROR = re.compile(r"^(?:Error|Exception): (?P<what>.*)$")
+# What `sbs compile` says when THIS MACHINE cannot compile anything: the dev library
+# that carries the stand-in for the game is fetched by `sbs debug`, and a writer who has
+# only ever linted does not have it. That is not a fault in the mission.
+_COMPILE_CANNOT = ("Missing dev libraries", "No sbs_utils source and no sbs_utils sbslib")
+NOT_CHECKED = "not-checked"
 _COMPILE_AT = re.compile(r"^at (?P<file>.+?) Line (?P<line>\d+) - (?P<text>.*)$")
 
 
@@ -221,6 +230,8 @@ def _compile_errors(folder, mission):
     out = (run.stdout or "").splitlines()
     if run.returncode == 0 and not any(l.startswith("FAILED:") for l in out):
         return []
+    if any(l.startswith(_COMPILE_CANNOT) for l in out):
+        return NOT_CHECKED
     errors = []
     for i, line in enumerate(out):
         m = _COMPILE_ERROR.match(line.strip())
@@ -340,15 +351,98 @@ def lint_self_packaging(mission, user="artemis-sbs"):
     return out
 
 
+def _read_text(path):
+    """A source file's text, decoded the way the game decodes it: UTF-8 (a mark is
+    fine), UTF-16 with its mark, else the Windows code page.
+
+    These reads used a bare `open(path, "r")` - the locale's code page - inside an
+    `except: pass`. So a UTF-8 file with one curly quote in it could not be read on some
+    machines, was skipped without a word, and every key in it went missing from the
+    table that cross-file references are checked against."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", "replace")
+
+
 def _read_all(mission, pattern):
     """Read every file matching `pattern` under `mission` into a list of strings."""
     out = []
     for path in glob.glob(os.path.join(mission, "**", pattern), recursive=True):
         try:
-            with open(path, "r") as f:
-                out.append(f.read())
+            out.append(_read_text(path))
         except Exception:
             pass
+    return out
+
+
+# A file name handed straight to a call: `crew_load_amd("mission.amd")`. No spaces in
+# the name (a sentence that mentions a file is not a request for it), and not a call
+# that says in its own name that the file may be absent.
+_AMD_NAMED = re.compile(r"""(?P<call>\w+)\(\s*["'](?P<name>[\w./\\-]+\.amd)["']""")
+_AMD_MAY_BE_ABSENT = re.compile(r"optional|exists|isfile|expect|print|log", re.I)
+
+
+def _missing_amd_files(mission, mast_files):
+    """[(file relative to the mission, line, message)] for each `.amd` a `.mast` names
+    that is not there.
+
+    The story asks for its files BY NAME (`crew_load_amd("mission.amd")`). Rename the
+    file, or let Notepad save it as `mission.amd.txt`, and lint said `clean` - about the
+    renamed file, or about nothing at all - while the game stopped on its first line
+    with a Python traceback in the log."""
+    out = []
+    said = {}                # (file, name) -> index in `out`: one finding per missing file
+    root = os.path.abspath(mission)
+    for path in mast_files:
+        try:
+            lines = _read_text(path).splitlines()
+        except Exception:
+            continue
+        here = os.path.dirname(os.path.abspath(path))
+        for number, line in enumerate(lines, start=1):
+            code = line.split("#", 1)[0]
+            if "{" in code and "}" in code:
+                continue                       # a name built at run time: cannot tell
+            for m in _AMD_NAMED.finditer(code):
+                if _AMD_MAY_BE_ABSENT.search(m.group("call")):
+                    continue
+                name = m.group("name").strip()
+                spots = [os.path.join(root, name), os.path.join(here, name),
+                         os.path.join(os.path.dirname(root), name)]
+                if any(os.path.isfile(s) for s in spots):
+                    continue
+                if (path, name) in said:
+                    rel, first, message = out[said[(path, name)]]
+                    more = ", " if ". Also asked for on line " in message \
+                        else ". Also asked for on line "
+                    out[said[(path, name)]] = (rel, first, message + f"{more}{number}")
+                    continue
+                said[(path, name)] = len(out)
+                base = os.path.basename(name)
+                near = sorted(f for f in os.listdir(os.path.dirname(spots[0]) or root)
+                              if f != base and f.lower().startswith(base.lower())) \
+                    if os.path.isdir(os.path.dirname(spots[0]) or root) else []
+                others = sorted(os.path.relpath(p, root) for p in glob.glob(
+                    os.path.join(root, "*.amd")))
+                hint = ""
+                if near:
+                    hint = (f" There is a `{near[0]}` in the folder: the name has to END "
+                            f"in `.amd` (Windows may be hiding the last part)")
+                elif others:
+                    hint = f" The folder has: {', '.join(others[:4])}"
+                out.append((os.path.relpath(path, root), number,
+                            f"this line asks for `{name}`, and there is no file of that "
+                            f"name. The game stops here when the mission starts.{hint}"))
     return out
 
 
@@ -359,8 +453,7 @@ def _mission_amd_keys(amd_files):
     keys = set()
     for path in amd_files:
         try:
-            with open(path, "r") as f:
-                keys |= parse(f.read()).keys
+            keys |= parse(_read_text(path)).keys
         except Exception:
             pass
     return keys
@@ -584,6 +677,22 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
             raise SystemExit(2)
         raise SystemExit(serve())
 
+    if folder in (".", "", "./", ".\\"):
+        # NO FOLDER NAME. `os.path.join(missions, ".")` is the missions folder itself, so
+        # this linted EVERY mission on the machine as if they were one, and wrote two log
+        # files into the missions folder. It means "the mission I am standing in".
+        here = os.getcwd()
+        if not any(os.path.isfile(os.path.join(here, name))
+                   for name in ("story.mast", "story.json", "script.py")):
+            print("ERROR: which mission? Put its folder name after the command:\n"
+                  "    sbs lint MyMission")
+            raise SystemExit(2)
+        try:
+            folder = os.path.relpath(here, str(missions))
+        except ValueError:
+            folder = here
+        if folder.startswith(".."):
+            folder = here
     mission = os.path.join(missions, folder)
     if not os.path.isdir(mission):
         mission = folder  # allow an absolute or cwd-relative path
@@ -784,12 +893,35 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
                 else:  # json
                     bundle.extend(f.to_dict(file=rel) for f in findings)
 
+    # EVERY `.amd` THE STORY NAMES HAS TO BE THERE.
+    if not only_shared:
+        named_from = mast_files or sorted(
+            glob.glob(os.path.join(mission, "**", "*.mast"), recursive=True))
+        for rel, number, message in _missing_amd_files(mission, named_from):
+            total_err += 1
+            if fmt == "text":
+                print(f"== {rel} ==\n  [ERROR] line {number}: {message} (amd-file-missing)")
+            elif fmt == "compact":
+                print(f"{rel}:{number}:1: error: {message} [amd-file-missing]")
+            else:
+                bundle.append({"file": rel, "line": number, "severity": "error",
+                               "code": "amd-file-missing", "message": message})
+
     # THE STORY HAS TO COMPILE. Everything above reads files; none of it runs the
     # compiler, so a mission whose story.mast does not compile - one line pasted at the
     # wrong indent is enough - was reported clean and then ran nothing at all.
     if not no_compile and not only_shared \
             and os.path.isfile(os.path.join(mission, "story.mast")):
         errors = _compile_errors(folder, mission)
+        if errors == NOT_CHECKED:
+            # "Could not check" is a NOTE. It used to be an error against line 1 of a
+            # clean mission, ending "NOTHING in this mission runs", on any machine that
+            # had never run `sbs debug`.
+            errors = []
+            if fmt == "text":
+                print("== story.mast (compile) ==\n  not checked: the library that "
+                      "checks whether the story compiles is not on this machine. "
+                      f"`sbs debug {folder}` fetches it")
         for rel, number, what in (errors or []):
             total_err += 1
             message = (f"{what}. The story does not compile, so NOTHING in this "
@@ -885,6 +1017,10 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
     elif fmt == "text":
         print(f"\n{len(amd_files)} amd + {len(mast_files)} mast file(s): "
               f"{total_err} error(s), {total_warn} warning(s)")
+        if strict and total_warn and not total_err:
+            # The same bytes as plain lint, and exit code 1: nobody could SEE that it
+            # had failed.
+            print("FAILED: --strict counts a warning as a failure")
 
     if total_err or (strict and total_warn):
         raise SystemExit(1)
