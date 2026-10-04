@@ -318,9 +318,24 @@ def _bad_title(title):
         return "a leading '-' makes YAML read it as a list"
     if ":" in title:
         return "a ':' makes YAML read it as a mapping"
+    if '"' in title:
+        return "a double quote cannot be written safely; use an apostrophe"
     if len(title) > 40:
         return f"it is {len(title)} characters; the mission list truncates long names"
     return None
+
+
+def _yaml_value(value):
+    """`value` as it must be WRITTEN in description.yaml.
+
+    A bare hyphen anywhere in a value - `Visible Mission Name: Half-Light` - crashes the
+    engine's mission-list scan at start-up. Not for that mission: for EVERY launch,
+    whatever mission is asked for, with nothing in any log. A title like "Half-Light" is
+    exactly what a writer types, so a value holding one is written in double quotes,
+    which the engine reads correctly.
+    """
+    text = str(value)
+    return f'"{text}"' if "-" in text else text
 
 
 def _rewrite_line(path, key, value):
@@ -341,7 +356,7 @@ def _rewrite_line(path, key, value):
             after = stripped[len(key) + 1:]
             if "#" in after:
                 comment = "  " + after[after.index("#"):]
-            out.append(f"{indent}{key}: {value}{comment}")
+            out.append(f"{indent}{key}: {_yaml_value(value)}{comment}")
             changed = True
         else:
             out.append(text)
