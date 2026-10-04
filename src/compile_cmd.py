@@ -179,6 +179,9 @@ def _looks_like_mast_error(e):
 @click.option('-t', '--terminal', is_flag=True)
 @click.option('-r', '--run', is_flag=True)
 def compile(folder, run, terminal):
+    # A check leaves the mission's logs alone (see lint); a RUN starts them empty.
+    if not run:
+        os.environ["MAST_LEAVE_LOGS"] = "1"
     # Exit non-zero when it did not compile, so this can be used as a gate.
     if not compile_impl(folder, not run, not terminal):
         raise SystemExit(1)

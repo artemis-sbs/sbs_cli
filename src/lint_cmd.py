@@ -566,6 +566,10 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
     With --lsp, run an editor language server on stdin/stdout instead (VSCode,
     Neovim, Emacs, ...): live diagnostics as you type.
     """
+    # A CHECK LEAVES THE MISSION'S LOGS ALONE. Lint builds a Mast to read the story, and
+    # that used to empty `mast.runtime.log` - the file a writer runs lint and then goes
+    # to read. The child process that compiles the story inherits this.
+    os.environ["MAST_LEAVE_LOGS"] = "1"
     missions = zipapp_dir
 
     if lsp:
