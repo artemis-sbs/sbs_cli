@@ -1,4 +1,4 @@
-"""Shared media: unpack a resource pack ONCE, beside the libraries.
+r"""Shared media: unpack a resource pack ONCE, beside the libraries.
 
 Art used to be copied per consuming mission - 27 MB in LegendaryMissions' git and 27 MB
 again in every mission that declared the pack. Everything the engine is handed is a path

@@ -44,6 +44,16 @@ def _add_sidecar():
 _add_sidecar()
 
 
-@click.group(context_settings=CONTEXT_SETTINGS)
+class _SbsGroup(click.Group):
+    """The tool calls itself what the writer types. Every usage line and every
+    `Try '... --help'` said `sbs.pyz`, the file's name, to a person who typed `sbs`."""
+
+    def main(self, *args, **kwargs):
+        if not kwargs.get("prog_name"):
+            kwargs["prog_name"] = "sbs"
+        return super().main(*args, **kwargs)
+
+
+@click.group(cls=_SbsGroup, context_settings=CONTEXT_SETTINGS)
 def cli():
     pass

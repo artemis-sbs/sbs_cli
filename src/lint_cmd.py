@@ -34,10 +34,22 @@ def _ensure_sbs_utils_importable(missions):
         return
     except Exception:
         pass
-    lib_dir = os.path.join(missions, "__lib__")
-    libs = sorted(glob.glob(os.path.join(lib_dir, "*sbs_utils*.sbslib")), reverse=True)
+    libs = _sbs_utils_sbslibs(os.path.join(missions, "__lib__"))
     if libs:
         sys.path.append(libs[0])
+
+
+def _sbs_utils_sbslibs(lib_dir):
+    """The sbs_utils libraries in `lib_dir` that ARE libraries, newest name first.
+
+    A failed download is a file too. The game's own archive ships
+    `artemis-sbs.sbs_utils.v1.4.0_dev.sbslib` holding the nine bytes `Not Found`, and its
+    name sorts above the real one - so on a fresh install the library "was not
+    importable" and the editor's checking would not start."""
+    import zipfile
+    return [p for p in sorted(glob.glob(os.path.join(lib_dir, "*sbs_utils*.sbslib")),
+                              reverse=True)
+            if zipfile.is_zipfile(p)]
 
 
 def _load_amd_lint(missions, mission):
