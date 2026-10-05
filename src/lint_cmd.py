@@ -949,7 +949,8 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
             if fmt == "text":
                 print("== story.mast (compile) ==\n  not checked: the library that "
                       "checks whether the story compiles is not on this machine. "
-                      f"`sbs debug {folder}` fetches it")
+                      f'`sbs fetch "{os.path.basename(os.path.abspath(mission))}" '
+                      f'--libs` fetches it')
         headed = None
         for rel, number, what in (errors or []):
             total_err += 1

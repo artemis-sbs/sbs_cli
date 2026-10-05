@@ -96,8 +96,10 @@ sbs fetch "My Mission" --libs              # a mission of YOUR OWN: get its libr
 **`fetch` replaces the mission folder with the published one** (it asks first). For a
 mission you are writing, that is the wrong tool: use `--libs`. It reads the list of
 libraries in your mission's `story.json`, downloads the newest build of each into
-`__lib__`, and leaves your folder alone. Use it when `sbs doctor` says a library is
-missing, and whenever a fixed library has been published.
+`__lib__` (and the dev library that `sbs lint` and `sbs debug` need), and leaves your
+folder alone. Use it when `sbs doctor` says a library is missing, and whenever a fixed
+library has been published. `sbs debug <mission> --refresh-libs` does the same and then
+starts the mission.
 
 By default `fetch` pulls from the official `artemis-sbs` account and the newest
 (`main`) version. Common options:

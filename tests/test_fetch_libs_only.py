@@ -24,6 +24,7 @@ from cli_cmd import cli
 
 SBSLIB = "artemis-sbs.sbs_utils.v1.4.0.sbslib"
 MASTLIB = "artemis-sbs.LegendaryMissions.comms.v1.4.0.mastlib"
+DEVLIB = "artemis-sbs.cosmos_dev.v1.4.0.sbslib"
 
 
 def _zip_with(path, text):
@@ -82,8 +83,21 @@ class TheLibrariesArrive(_Missions):
     def test_into_the_tools_lib_not_the_prompts(self):
         result = self.fetch(self.good)
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(sorted(os.listdir(self.lib)), sorted([SBSLIB, MASTLIB]))
+        self.assertEqual(sorted(os.listdir(self.lib)), sorted([SBSLIB, MASTLIB, DEVLIB]))
         self.assertEqual(os.listdir(self.elsewhere), [])
+
+    def test_the_dev_library_comes_too_from_the_sbs_utils_release(self):
+        # No story.json names it, and lint's compile step and `sbs debug` both need it.
+        # It is published on sbs_utils' release: there is no repo called cosmos_dev.
+        asked = []
+
+        def good(url, name):
+            asked.append(url)
+            return self.good(url, name)
+        self.fetch(good)
+        dev = [u for u in asked if u.endswith(DEVLIB)]
+        self.assertEqual(
+            dev, ["https://github.com/artemis-sbs/sbs_utils/releases/download/v1.4.0/" + DEVLIB])
 
     def test_a_library_already_there_is_replaced(self):
         self.fetch(self.good)

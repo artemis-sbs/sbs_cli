@@ -414,7 +414,10 @@ def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs, lib_dir=None):
             continue
 
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        base = f"https://github.com/{user}/{repo}/releases/download/{version}"
+        # The dev library is a second package published on sbs_utils' OWN release, not a
+        # repo called cosmos_dev (`debug_cmd._parse_asset` knows the same thing).
+        release_repo = "sbs_utils" if is_sbs_lib and repo == "cosmos_dev" else repo
+        base = f"https://github.com/{user}/{release_repo}/releases/download/{version}"
         # Stage through a temp file and only accept a real archive. `curl -f` still CREATES
         # the output file on a 404, and an empty (or HTML) lib left at `target` is silently
         # skipped by the exists() check above on the next run - a corrupt lib that looks

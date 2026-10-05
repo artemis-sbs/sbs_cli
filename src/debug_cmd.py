@@ -61,7 +61,7 @@ def _runner_lib_paths(mission_path):
         if not cands:
             raise RuntimeError(
                 "No sbs_utils source and no sbs_utils sbslib in __lib__.\n"
-                "Fetch the dev libraries first:  sbs fetch sbs_utils")
+                "Fetch the libraries first:  sbs fetch <your mission> --libs")
         sbs_name = os.path.basename(cands[-1])
 
     sbs_path = os.path.join(lib_dir, sbs_name)
@@ -75,8 +75,8 @@ def _runner_lib_paths(mission_path):
         raise RuntimeError(
             "Missing dev libraries (no sbs_utils source):\n  "
             + "\n  ".join(missing)
-            + "\nGet them from the GitHub release, e.g.:\n"
-            "  gh release download <version> -R artemis-sbs/sbs_utils -D __lib__")
+            + "\nFetch them with:  sbs fetch \""
+            + os.path.basename(os.path.abspath(mission_path)) + "\" --libs")
     return [sbs_path, cosmos_path]
 
 

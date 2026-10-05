@@ -208,9 +208,14 @@ def fetch_libs_only(folder):
     THE MISSION FOLDER IS NOT TOUCHED. Every other form of `fetch` replaces a mission
     with the published one, which is the wrong tool for a mission somebody is writing:
     `sbs create` takes a library only when there is none, so the copy that came with the
-    game stayed for good, and the two places that told a writer how to get a missing
-    library (`sbs doctor`, and `sbs create` when the download was skipped) both said
-    `sbs fetch` - which fetches LegendaryMissions.
+    game stays, and the two places that told a writer how to get a missing library
+    (`sbs doctor`, and `sbs create` when the download was skipped) both said
+    `sbs fetch` - which fetches LegendaryMissions. (`sbs debug <mission> --refresh-libs`
+    could always do it, and then starts the game's stand-in; nothing pointed there.)
+
+    The DEV library comes too: the second sbs_utils package that `sbs lint` needs to
+    check that the story compiles and `sbs debug` needs to run at all. No mission's
+    story.json names it, so it is worked out from the sbs_utils one the mission pins.
 
     A v1.4.0 library is re-published under the same name as it is fixed, so "is it
     there" is not "is it current": this always downloads. Each file is staged and
@@ -230,10 +235,28 @@ def fetch_libs_only(folder):
     lib_dir = os.path.join(str(zipapp_dir), "__lib__")
     click.echo(f"Fetching the libraries {os.path.basename(mission)} names into {lib_dir}")
     missing = fetch_story_deps(deps_file, lib_dir, True, True)
+    dev = _dev_library_for(deps_file)
+    if dev:
+        missing += fetch_deps([dev], True, True, lib_dir)
     if report_problems(missing):
         return False
     click.echo(f"Libraries are up to date. {os.path.basename(mission)} itself was not changed.")
     return True
+
+
+def _dev_library_for(deps_file):
+    """`artemis-sbs.cosmos_dev.<line>.sbslib` for the sbs_utils this mission pins, or None."""
+    import re
+    try:
+        with open(deps_file, "r") as f:
+            pins = (json.load(f) or {}).get("sbslib", [])
+    except Exception:
+        return None
+    for pin in pins:
+        m = re.match(r"^(?P<user>[^.]+)\.sbs_utils\.(?P<line>v[\w.]+?)\.sbslib$", str(pin))
+        if m:
+            return f"{m.group('user')}.cosmos_dev.{m.group('line')}.sbslib"
+    return None
 
 
 def report_problems(missing, skipped=()):
