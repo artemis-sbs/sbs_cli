@@ -264,8 +264,13 @@ def _compile_errors(folder, mission):
     if not (os.path.isfile(app) and app.lower().endswith(".pyz")):
         return None
     try:
-        run = subprocess.run([sys.executable, app, "compile", folder],
-                             capture_output=True, text=True, timeout=300)
+        # One encoding for both ends. The child wrote in whatever PYTHONIOENCODING said
+        # and this end read in the console's code page, so a compile error that held a
+        # curly quote came back as `the compile failed` with its line thrown away.
+        env = dict(os.environ, PYTHONIOENCODING="utf-8")
+        run = subprocess.run([sys.executable, app, "compile", folder], env=env,
+                             capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=300)
     except Exception:
         return None
     out = (run.stdout or "").splitlines()
