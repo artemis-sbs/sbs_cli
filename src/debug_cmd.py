@@ -264,6 +264,9 @@ def build_settings_override(set_opts, auto_start, autoplay, players):
               help="WebSocket port for the browser GUI")
 @click.option("--tick-rate", default=60, show_default=True,
               help="Ticks per second")
+@click.option("--lan", is_flag=True, default=False,
+              help="Serve the page to the whole network (tablets, a second machine), "
+                   "not only this computer. Windows may ask about its firewall")
 @click.option("--no-fetch", is_flag=True, default=False,
               help="Don't download missing libs from GitHub releases; error instead")
 @click.option("--refresh-libs", is_flag=True, default=False,
@@ -287,7 +290,7 @@ def build_settings_override(set_opts, auto_start, autoplay, players):
 @click.option("--use-working-tree", is_flag=True, default=False,
               help="Load sbs_utils from the source working tree instead of the "
                    "packaged .sbslib, so library Python is editable while debugging")
-def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs,
+def debug(mission_path, map_arg, no_gui, port, tick_rate, lan, no_fetch, refresh_libs,
           set_opts, auto_start, autoplay, players, dap_port, dap_wait, use_working_tree):
     """Run MISSION_PATH in debug mode using the cosmos_dev mission runner.
 
@@ -308,6 +311,8 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs
       sbs debug . --auto-start --autoplay --players 1
       sbs debug . --set DIFFICULTY=8 --set AUTO_START=true
     """
+    if lan:
+        os.environ["COSMOS_DEV_LAN"] = "1"
     mission_abs = os.path.abspath(mission_path)
     # Look before anything is fetched or imported. A misspelled name used to be a
     # traceback (`Story file not found`), or advice to fetch libraries for a mission that
