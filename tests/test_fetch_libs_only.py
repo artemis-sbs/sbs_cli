@@ -62,6 +62,9 @@ class _Missions(unittest.TestCase):
         patch = mock.patch.object(fetch_cmd, "zipapp_dir", self.missions)
         patch.start()
         self.addCleanup(patch.stop)
+        online = mock.patch.object(fetch_cmd, "_online", lambda: True)
+        online.start()
+        self.addCleanup(online.stop)
 
     def mission_files(self):
         out = {}

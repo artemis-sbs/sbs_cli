@@ -309,6 +309,17 @@ def debug(mission_path, map_arg, no_gui, port, tick_rate, no_fetch, refresh_libs
       sbs debug . --set DIFFICULTY=8 --set AUTO_START=true
     """
     mission_abs = os.path.abspath(mission_path)
+    # Look before anything is fetched or imported. A misspelled name used to be a
+    # traceback (`Story file not found`), or advice to fetch libraries for a mission that
+    # does not exist.
+    if not os.path.isdir(mission_abs):
+        raise click.ClickException(
+            f"not a folder: {mission_path}\n       Check the spelling, and that the "
+            f"prompt is in data\\missions (type `dir` to see the mission folders).")
+    if not os.path.isfile(os.path.join(mission_abs, "story.mast")):
+        raise click.ClickException(
+            f"not a mission: {mission_path} has no story.mast. Name the mission's own "
+            f"folder, for example:  sbs debug MyMission")
 
     # Build settings overrides and hand them to the mission via COSMOS_SETTINGS
     # (settings_get_defaults merges it, highest priority, no settings.yaml edit).

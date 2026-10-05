@@ -233,15 +233,39 @@ def fetch_libs_only(folder):
         print("       (a mission folder holds a file called story.json)")
         return False
     lib_dir = os.path.join(str(zipapp_dir), "__lib__")
+    # One question first. With the internet off this used to try every library under two
+    # names - about a minute and seventy-five lines - and end `The mission(s) will NOT
+    # run without them`, though every library that was there had been kept.
+    if not _online():
+        print("ERROR: could not reach github.com, so no library was fetched. Nothing was "
+              "changed: the libraries you have are still there. Check the internet "
+              "connection and type the command again.")
+        return False
     click.echo(f"Fetching the libraries {os.path.basename(mission)} names into {lib_dir}")
     missing = fetch_story_deps(deps_file, lib_dir, True, True)
     dev = _dev_library_for(deps_file)
     if dev:
         missing += fetch_deps([dev], True, True, lib_dir)
-    if report_problems(missing):
+    if missing:
+        print(f"\nERROR: {len(dict.fromkeys(missing))} library file(s) could not be fetched:")
+        for dep in dict.fromkeys(missing):
+            print(f"  {dep}")
+        print("Where a library of that name was already in __lib__, it was kept. Type the "
+              "command again; if the same names fail, the release does not have them.")
         return False
     click.echo(f"Libraries are up to date. {os.path.basename(mission)} itself was not changed.")
     return True
+
+
+def _online():
+    """Can github.com be reached at all? One short request, nothing written."""
+    import subprocess
+    try:
+        r = subprocess.run(["curl", "-s", "-I", "-L", "--max-time", "10", "-o", os.devnull,
+                            "https://github.com"], capture_output=True, text=True)
+    except (OSError, ValueError):
+        return False
+    return r.returncode == 0
 
 
 def _dev_library_for(deps_file):

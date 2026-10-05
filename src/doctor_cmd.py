@@ -159,7 +159,14 @@ def _check_layout(rep):
             return
         where = os.path.dirname(os.path.dirname(os.path.abspath(origin)))
         kind = "sbslib" if ".sbslib" in where else "working tree"
-        rep.add("Layout", "sbs_utils", OK, f"{kind}: {where}")
+        from lint_cmd import sbs_utils_too_old
+        if kind == "sbslib" and sbs_utils_too_old(where):
+            # It imports, so this row used to be `ok` - and `sbs lint` then failed on it.
+            rep.add("Layout", "sbs_utils", PROBLEM,
+                    f"older than this sbs needs: {where}",
+                    'run: sbs fetch "<your mission>" --libs   (it fetches today\'s build)')
+        else:
+            rep.add("Layout", "sbs_utils", OK, f"{kind}: {where}")
     except Exception as e:
         rep.add("Layout", "sbs_utils", PROBLEM, f"not importable ({e})",
                 "no sbs_utils library in __lib__ could be opened. "

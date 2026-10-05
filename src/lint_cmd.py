@@ -39,6 +39,35 @@ def _ensure_sbs_utils_importable(missions):
         sys.path.append(libs[0])
 
 
+OLD_LIBRARY = ("The sbs_utils library in __lib__ is older than this sbs needs.\n"
+               "       Type:  sbs fetch \"{mission}\" --libs")
+
+
+def sbs_utils_too_old(path):
+    """True when `path` is an sbs_utils library this tool cannot check a mission with.
+
+    The game's download can carry a months-old build under today's NAME (the 1.3.7
+    archive: 440 KB against 1.9 MB). `sbs create` keeps a library that is already there,
+    so the first three things a new writer tried - lint, the editor's checker, `sbs debug`
+    - each failed with `No module named 'sbs_utils.procedural.amd_lint'`, while create had
+    said `is ready.` and doctor `0 problems`."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = set(z.namelist())
+    except Exception:
+        return True
+    return not {"sbs_utils/procedural/amd_lint.py", "sbs_utils/procedural/amd_lsp.py"} <= names
+
+
+def _old_library_hint(error, mission):
+    """The second line of a could-not-load error, when the cause is an old library."""
+    if not isinstance(error, ImportError):
+        return ""
+    name = os.path.basename(os.path.abspath(mission)) if mission else "<your mission>"
+    return "\n       " + OLD_LIBRARY.format(mission=name)
+
+
 def _sbs_utils_sbslibs(lib_dir):
     """The sbs_utils libraries in `lib_dir` that ARE libraries, newest name first.
 
@@ -701,7 +730,8 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
         try:
             from sbs_utils.procedural.amd_lsp import serve
         except Exception as e:
-            print(f"ERROR: could not load the AMD language server ({e})")
+            print(f"ERROR: could not load the AMD language server ({e})"
+                  + _old_library_hint(e, None))
             raise SystemExit(2)
         raise SystemExit(serve())
 
@@ -744,7 +774,7 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
         reach_lint = _load_reach_lint(missions, mission)
         tilemap_lint_mission = _load_tilemap_lint(missions, mission)
     except Exception as e:
-        print(f"ERROR: could not load sbs_utils to lint ({e})")
+        print(f"ERROR: could not load sbs_utils to lint ({e})" + _old_library_hint(e, mission))
         raise SystemExit(2)
 
     amd_files = sorted(glob.glob(os.path.join(mission, "**", "*.amd"), recursive=True))

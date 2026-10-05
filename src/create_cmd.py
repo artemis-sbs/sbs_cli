@@ -270,14 +270,48 @@ def resolve_line(branches, requested, engine_hint, installed):
     return None, "could not match a branch to this install"
 
 
+def closing_lines(name, deps, named, kept, lib_dir):
+    """What `sbs create` says last.
+
+    It said `<name> is ready.` whatever was in `__lib__`. A library that is already there
+    is KEPT, and a game download can carry a months-old build under today's name: on a
+    student's install the next three commands - lint, the editor's checker, `sbs debug` -
+    all failed with a missing-module error straight after `is ready.`
+
+    `named` is every library the mission asks for, `kept` the ones that were already
+    there (so were not fetched).
+    """
+    from lint_cmd import sbs_utils_too_old
+    stale = [d for d in deps.get("sbslib", [])
+             if ".sbs_utils." in str(d) and d in kept
+             and sbs_utils_too_old(os.path.join(lib_dir, str(d)))]
+    if stale:
+        # Not "ready": lint, the editor's checker and `sbs debug` all fail on this.
+        return [f"\n{name} was made, but it cannot be checked or run yet: the sbs_utils "
+                f"library that was already in __lib__ is older than this sbs needs.",
+                f'  sbs fetch "{name}" --libs   # fetch today\'s libraries, then it is ready']
+    lines = [f"\n{name} is ready."]
+    if kept:
+        lines += [f"  {len(kept)} of its {len(named)} libraries were already here and were "
+                  f"kept as they are.",
+                  f'  sbs fetch "{name}" --libs   # get today\'s build of each (do this once)']
+    lines += [f"  sbs debug {name}          # run it in the browser",
+              f"  sbs lint {name}           # check its AMD"]
+    return lines
+
+
 def choose_template(templates, requested):
     """Return one template dict, prompting when the caller did not name one."""
     if requested:
         for t in templates:
-            if t.get("id") == requested:
+            if str(t.get("id", "")).lower() == str(requested).strip().lower():
                 return t
         ids = ", ".join(t.get("id", "?") for t in templates)
-        raise click.ClickException(f"no template '{requested}'. Available: {ids}")
+        hint = ""
+        if str(requested).lower() == "itle":
+            # `-title "X"` is `-t itle "X"` to the option parser.
+            hint = " (the title option has TWO dashes: --title)"
+        raise click.ClickException(f"no template '{requested}'{hint}. Available: {ids}")
 
     if len(templates) == 1:
         return templates[0]
@@ -497,6 +531,14 @@ def create_impl(name, template_id, branch, line, title, description, user, repo,
 
     missing = []
     lib_dir = str(Path(zipapp_dir).resolve() / "__lib__")
+    # What is ALREADY there is kept, and "there" is not "current": a library is published
+    # again under the same name each time it is fixed, and a game download can carry a
+    # months-old one. Remember which ones were kept so the last lines can say so.
+    named = list(deps.get("sbslib", [])) + list(mastlibs)
+    if isinstance(deps.get("resources"), dict):
+        named += list(deps["resources"].values())
+    named += list(deps.get("shared_media") or [])
+    kept = [d for d in named if os.path.isfile(os.path.join(lib_dir, str(d)))]
     if deps.get("sbslib"):
         missing += fetch_deps(deps["sbslib"], True, False, lib_dir)
     if mastlibs:
@@ -521,9 +563,8 @@ def create_impl(name, template_id, branch, line, title, description, user, repo,
         click.echo(f"{name} will NOT run without them.")
         raise SystemExit(1)
 
-    click.echo(f"\n{name} is ready.")
-    click.echo(f"  sbs debug {name}          # run it in the browser")
-    click.echo(f"  sbs lint {name}           # check its AMD")
+    for line in closing_lines(name, deps, named, kept, lib_dir):
+        click.echo(line)
 
 
 @cli.command(short_help="Create a new mission from a boilerplate template.")
