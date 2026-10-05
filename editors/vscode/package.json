@@ -2,7 +2,7 @@
   "name": "amd-language",
   "displayName": "Artemis AMD",
   "description": "Language support for Artemis Cosmos AMD (.amd) files: syntax highlighting, diagnostics/navigation/formatting via the sbs AMD language server, plus a MAST source debugger.",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "publisher": "artemis-sbs",
   "license": "MIT",
   "repository": {
@@ -18,6 +18,12 @@
     "Formatters"
   ],
   "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Coloring works in Restricted Mode. Checking, the outline and the story tools start once the folder is trusted, because they run the game's Python on the mission's own files."
+    }
+  },
   "activationEvents": [
     "onDebug"
   ],

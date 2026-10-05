@@ -136,7 +136,35 @@ async function ensureClientReady(timeoutMs = 8000): Promise<boolean> {
   });
 }
 
+// A FOLDER THAT IS NOT TRUSTED. VS Code opens a new folder in Restricted Mode, and since
+// 1.140 it does so with a band across the top and no question. An extension that does not
+// declare itself for that mode is switched off whole - so a writer opening their first
+// mission saw no color, `Plain Text` in the corner and not one word from this add-on
+// (seen in a real window, 2026-10-04). package.json now declares "limited": the grammar
+// loads, and the part that RUNS something - the checker, which starts the game's Python
+// on the mission's own files - waits here until the folder is trusted, and says so.
+let waitingForTrust = false;
+let trustItem: vscode.StatusBarItem | undefined;
+
+function holdForTrust(): void {
+  if (waitingForTrust) { return; }
+  waitingForTrust = true;
+  output.appendLine('This folder is in Restricted Mode: coloring only. The checker starts when the folder is trusted.');
+  trustItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  trustItem.text = '$(shield) AMD: trust this folder';
+  trustItem.tooltip = 'Artemis AMD is only coloring this file. Checking, the outline and the story tools start when you trust the folder. Click to open Manage Workspace Trust.';
+  trustItem.command = 'workbench.trust.manage';
+  trustItem.show();
+  vscode.window.showInformationMessage(
+    'Artemis AMD: this folder is in Restricted Mode, so only coloring is on. Trust the folder to turn on checking and the story tools.',
+    'Manage Trust',
+  ).then((pick) => {
+    if (pick) { vscode.commands.executeCommand('workbench.trust.manage'); }
+  });
+}
+
 function startClient(): void {
+  if (!vscode.workspace.isTrusted) { holdForTrust(); return; }
   const exec = resolveServer();
   const serverOptions: ServerOptions = { run: exec, debug: exec };
   const clientOptions: LanguageClientOptions = {
@@ -157,11 +185,17 @@ function startClient(): void {
   client = new LanguageClient('amd', 'Artemis AMD', serverOptions, clientOptions);
   client.start().catch((err) => {
     output.appendLine(`Failed to start the AMD language server: ${err}`);
+    // The box used to blame one thing - "set amd.cosmosPath" - whatever had happened.
+    // With a library older than the tool, the server's own last line names the real
+    // cause, and it is in the Output panel, which a new writer has never opened.
     vscode.window.showErrorMessage(
-      'Artemis AMD: could not start the language server. Set "amd.cosmosPath" to your Cosmos install folder.',
-      'Open Settings',
+      'Artemis AMD: the checker did not start. "Show Why" opens its own message. '
+      + 'If it says a library could not be loaded, type  sbs fetch "<your mission>" --libs  '
+      + 'in data\\missions. If it says the game was not found, set "amd.cosmosPath".',
+      'Show Why', 'Open Settings',
     ).then((pick) => {
-      if (pick) {
+      if (pick === 'Show Why') { output.show(true); }
+      if (pick === 'Open Settings') {
         vscode.commands.executeCommand('workbench.action.openSettings', 'amd.cosmosPath');
       }
     });
@@ -5203,6 +5237,16 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+
+  // The folder was just trusted: start what `holdForTrust` held back.
+  context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => {
+    if (!waitingForTrust) { return; }
+    waitingForTrust = false;
+    trustItem?.dispose();
+    trustItem = undefined;
+    output.appendLine('Folder trusted - starting the checker.');
+    if (!client) { startClient(); }
+  }));
 
   // Opening a .tiles/.tileset FIRST activates the extension for its custom editor before
   // that document exists, so there is nothing yet to find the Cosmos install from - and

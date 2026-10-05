@@ -42,17 +42,33 @@ not be on your PATH.** If your files live outside a Cosmos install, set
 Launch order: explicit `amd.server.command` → detected Cosmos (`PyRuntime/python
 sbs.pyz lint --lsp`) → `sbs` on PATH. See [HELP.md](HELP.md) for details.
 
-## Build / install (not prebuilt)
+## Install
 
-This folder is source only — no compiled `out/` or `.vsix` is committed. The build
-below is verified to compile (`tsc`) and package (`vsce`) cleanly on Node 24 / npm 10.
+The add-on is **not in the VS Code Marketplace**: searching the Extensions view for
+"Artemis AMD" finds nothing of ours. It is published as a file.
+
+1. On the [sbs_cli releases page](https://github.com/artemis-sbs/sbs_cli/releases), find
+   the newest release named **"Artemis AMD (VS Code)"** (tagged `amd-vscode-v...`) and
+   download its `amd-language-<version>.vsix`.
+2. In VS Code: `Ctrl+Shift+P`, **Extensions: Install from VSIX...**, pick the file.
+   (Or, at a prompt: `code --install-extension amd-language-<version>.vsix`.)
+3. Open your **mission folder** and **trust it**. VS Code opens a new folder in
+   Restricted Mode, with a band across the top and no question. Until the folder is
+   trusted the add-on only colors the file and shows `AMD: trust this folder` at the
+   bottom right; checking, the outline and the story tools start when you click that
+   and choose **Trust**. (Before 0.9.4 the add-on was switched off whole in Restricted
+   Mode: no color, `Plain Text`, and no message.)
+
+## Build from source
+
+This folder is source only — no compiled `out/` or `.vsix` is committed.
 
 ```
 cd editors/vscode
 npm install
-npm run compile          # tsc -> out/extension.js
+npm run bundle           # tsc --noEmit, then esbuild -> out/extension.js
 npm run package          # vsce package -> amd-language-<version>.vsix
-code --install-extension amd-language-0.1.0.vsix
+code --install-extension amd-language-<version>.vsix
 ```
 
 Or press **F5** in VSCode with this folder open to launch an Extension Development

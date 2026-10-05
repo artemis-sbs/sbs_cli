@@ -428,9 +428,12 @@ For **CI or editors**, add `--format json` (structured findings) or `--format
 compact` (`file:line:col:` lines for editor problem-matchers). And for **live
 squiggles as you type**, `sbs lint --lsp` runs an AMD language server (LSP over
 stdio) that any editor — VSCode, Neovim, Emacs — can connect to (it also does
-go-to-definition, outline, hover, completion, and format-on-save). A ready-to-build
-**VSCode extension** (syntax highlighting + a client for this server) lives in
-[`editors/vscode/`](editors/vscode/).
+go-to-definition, outline, hover, completion, and format-on-save). The **VS Code
+add-on** (coloring + a client for this server) is published as a `.vsix` file on this
+repository's [releases page](https://github.com/artemis-sbs/sbs_cli/releases), under
+**"Artemis AMD (VS Code)"** - it is not in the Marketplace. Install it with
+**Extensions: Install from VSIX...**; see [`editors/vscode/`](editors/vscode/) for the
+steps and the source.
 
 ### `sbs fmt` — tidy up a mission's AMD files
 
