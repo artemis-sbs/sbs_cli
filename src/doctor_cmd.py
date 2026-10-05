@@ -164,14 +164,14 @@ def _check_layout(rep):
             # It imports, so this row used to be `ok` - and `sbs lint` then failed on it.
             rep.add("Layout", "sbs_utils", PROBLEM,
                     f"older than this sbs needs: {where}",
-                    'run: sbs fetch "<a mission folder>" --libs   (it fetches today\'s '
+                    'run: sbs fetch "<a mission folder>" --update-libs   (it fetches today\'s '
                     'build; no mission yet? `sbs create` one first)')
         else:
             rep.add("Layout", "sbs_utils", OK, f"{kind}: {where}")
     except Exception as e:
         rep.add("Layout", "sbs_utils", PROBLEM, f"not importable ({e})",
                 "no sbs_utils library in __lib__ could be opened. "
-                "`sbs fetch <mission> --libs` downloads the ones a mission names")
+                "`sbs fetch <mission> --update-libs` downloads the ones a mission names")
         return
 
     try:
@@ -291,7 +291,7 @@ def _check_mission(rep, mission):
         rep.add(name, "libraries", PROBLEM,
                 f"{len(missing)} declared but not in __lib__: "
                 + ", ".join(missing[:3]) + ("..." if len(missing) > 3 else ""),
-                f'run: sbs fetch "{name}" --libs   (or `sbs lib <folder>` if you '
+                f'run: sbs fetch "{name}" --update-libs   (or `sbs lib <folder>` if you '
                 f'build them here)')
     else:
         rep.add(name, "libraries", OK, "all declared libraries present")

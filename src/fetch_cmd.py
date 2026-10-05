@@ -226,7 +226,7 @@ def fetch_libs_only(folder):
     mission = name if os.path.isabs(name) else os.path.join(str(zipapp_dir), name)
     if not os.path.isfile(os.path.join(mission, "story.json")) and os.path.isfile(
             os.path.join(os.path.abspath(name), "story.json")):
-        mission = os.path.abspath(name)             # `sbs fetch . --libs` in the mission
+        mission = os.path.abspath(name)             # `sbs fetch . --update-libs` in the mission
     deps_file = os.path.join(mission, "story.json")
     if not os.path.isfile(deps_file):
         print(f"ERROR: no mission here to read the list of libraries from: {mission}")
@@ -337,13 +337,15 @@ def fetch_repos(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clea
 @click.option('--source', is_flag=True,
               help="Clone the repository instead of downloading the archive, so you get "
                    "the addon SOURCE folders a normal fetch leaves out. Needs git.")
-@click.option('--libs', 'libs_only', is_flag=True,
+@click.option('--update-libs', 'libs_only', is_flag=True,
               help="REPO is a mission folder already here: download the newest build of "
                    "the libraries it names, and change nothing in the folder.")
+# 0.11 called it `--libs` for one day. Still taken, not advertised.
+@click.option('--libs', 'libs_only_old', is_flag=True, hidden=True)
 def fetch(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, quiet, source,
-          libs_only):
+          libs_only, libs_only_old):
     """Fetch command"""
-    if libs_only:
+    if libs_only or libs_only_old:
         if not fetch_libs_only(repo):
             raise SystemExit(1)
         return

@@ -289,12 +289,12 @@ def closing_lines(name, deps, named, kept, lib_dir):
         # Not "ready": lint, the editor's checker and `sbs debug` all fail on this.
         return [f"\n{name} was made, but it cannot be checked or run yet: the sbs_utils "
                 f"library that was already in __lib__ is older than this sbs needs.",
-                f'  sbs fetch "{name}" --libs   # fetch today\'s libraries, then it is ready']
+                f'  sbs fetch "{name}" --update-libs   # fetch today\'s libraries, then it is ready']
     lines = [f"\n{name} is ready."]
     if kept:
         lines += [f"  {len(kept)} of its {len(named)} libraries were already here and were "
                   f"kept as they are.",
-                  f'  sbs fetch "{name}" --libs   # get today\'s build of each (do this once)']
+                  f'  sbs fetch "{name}" --update-libs   # get today\'s build of each (do this once)']
     lines += [f"  sbs debug {name}          # run it in the browser",
               f"  sbs lint {name}           # check its AMD"]
     return lines
@@ -526,7 +526,7 @@ def create_impl(name, template_id, branch, line, title, description, user, repo,
         click.echo(f"  + {len(mastlibs)} mastlib dependencies")
     if not assume_yes:
         if not click.confirm("\nFetch these dependencies now?", default=True):
-            click.echo(f'Skipped. Type `sbs fetch "{name}" --libs` when you are ready.')
+            click.echo(f'Skipped. Type `sbs fetch "{name}" --update-libs` when you are ready.')
             return
 
     missing = []

@@ -7,7 +7,7 @@ from the game's own 1.3.7 download:
   `sbs create` keeps a library that is already there - so it said `MyMission is ready.`
   and the next three commands each failed with a missing-module error, while `sbs doctor`
   said `0 problems`;
-* `sbs fetch --libs` with the internet off took a minute, printed seventy-five lines and
+* `sbs fetch --update-libs` with the internet off took a minute, printed seventy-five lines and
   ended `The mission(s) will NOT run without them`, though nothing had been removed;
 * `sbs debug` on a misspelled folder was a traceback;
 * `sbs create -t AMD` was refused, and `-title "X"` was read as the template `itle`.
@@ -63,7 +63,7 @@ class IsThisLibraryTooOld(_Lib):
     def test_the_error_names_the_command_and_the_mission(self):
         hint = lint_cmd._old_library_hint(ModuleNotFoundError("No module named 'x'"),
                                           os.path.join(self.lib, "My Mission"))
-        self.assertIn('sbs fetch "My Mission" --libs', hint)
+        self.assertIn('sbs fetch "My Mission" --update-libs', hint)
 
     def test_another_kind_of_error_gets_no_such_advice(self):
         self.assertEqual(lint_cmd._old_library_hint(ValueError("bad"), "x"), "")
@@ -81,21 +81,21 @@ class WhatCreateSaysLast(_Lib):
         _library(self.path, "amd_lint", "amd_lsp")
         text = self.last([])
         self.assertIn("MyMission is ready.", text)
-        self.assertNotIn("--libs", text)
+        self.assertNotIn("--update-libs", text)
 
     def test_libraries_that_were_already_there_are_named_as_kept(self):
         _library(self.path, "amd_lint", "amd_lsp")
         text = self.last([SBSLIB])
         self.assertIn("MyMission is ready.", text)
         self.assertIn("1 of its 2 libraries were already here", text)
-        self.assertIn('sbs fetch "MyMission" --libs', text)
+        self.assertIn('sbs fetch "MyMission" --update-libs', text)
 
     def test_an_old_library_is_not_ready(self):
         _library(self.path, "quest")
         text = self.last([SBSLIB])
         self.assertNotIn("is ready.", text)
         self.assertIn("cannot be checked or run yet", text)
-        self.assertIn('sbs fetch "MyMission" --libs', text)
+        self.assertIn('sbs fetch "MyMission" --update-libs', text)
 
 
 class TemplateNames(unittest.TestCase):
@@ -121,7 +121,7 @@ class FetchLibsOffline(unittest.TestCase):
                     mock.patch.object(fetch_cmd, "_online", lambda: False), \
                     mock.patch.object(file_help, "curlretrieve",
                                       lambda url, name: tried.append(url)):
-                result = CliRunner().invoke(cli, ["fetch", "MyMission", "--libs"])
+                result = CliRunner().invoke(cli, ["fetch", "MyMission", "--update-libs"])
             self.assertEqual(result.exit_code, 1)
             self.assertEqual(tried, [])
             self.assertIn("could not reach github.com", result.output)

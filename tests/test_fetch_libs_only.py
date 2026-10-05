@@ -1,4 +1,4 @@
-"""`sbs fetch <mission> --libs` - the libraries a mission names, and nothing else.
+"""`sbs fetch <mission> --update-libs` - the libraries a mission names, and nothing else.
 
 Every other form of `fetch` REPLACES a mission with the published one. A writer's own
 mission had no way to get a library: `sbs create` takes one only when there is none, so
@@ -75,7 +75,7 @@ class _Missions(unittest.TestCase):
 
     def fetch(self, curl):
         with mock.patch.object(file_help, "curlretrieve", curl):
-            return CliRunner().invoke(cli, ["fetch", "My Mission", "--libs"])
+            return CliRunner().invoke(cli, ["fetch", "My Mission", "--update-libs"])
 
 
 class TheLibrariesArrive(_Missions):
@@ -116,7 +116,7 @@ class TheLibrariesArrive(_Missions):
         os.chdir(self.mission)
         before = self.mission_files()
         with mock.patch.object(file_help, "curlretrieve", self.good):
-            result = CliRunner().invoke(cli, ["fetch", ".", "--libs"])
+            result = CliRunner().invoke(cli, ["fetch", ".", "--update-libs"])
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(_marker(os.path.join(self.lib, SBSLIB)), "new")
         self.assertEqual(self.mission_files(), before)
@@ -136,7 +136,7 @@ class TheDownloadFails(_Missions):
 
     def test_a_folder_that_is_not_a_mission(self):
         with mock.patch.object(file_help, "curlretrieve", lambda url, name: self.fail(url)):
-            result = CliRunner().invoke(cli, ["fetch", "No Such Mission", "--libs"])
+            result = CliRunner().invoke(cli, ["fetch", "No Such Mission", "--update-libs"])
         self.assertEqual(result.exit_code, 1)
         self.assertIn("story.json", result.output)
 
@@ -148,7 +148,22 @@ class DoctorNamesACommandThatMends(_Missions):
             doctor_cmd._check_mission(rep, self.mission)
         row = [r for r in rep.rows if r["name"] == "libraries"][0]
         self.assertEqual(row["status"], doctor_cmd.PROBLEM)
-        self.assertIn('sbs fetch "My Mission" --libs', row["remedy"])
+        self.assertIn('sbs fetch "My Mission" --update-libs', row["remedy"])
+
+
+
+class TheNameItHadForADay(_Missions):
+    def test_libs_still_works_and_is_not_advertised(self):
+        def good(url, name):
+            _zip_with(name, "new")
+            return True
+        with mock.patch.object(file_help, "curlretrieve", good):
+            result = CliRunner().invoke(cli, ["fetch", "My Mission", "--libs"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(_marker(os.path.join(self.lib, SBSLIB)), "new")
+        helped = CliRunner().invoke(cli, ["fetch", "--help"]).output
+        self.assertIn("--update-libs", helped)
+        self.assertNotIn("--libs ", helped.replace("--update-libs", ""))
 
 
 if __name__ == "__main__":

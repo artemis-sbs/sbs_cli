@@ -190,7 +190,7 @@ function startClient(): void {
     // cause, and it is in the Output panel, which a new writer has never opened.
     vscode.window.showErrorMessage(
       'Artemis AMD: the checker did not start. "Show Why" opens its own message. '
-      + 'If it says a library could not be loaded, type  sbs fetch "<your mission>" --libs  '
+      + 'If it says a library could not be loaded, type  sbs fetch "<your mission>" --update-libs  '
       + 'in data\\missions. If it says the game was not found, set "amd.cosmosPath".',
       'Show Why', 'Open Settings',
     ).then((pick) => {
