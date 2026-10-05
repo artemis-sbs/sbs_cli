@@ -29,7 +29,11 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
     is not a successful fetch.
     """
     url = f"https://github.com/{user}/{repo}/archive/refs/heads/{branch}.zip"
-    zip_file_path = "rel.zip"
+    # Beside the tool, like everything else here: the mission is unpacked under
+    # `zipapp_dir`, so a download and a `__lib__` under the CURRENT folder are only the
+    # same place when the prompt is in `data/missions`.
+    zip_file_path = os.path.join(str(zipapp_dir), "rel.zip")
+    lib_dir = os.path.join(str(zipapp_dir), "__lib__")
     missing_deps = []
     skipped = []
 
@@ -115,7 +119,7 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
         files_to_exclude = ['.github/', 'mkdocs/', '.env']
         try:
             if not skip_unzip:
-                unzip_exclude(zip_file_path, destination_directory, files_to_exclude)
+                unzip_exclude(zip_file_path, str(target_directory), files_to_exclude)
 
         except Exception as e:
             print(f"ERROR: Could not unzip: {zip_file_path} {destination_directory}\n{e}")
@@ -136,53 +140,9 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
     if not os.path.exists(deps_file):
         # its is ok if there is no story.json
         return missing_deps, skipped
-    
-    try:
-        deps = {}
-        
-        with open(deps_file, 'r') as f:
-            deps = json.load(f)
-            # artemis-sbs.sbs_utils.v1.3.0.sbslib
-            # Fetch sbs libs
-        
-        
-        #
-        # Fetching the sbs_lib dependencies
-        #
-        sbs_libs = deps.get("sbslib")
-        if sbs_libs is not None:
-            missing_deps += fetch_deps(sbs_libs, True, overwrite_sbs_libs)
-        mast_libs = deps.get("mastlib")
-        if mast_libs is not None:
-            missing_deps += fetch_deps(mast_libs, False, overwrite_libs)
 
-        resources = deps.get("resources")
-        if resources is not None:
-            missing_deps += fetch_deps(resources.values(), False, overwrite_libs)
-        # `shared_media` is a dependency too - the difference is only that nobody copies
-        # it into the mission. Without this the mission declares a pack that never
-        # arrives and its art silently vanishes.
-        shared_media = deps.get("shared_media")
-        if shared_media:
-            missing_deps += fetch_deps(shared_media, False, overwrite_libs)
-        if resources is not None or shared_media:
-            # ...and unpack the art once, beside the libraries, so a fetched dependency
-            # lands in the same layout a locally built one does.
-            try:
-                from media_cmd import unpack_all, pinned_packs
-                # Pass what the missions pin, so a pack named after itself rather than
-                # `.media.` (a repo releasing several packs) is unpacked too.
-                unpack_all(os.path.join(zipapp_dir, "__lib__"),
-                           pinned=pinned_packs(zipapp_dir))
-            except Exception as e:
-                print(f"WARNING: could not unpack media: {e}")
+    missing_deps += fetch_story_deps(deps_file, lib_dir, overwrite_libs, overwrite_sbs_libs)
 
-        #media
-        #  artemis-sbs.LegendaryMissions.media.v1.3.0.zip
-
-    except Exception as e:
-        print(f"ERROR: Could not load {deps_file}\n{e}")
-    
     if skip_libs:
         return missing_deps, skipped
     
@@ -191,6 +151,89 @@ def fetch_cmd(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean,
     except Exception as e:
         print("ERROR: error trying to build libraries/addons")
     return missing_deps, skipped
+
+
+def fetch_story_deps(deps_file, lib_dir, overwrite_libs, overwrite_sbs_libs):
+    """Fetch what one `story.json` names into `lib_dir`. Returns what did not arrive."""
+    missing_deps = []
+    try:
+        deps = {}
+
+        with open(deps_file, 'r') as f:
+            deps = json.load(f)
+            # artemis-sbs.sbs_utils.v1.3.0.sbslib
+            # Fetch sbs libs
+
+        #
+        # Fetching the sbs_lib dependencies
+        #
+        sbs_libs = deps.get("sbslib")
+        if sbs_libs is not None:
+            missing_deps += fetch_deps(sbs_libs, True, overwrite_sbs_libs, lib_dir)
+        mast_libs = deps.get("mastlib")
+        if mast_libs is not None:
+            missing_deps += fetch_deps(mast_libs, False, overwrite_libs, lib_dir)
+
+        resources = deps.get("resources")
+        if resources is not None:
+            missing_deps += fetch_deps(resources.values(), False, overwrite_libs, lib_dir)
+        # `shared_media` is a dependency too - the difference is only that nobody copies
+        # it into the mission. Without this the mission declares a pack that never
+        # arrives and its art silently vanishes.
+        shared_media = deps.get("shared_media")
+        if shared_media:
+            missing_deps += fetch_deps(shared_media, False, overwrite_libs, lib_dir)
+        if resources is not None or shared_media:
+            # ...and unpack the art once, beside the libraries, so a fetched dependency
+            # lands in the same layout a locally built one does.
+            try:
+                from media_cmd import unpack_all, pinned_packs
+                # Pass what the missions pin, so a pack named after itself rather than
+                # `.media.` (a repo releasing several packs) is unpacked too.
+                unpack_all(lib_dir, pinned=pinned_packs(zipapp_dir))
+            except Exception as e:
+                print(f"WARNING: could not unpack media: {e}")
+
+        #media
+        #  artemis-sbs.LegendaryMissions.media.v1.3.0.zip
+
+    except Exception as e:
+        print(f"ERROR: Could not load {deps_file}\n{e}")
+    return missing_deps
+
+
+def fetch_libs_only(folder):
+    """Fetch the libraries a mission ALREADY HERE names, newest build. True when all came.
+
+    THE MISSION FOLDER IS NOT TOUCHED. Every other form of `fetch` replaces a mission
+    with the published one, which is the wrong tool for a mission somebody is writing:
+    `sbs create` takes a library only when there is none, so the copy that came with the
+    game stayed for good, and the two places that told a writer how to get a missing
+    library (`sbs doctor`, and `sbs create` when the download was skipped) both said
+    `sbs fetch` - which fetches LegendaryMissions.
+
+    A v1.4.0 library is re-published under the same name as it is fixed, so "is it
+    there" is not "is it current": this always downloads. Each file is staged and
+    checked before it replaces the old one (`fetch_deps`), so a dropped connection
+    leaves the library that was there.
+    """
+    name = str(folder).strip().strip('"').rstrip("/\\")
+    mission = name if os.path.isabs(name) else os.path.join(str(zipapp_dir), name)
+    if not os.path.isfile(os.path.join(mission, "story.json")) and os.path.isfile(
+            os.path.join(os.path.abspath(name), "story.json")):
+        mission = os.path.abspath(name)             # `sbs fetch . --libs` in the mission
+    deps_file = os.path.join(mission, "story.json")
+    if not os.path.isfile(deps_file):
+        print(f"ERROR: no mission here to read the list of libraries from: {mission}")
+        print("       (a mission folder holds a file called story.json)")
+        return False
+    lib_dir = os.path.join(str(zipapp_dir), "__lib__")
+    click.echo(f"Fetching the libraries {os.path.basename(mission)} names into {lib_dir}")
+    missing = fetch_story_deps(deps_file, lib_dir, True, True)
+    if report_problems(missing):
+        return False
+    click.echo(f"Libraries are up to date. {os.path.basename(mission)} itself was not changed.")
+    return True
 
 
 def report_problems(missing, skipped=()):
@@ -245,8 +288,16 @@ def fetch_repos(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clea
 @click.option('--source', is_flag=True,
               help="Clone the repository instead of downloading the archive, so you get "
                    "the addon SOURCE folders a normal fetch leaves out. Needs git.")
-def fetch(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, quiet, source):
+@click.option('--libs', 'libs_only', is_flag=True,
+              help="REPO is a mission folder already here: download the newest build of "
+                   "the libraries it names, and change nothing in the folder.")
+def fetch(repo, user, branch, folder, overwrite_libs, skip_libs, skip_clean, quiet, source,
+          libs_only):
     """Fetch command"""
+    if libs_only:
+        if not fetch_libs_only(repo):
+            raise SystemExit(1)
+        return
     if not skip_clean and not quiet:
         click.echo('This will remove the existing folder(s) prior fetching the new version.')
         answer = click.prompt('Continue?', default="N")

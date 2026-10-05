@@ -366,12 +366,16 @@ def release_asset_candidates(local_name):
     return [local_name, parts[2]]
 
 
-def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
+def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs, lib_dir=None):
     """ This will fetch the dependencies from a github release
 
     Args:
         dep_libs ([str]]): The list of dependencies
         is_sbs_lib (bool): If this is a list of sbslibs they have different naming conventions
+        lib_dir (str): The `__lib__` folder to fill. Callers pass the one beside the
+            tool. Left out, it is `__lib__` under the CURRENT folder, which is only the
+            same place when the prompt is in `data/missions` - from anywhere else the
+            libraries arrived somewhere no mission looks.
 
     Returns:
         list[str]: The dependencies that could NOT be fetched. A caller that ignores this
@@ -404,12 +408,12 @@ def fetch_deps(dep_libs, is_sbs_lib, overwrite_libs):
         # put back
         version = ".".join(version)
 
-        target = f"__lib__/{dep_lib}"
+        target = os.path.join(lib_dir, dep_lib) if lib_dir else f"__lib__/{dep_lib}"
         if not overwrite_libs and os.path.exists(target):
             #print("SKIPPING")
             continue
-        
-        os.makedirs("__lib__", exist_ok=True)
+
+        os.makedirs(os.path.dirname(target), exist_ok=True)
         base = f"https://github.com/{user}/{repo}/releases/download/{version}"
         # Stage through a temp file and only accept a real archive. `curl -f` still CREATES
         # the output file on a 404, and an empty (or HTML) lib left at `target` is silently

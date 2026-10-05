@@ -492,19 +492,20 @@ def create_impl(name, template_id, branch, line, title, description, user, repo,
         click.echo(f"  + {len(mastlibs)} mastlib dependencies")
     if not assume_yes:
         if not click.confirm("\nFetch these dependencies now?", default=True):
-            click.echo(f"Skipped. Run `sbs fetch` inside {name} when you are ready.")
+            click.echo(f'Skipped. Type `sbs fetch "{name}" --libs` when you are ready.')
             return
 
     missing = []
+    lib_dir = str(Path(zipapp_dir).resolve() / "__lib__")
     if deps.get("sbslib"):
-        missing += fetch_deps(deps["sbslib"], True, False)
+        missing += fetch_deps(deps["sbslib"], True, False, lib_dir)
     if mastlibs:
-        missing += fetch_deps(mastlibs, False, False)
+        missing += fetch_deps(mastlibs, False, False, lib_dir)
     resources = deps.get("resources")
     if isinstance(resources, dict):
-        missing += fetch_deps(list(resources.values()), False, False)
+        missing += fetch_deps(list(resources.values()), False, False, lib_dir)
     if deps.get("shared_media"):
-        missing += fetch_deps(deps["shared_media"], False, False)
+        missing += fetch_deps(deps["shared_media"], False, False, lib_dir)
 
     # An addon template ships lib folders of its own; a plain mission does not.
     if lib_get_json(name):

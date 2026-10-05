@@ -162,7 +162,8 @@ def _check_layout(rep):
         rep.add("Layout", "sbs_utils", OK, f"{kind}: {where}")
     except Exception as e:
         rep.add("Layout", "sbs_utils", PROBLEM, f"not importable ({e})",
-                "run: sbs fetch, or check __lib__")
+                "no sbs_utils library in __lib__ could be opened. "
+                "`sbs fetch <mission> --libs` downloads the ones a mission names")
         return
 
     try:
@@ -212,7 +213,8 @@ def _tool(rep, name, argv, remedy):
 
 def _check_tools(rep):
     _tool(rep, "git", ["git", "--version"], "needed by `sbs fetch --source`")
-    _tool(rep, "curl", ["curl", "--version"], "needed by `sbs fetch` and `sbs update`")
+    _tool(rep, "curl", ["curl", "--version"],
+          "needed by `sbs update`, `sbs create` and `sbs fetch`: they download with it")
     try:
         import pdf_out
         eng = pdf_out.find_browser()
@@ -281,7 +283,8 @@ def _check_mission(rep, mission):
         rep.add(name, "libraries", PROBLEM,
                 f"{len(missing)} declared but not in __lib__: "
                 + ", ".join(missing[:3]) + ("..." if len(missing) > 3 else ""),
-                "run: sbs fetch  (or `sbs lib <folder>` if you build them here)")
+                f'run: sbs fetch "{name}" --libs   (or `sbs lib <folder>` if you '
+                f'build them here)')
     else:
         rep.add(name, "libraries", OK, "all declared libraries present")
 

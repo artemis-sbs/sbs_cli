@@ -90,7 +90,14 @@ sbs fetch SecretMeeting                    # grab the Secret Meeting mission
 sbs fetch WalkTheLine,SecretMeeting        # grab several at once (comma-separated)
 sbs fetch SomeMission --user their_name     # grab a mission from someone other than artemis-sbs
 sbs fetch LegendaryMissions --branch v1.3.0 # grab a specific version (tag) instead of the latest
+sbs fetch "My Mission" --libs              # a mission of YOUR OWN: get its libraries, change nothing in it
 ```
+
+**`fetch` replaces the mission folder with the published one** (it asks first). For a
+mission you are writing, that is the wrong tool: use `--libs`. It reads the list of
+libraries in your mission's `story.json`, downloads the newest build of each into
+`__lib__`, and leaves your folder alone. Use it when `sbs doctor` says a library is
+missing, and whenever a fixed library has been published.
 
 By default `fetch` pulls from the official `artemis-sbs` account and the newest
 (`main`) version. Common options:
@@ -713,6 +720,7 @@ Start the server and clients and let it run.
 | `sbs create <name>` | Start a new mission from a boilerplate |
 | `sbs templates` | List the boilerplates you can start from |
 | `sbs fetch <name>` | Download one (or several) missions |
+| `sbs fetch <your mission> --libs` | Get the newest libraries for a mission of your own |
 | `sbs production` | Download all the missions that ship with Cosmos |
 | `sbs swap <name>` | Switch which `missions_*` set Cosmos loads |
 | `sbs run <consoles>` | Launch the game — one window or many |
