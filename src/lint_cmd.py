@@ -445,6 +445,53 @@ _AMD_NAMED = re.compile(r"""(?P<call>\w+)\(\s*["'](?P<name>[\w./\\-]+\.amd)["']"
 _AMD_MAY_BE_ABSENT = re.compile(r"optional|exists|isfile|expect|print|log", re.I)
 
 
+def _description_yaml_findings(mission):
+    """[(line, message)] for values in `description.yaml` that stop the game starting.
+
+    THE ONE FILE NOTHING CHECKED, AND THE ONE THAT CAN TAKE THE WHOLE GAME DOWN. The
+    server reads every mission's description.yaml to build its list, before any mission
+    runs. A value with a bare hyphen in it (`Visible Mission Name: The Half-Dark Lantern`)
+    crashes that scan: the game does not start, for ANY mission, with nothing in any log
+    (measured in the engine, 2026-09-20). `sbs create --title` quotes such a title; a
+    writer who edits the file by hand in the last lesson of a course, and then mails the
+    mission to a friend, had lint say `clean` and doctor `0 problems`.
+
+    A value in quote marks is safe. Comment lines and the part of a line after ` #` are
+    not values.
+    """
+    path = os.path.join(mission, "description.yaml")
+    if not os.path.isfile(path):
+        return []
+    out = []
+    try:
+        text = _read_text(path)
+    except Exception:
+        return []
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.split(" #", 1)[0].rstrip()
+        if not line.strip() or line.lstrip().startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        value = value.strip()
+        if not value:
+            continue
+        quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'"
+        if quoted:
+            continue
+        if "-" in value:
+            out.append((number, f"`{key.strip()}:` has a hyphen in a value that is not in "
+                                f"quote marks. The game reads this file before any mission "
+                                f"runs, and a bare hyphen here stops the GAME from starting "
+                                f"at all, for every mission. Put the value in double quotes: "
+                                f"`{key.strip()}: \"{value}\"`"))
+        elif ": " in value or value.endswith(":"):
+            out.append((number, f"`{key.strip()}:` has a second colon in a value that is not "
+                                f"in quote marks, which the game reads as a list of fields, "
+                                f"not as your words. Put the value in double quotes: "
+                                f"`{key.strip()}: \"{value}\"`"))
+    return out
+
+
 def _missing_amd_files(mission, mast_files):
     """[(file relative to the mission, line, message)] for each `.amd` a `.mast` names
     that is not there.
@@ -969,6 +1016,21 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
             else:
                 bundle.append({"file": rel, "line": number, "severity": "error",
                                "code": "amd-file-missing", "message": message})
+
+    # THE FILE THE GAME READS BEFORE ANY MISSION RUNS.
+    if not only_shared:
+        for number, message in _description_yaml_findings(mission):
+            total_err += 1
+            if fmt == "text":
+                print(f"== description.yaml ==\n  [ERROR] line {number}: {message} "
+                      f"(description-stops-the-game)")
+            elif fmt == "compact":
+                print(f"description.yaml:{number}:1: error: {message} "
+                      f"[description-stops-the-game]")
+            else:
+                bundle.append({"file": "description.yaml", "line": number,
+                               "severity": "error", "code": "description-stops-the-game",
+                               "message": message})
 
     # THE STORY HAS TO COMPILE. Everything above reads files; none of it runs the
     # compiler, so a mission whose story.mast does not compile - one line pasted at the
