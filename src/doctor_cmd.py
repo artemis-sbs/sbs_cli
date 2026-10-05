@@ -139,7 +139,7 @@ def _check_layout(rep):
         rep.add("Layout", "__lib__", OK, f"{n} libraries")
     else:
         rep.add("Layout", "__lib__", ABSENT, "no __lib__ beside the missions",
-                "run: sbs fetch")
+                "`sbs create <name>` makes a mission and fetches the libraries it needs")
 
     try:
         from lint_cmd import _ensure_sbs_utils_importable
@@ -164,7 +164,8 @@ def _check_layout(rep):
             # It imports, so this row used to be `ok` - and `sbs lint` then failed on it.
             rep.add("Layout", "sbs_utils", PROBLEM,
                     f"older than this sbs needs: {where}",
-                    'run: sbs fetch "<your mission>" --libs   (it fetches today\'s build)')
+                    'run: sbs fetch "<a mission folder>" --libs   (it fetches today\'s '
+                    'build; no mission yet? `sbs create` one first)')
         else:
             rep.add("Layout", "sbs_utils", OK, f"{kind}: {where}")
     except Exception as e:
@@ -490,8 +491,15 @@ def doctor(folder, env_only, as_json, strict):
         missions = _missions_dir()
         targets = []
         if folder:
+            # A folder that IS a mission where the prompt stands wins: `sbs doctor .` from
+            # inside a mission was read against the tool's folder and reported on
+            # `missions` itself (`not a mission folder`).
+            here = os.path.abspath(folder)
             cand = os.path.join(missions, folder)
-            targets = [cand if os.path.isdir(cand) else folder]
+            if os.path.isfile(os.path.join(here, "story.json")):
+                targets = [here]
+            else:
+                targets = [cand if os.path.isdir(cand) else folder]
         else:
             targets = [os.path.join(missions, d) for d in sorted(os.listdir(missions))
                        if os.path.isfile(os.path.join(missions, d, "story.json"))]

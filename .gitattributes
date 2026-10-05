@@ -1,1 +1,2 @@
-*.pyz linguist-language=Python
+*.pyz linguist-language=Python# The launcher is laid out by BYTE (tests/test_update_cmd.py): it must be CRLF everywhere.
+bat/sbs.bat text eol=crlf

@@ -116,3 +116,33 @@ class ALibraryThatIsNotOne(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheLauncherSurvivesBeingReplacedWhileItRuns(unittest.TestCase):
+    """`sbs update` replaces `sbs.bat` while cmd is in the middle of running it, and cmd
+    carries on from the byte it had reached in the OLD file. Every tool up to 0.10 shipped
+    a 44-byte launcher with no line end, so cmd resumed at byte 44 of the new one - the
+    middle of its command line in 0.11 - and a writer's first update ended
+
+        'dp0sbs.pyz" update' is not recognized as an internal or external command
+
+    after `Updated sbs`. Byte 44 of the launcher is therefore the start of a line that
+    ends the batch quietly, and the command is the LAST line, so a later launcher of
+    the same shape is resumed at its end."""
+
+    def setUp(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "..", "bat", "sbs.bat"), "rb") as f:
+            self.bat = f.read()
+
+    def test_byte_44_starts_a_line_that_ends_the_batch(self):
+        self.assertEqual(self.bat[42:44], b"\r\n")
+        self.assertTrue(self.bat[44:].startswith(b"exit /b"), self.bat[44:70])
+
+    def test_a_fresh_run_jumps_over_that_line_to_the_command(self):
+        lines = self.bat.split(b"\r\n")
+        self.assertEqual(lines[0], b"@echo off")
+        self.assertEqual(lines[1].strip(), b"goto run")
+        self.assertIn(b":run", lines)
+        self.assertEqual(lines[-2], b'"%~dp0..\..\PyRuntime\python" "%~dp0sbs.pyz" %*')
+        self.assertEqual(lines[-1], b"")                     # the file ends with a line end

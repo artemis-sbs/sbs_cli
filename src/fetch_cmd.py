@@ -250,8 +250,10 @@ def fetch_libs_only(folder):
         print(f"\nERROR: {len(dict.fromkeys(missing))} library file(s) could not be fetched:")
         for dep in dict.fromkeys(missing):
             print(f"  {dep}")
-        print("Where a library of that name was already in __lib__, it was kept. Type the "
-              "command again; if the same names fail, the release does not have them.")
+        print("Where a library of that name was already in __lib__, it was kept. Wait a "
+              "few minutes and type the command again: a library is unavailable for about "
+              "a minute while a new build of it is being published. If the same names "
+              "still fail, the release does not have them.")
         return False
     click.echo(f"Libraries are up to date. {os.path.basename(mission)} itself was not changed.")
     return True
