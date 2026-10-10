@@ -492,6 +492,39 @@ def _description_yaml_findings(mission):
     return out
 
 
+def _story_json_error(mission):
+    """(line, message) when the mission's `story.json` is there and is not JSON, else
+    None.
+
+    The line is where the reader gave up, which for the commonest slip - a comma left
+    off the end of a line - is the line AFTER the one to fix, so the message says to
+    look one line up as well."""
+    path = os.path.join(mission, "story.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        json.loads(_read_text(path))
+        return None
+    except json.JSONDecodeError as e:
+        what = e.msg[:1].lower() + e.msg[1:]
+        hint = ""
+        if "delimiter" in e.msg:
+            hint = (" The usual cause is a comma missing from the end of the line "
+                    "above: every line of a list but the last ends in one.")
+        elif ("Expecting value" in e.msg or "property name" in e.msg
+              or "trailing comma" in e.msg):
+            hint = (" The usual cause is a comma after the LAST line of a list, where "
+                    "there must be none.")
+        return (e.lineno,
+                f"`story.json` cannot be read: {what} (line {e.lineno}, column "
+                f"{e.colno}).{hint} This file is the list of libraries the mission "
+                f"loads, so until it is fixed the mission does not start, and nothing "
+                f"else in it can be checked")
+    except Exception as e:                               # noqa: BLE001
+        return (1, f"`story.json` cannot be read ({e}), so the mission does not start, "
+                   f"and nothing else in it can be checked")
+
+
 def _missing_amd_files(mission, mast_files):
     """[(file relative to the mission, line, message)] for each `.amd` a `.mast` names
     that is not there.
@@ -824,6 +857,24 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
         only_shared = os.path.abspath(mission)
         mission = owner
 
+    # `story.json` HAS TO BE READABLE BEFORE ANYTHING ELSE MEANS ANYTHING. It is the list
+    # of libraries the mission loads: with one comma missing, the mission's own words
+    # were not loaded and its addons' routes were not read, so lint printed dozens of
+    # warnings about a correct `.amd` and then `story.mast (compile) line 1` - the wrong
+    # file, the wrong line. Say the one true thing and stop.
+    broken = _story_json_error(mission)
+    if broken is not None:
+        number, message = broken
+        if fmt == "text":
+            print(f"== story.json ==\n  [ERROR] line {number}: {message} (story-json)")
+            print("\nstory.json: 1 error(s). Nothing else was checked")
+        elif fmt == "compact":
+            print(f"story.json:{number}:1: error: {message} [story-json]")
+        else:
+            print(json.dumps([{"file": "story.json", "line": number, "severity": "error",
+                               "code": "story-json", "message": message}], indent=2))
+        raise SystemExit(1)
+
     try:
         amd_lint = _load_amd_lint(missions, mission)
         signal_lint = None if no_signals else _load_signal_lint(missions, mission)
@@ -1152,7 +1203,6 @@ def lint(folder, strict, no_cross, no_signals, fmt, lsp, missing, private, no_co
                 bundle.extend(f.to_dict(file=rel) for f in findings)
 
     if fmt == "json":
-        import json
         print(json.dumps(bundle, indent=2))
     elif fmt == "text":
         print(f"\n{len(amd_files)} amd + {len(mast_files)} mast file(s): "
