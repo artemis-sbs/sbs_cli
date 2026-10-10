@@ -580,8 +580,14 @@ def _mastlib_signal_source(missions, mission):
                 os.path.join(os.path.dirname(os.path.abspath(mission)), "__lib__")]
 
     def relevant(ln):
+        # `//shared/signal/x` IS a route for x. Leaving it out made every signal a
+        # packaged addon answers on the server look unanswered: a universe's site hail
+        # (`; signal boarding_down`) and a boarded ship's endings were warned about in
+        # any mission that loads those addons as mastlibs, and in none that has their
+        # source in the folder - which is why the addons' own repos never saw it.
         s = ln.lstrip()
-        return s.startswith("//signal/") or "signal_emit" in ln or "SIGNAL_NAME" in ln
+        return (s.startswith("//signal/") or s.startswith("//shared/signal/")
+                or "signal_emit" in ln or "SIGNAL_NAME" in ln)
 
     lines = []
     for name in (data.get("mastlib") or []):
