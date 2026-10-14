@@ -637,6 +637,15 @@ def _mastlib_signal_source(missions, mission):
         return None
     lib_dirs = [os.path.join(missions, "__lib__"),
                 os.path.join(os.path.dirname(os.path.abspath(mission)), "__lib__")]
+    # ...and every `__lib__` further up, the way the mission runner finds it: a mission
+    # nested a level down (`_sandbox/x`), or lint run from source rather than the zipapp,
+    # otherwise saw no mastlibs at all - no routes, no prefab catalog.
+    up = os.path.dirname(os.path.dirname(os.path.abspath(mission)))
+    while up and up != os.path.dirname(up):
+        cand = os.path.join(up, "__lib__")
+        if os.path.isdir(cand) and cand not in lib_dirs:
+            lib_dirs.append(cand)
+        up = os.path.dirname(up)
 
     def relevant(ln):
         # `//shared/signal/x` IS a route for x. Leaving it out made every signal a
