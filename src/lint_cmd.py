@@ -592,6 +592,32 @@ def _mission_amd_keys(amd_files):
     return keys
 
 
+def _prefab_label_blocks(text):
+    """The PREFAB labels of one .mast, whole: each `== name` line whose metadata says
+    `type: prefab/...`, with its body - and every other label kept as its header plus
+    its `default` lines, so a prefab that `jump`s to a shared body (LM's stations ->
+    `common_station_create`) still shows the arguments that body takes. This is what lets
+    `Prefab:` and `Data:` in a mission be checked against prefabs a mastlib provides."""
+    out, cur = [], None
+    for ln in text.splitlines():
+        stripped = ln.strip()
+        if ln.startswith("==") and stripped.strip("=").strip():
+            cur = [ln]
+            out.append(cur)
+            continue
+        if cur is None:
+            continue
+        cur.append(ln)
+    keep = []
+    for block in out:
+        body = "\n".join(block)
+        if "type: prefab/" in body or "type:prefab/" in body:
+            keep += block
+        else:
+            keep += [block[0]] + [b for b in block[1:] if b.lstrip().startswith("default ")]
+    return keep
+
+
 def _mastlib_signal_source(missions, mission):
     """The signal-relevant lines from the mission's mastlibs: `//signal/...` route
     declarations AND emit sites (`signal_emit(...)` / `SIGNAL_NAME`).
@@ -635,6 +661,8 @@ def _mastlib_signal_source(missions, mission):
                             continue
                         text = z.read(entry).decode("utf-8", "replace")
                         lines += [ln for ln in text.splitlines() if relevant(ln)]
+                        if entry.endswith(".mast"):
+                            lines += _prefab_label_blocks(text)
             except Exception:
                 continue
             break  # found this lib; don't re-read from the other dir

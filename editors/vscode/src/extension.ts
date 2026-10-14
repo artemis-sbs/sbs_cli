@@ -206,7 +206,7 @@ function startClient(): void {
 interface LspRange { start: { line: number; character: number }; end: { line: number; character: number }; }
 interface MapLandmark { key: string; display: string; i: number; j: number; kind: string; uri: string; line: number; addLine: number; atRange: LspRange | null; kindRange: LspRange | null; problems: Problems | null; }
 interface MapRegion { key: string; display: string; i: number; j: number; radius: number; color: string; uri: string; line: number; centerRange: LspRange | null; radiusRange: LspRange | null; }
-interface MissionMap { landmarks: MapLandmark[]; regions: MapRegion[]; }
+interface MissionMap { landmarks: MapLandmark[]; regions: MapRegion[]; prefabs?: string[]; }
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -565,13 +565,13 @@ function renderMap(map: MissionMap, nonce: string, webview: vscode.Webview, init
       { label: 'New region here', action: 'addRegion' },
     ], (action) => vscode.postMessage({ type: action, i: c.i, j: c.j }));
   });
-  // Right-click a landmark for Rename / Change Kind / Delete / Go to.
+  // Right-click a landmark for Rename / Change Prefab / Delete / Go to.
   for (const g of scroll.querySelectorAll('.lm')) {
     g.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
       const data = { type: 'lmMenu', key: g.dataset.key, display: g.dataset.display, uri: g.dataset.uri, line: parseInt(g.dataset.line, 10), addLine: parseInt(g.dataset.addline, 10), kindRange: g.dataset.kindrange ? JSON.parse(g.dataset.kindrange) : null };
       const items = [{ label: 'Edit…', action: 'Edit…' }, { label: 'Go to', action: 'Go to' }, { label: 'Rename…', action: 'Rename…' }];
-      if (data.kindRange) { items.push({ label: 'Change Kind…', action: 'Change Kind…' }); }
+      if (data.kindRange) { items.push({ label: 'Change Prefab…', action: 'Change Prefab…' }); }
       items.push({ sep: true }, { label: 'Delete', action: 'Delete', danger: true });
       showCtxMenu(e.clientX, e.clientY, items, (action) => vscode.postMessage({ ...data, action }));
     });
@@ -4545,6 +4545,7 @@ async function showMap(uriArg?: string, column: vscode.ViewColumn = vscode.ViewC
   const refresh = async () => {
     try {
       const m = await client!.sendRequest<MissionMap>('amd/map', { textDocument: { uri } });
+      map = m;
       panel.webview.html = renderMap(m, nonce(), panel.webview, lastView);
     } catch (e) { output.appendLine(`Map refresh failed: ${e}`); }
   };
@@ -4596,14 +4597,14 @@ async function showMap(uriArg?: string, column: vscode.ViewColumn = vscode.ViewC
     } else if (msg?.type === 'addLandmark') {
       const d = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
       const key = `landmark_${msg.i}_${msg.j}`.replace(/-/g, 'm');
-      const stub = `\n### [New Landmark](${key})\n---\nAt: ${msg.i}, ${msg.j}\nKind: derelict\n---\n`;
+      const stub = `\n### [New Landmark](${key})\n---\nAt: ${msg.i}, ${msg.j}\nPrefab: derelict\n---\n`;
       const edit = new vscode.WorkspaceEdit();
       edit.insert(vscode.Uri.parse(uri), new vscode.Position(d.lineCount, 0), stub);
       await vscode.workspace.applyEdit(edit);
       scheduleRefresh();
     } else if (msg?.type === 'lmMenu') {
       const items = ['Edit…', 'Go to', 'Rename…'];
-      if (msg.kindRange) { items.push('Change Kind…'); }
+      if (msg.kindRange) { items.push('Change Prefab…'); }
       items.push('Delete');
       const pick = msg.action || await vscode.window.showQuickPick(items, { placeHolder: `${msg.display} (${msg.key})` });
       if (pick === 'Edit…') {
@@ -4621,9 +4622,12 @@ async function showMap(uriArg?: string, column: vscode.ViewColumn = vscode.ViewC
           await vscode.workspace.applyEdit(wsEditFromChanges(we.changes));
           scheduleRefresh();
         }
-      } else if (pick === 'Change Kind…') {
-        const kind = await vscode.window.showQuickPick(['derelict', 'station', 'worldlet'],
-          { placeHolder: 'Landmark kind' });
+      } else if (pick === 'Change Prefab…' || pick === 'Change Kind…') {
+        // What a landmark is = the prefab it names. The server sends the mission's catalog
+        // (its own prefab labels + the library defaults); `kindRange` is the Prefab: value.
+        const choices = map.prefabs && map.prefabs.length ? map.prefabs
+          : ['station', 'derelict', 'npc', 'nebula', 'point'];
+        const kind = await vscode.window.showQuickPick(choices, { placeHolder: 'Landmark prefab' });
         if (kind) {
           const r = msg.kindRange;
           const edit = new vscode.WorkspaceEdit();
@@ -4730,7 +4734,7 @@ The starting area.
 ### [First Site](site1)
 ---
 At: 2, 0
-Kind: derelict
+Prefab: derelict
 ---
 The first objective, out at (2, 0).
 `;
