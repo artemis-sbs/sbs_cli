@@ -594,27 +594,39 @@ def _mission_amd_keys(amd_files):
 
 def _prefab_label_blocks(text):
     """The PREFAB labels of one .mast, whole: each `== name` line whose metadata says
-    `type: prefab/...`, with its body - and every other label kept as its header plus
-    its `default` lines, so a prefab that `jump`s to a shared body (LM's stations ->
-    `common_station_create`) still shows the arguments that body takes. This is what lets
+    `type: prefab/...`, with its body - plus, for a label such a prefab `jump`s to, its
+    header and its `default` lines, so a prefab sharing a body (LM's stations ->
+    `common_station_create`) still shows the arguments that body takes. Nothing else:
+    every line kept here is also read as MAST by the route checks. This is what lets
     `Prefab:` and `Data:` in a mission be checked against prefabs a mastlib provides."""
-    out, cur = [], None
+    import re
+    blocks, order, cur = {}, [], None
     for ln in text.splitlines():
-        stripped = ln.strip()
-        if ln.startswith("==") and stripped.strip("=").strip():
-            cur = [ln]
-            out.append(cur)
+        m = re.match(r"^={2,}\s*([A-Za-z_]\w*)", ln)
+        if m:
+            cur = m.group(1)
+            blocks[cur] = [ln]
+            order.append(cur)
             continue
-        if cur is None:
-            continue
-        cur.append(ln)
+        if cur is not None:
+            blocks[cur].append(ln)
+    # A prefab says so in its METADATA: a `type: prefab/...` line at column 0. A menu
+    # that merely mentions the words (the GM spawn menus) is not one.
+    prefabs = [n for n in order
+               if any(re.match(r"^type:\s*prefab/", b) for b in blocks[n])]
+    jumped = set()
+    for n in prefabs:
+        for b in blocks[n]:
+            j = re.match(r"^\s*(?:jump|->)\s*([A-Za-z_]\w*)\s*$", b)
+            if j and j.group(1) in blocks and j.group(1) not in prefabs:
+                jumped.add(j.group(1))
     keep = []
-    for block in out:
-        body = "\n".join(block)
-        if "type: prefab/" in body or "type:prefab/" in body:
-            keep += block
-        else:
-            keep += [block[0]] + [b for b in block[1:] if b.lstrip().startswith("default ")]
+    for n in order:
+        if n in prefabs:
+            keep += blocks[n]
+        elif n in jumped:
+            keep += [blocks[n][0]] + [b for b in blocks[n][1:]
+                                      if b.lstrip().startswith("default ")]
     return keep
 
 
