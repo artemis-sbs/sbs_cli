@@ -2560,7 +2560,7 @@ class GuiFileEditorProvider implements vscode.CustomTextEditorProvider {
   }
 }
 
-// --- Tile Map Editor (experimental): a custom editor on *.tiles ------------------
+// --- Tile Map Editor: a custom editor on *.tiles ------------------
 // A tile AREA file is an ASCII map with a one-character legend (sbs_utils
 // procedural/tilemap.py). The document stays the source of truth: the page paints a
 // parsed copy (media/tilesModel.js) and each stroke comes back as the changed ROWS,
@@ -2619,7 +2619,6 @@ function tilesEditorHtml(webview: vscode.Webview, nonce: string): string {
   button:hover { filter: brightness(1.15); }
   input { background: var(--vscode-input-background); color: var(--vscode-input-foreground);
           border: 1px solid var(--vscode-input-border, transparent); padding: 2px 4px; }
-  .exp { color: var(--vscode-editorWarning-foreground); font-size: 11px; margin-left: auto; }
   main { flex: 1; display: flex; min-height: 0; }
   aside { width: 250px; overflow: auto; border-right: 1px solid var(--vscode-panel-border); padding: 6px; }
   #scroll { flex: 1; overflow: auto; padding: 8px; }
@@ -2672,7 +2671,6 @@ function tilesEditorHtml(webview: vscode.Webview, nonce: string): string {
   <span class="sep"></span>
   <button id="refresh" title="Ask the language server again (art, rules, problems)">Refresh</button>
   <button id="openText" title="Edit as text">Text</button>
-  <span class="exp">Experimental</span>
 </div>
 <main>
   <aside>
@@ -2854,7 +2852,7 @@ class TilesEditorProvider implements vscode.CustomTextEditorProvider {
   }
 }
 
-// --- Tileset Editor (experimental): a custom editor on *.tileset -------------------
+// --- Tileset Editor: a custom editor on *.tileset -------------------
 // A table of the kinds: the rules each has, the ground look it wears (from the art
 // sets, with a picture), a tint, and how many cells of the areas use it. Each edit
 // rewrites one line (media/tilesetModel.js), aligned to the file's own columns.
@@ -2870,7 +2868,6 @@ function tilesetEditorHtml(webview: vscode.Webview, nonce: string): string {
   body { color: var(--vscode-foreground); background: var(--vscode-editor-background);
          font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); margin: 0; padding: 8px 12px; }
   .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
-  .exp { color: var(--vscode-editorWarning-foreground); font-size: 11px; margin-left: auto; }
   button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
            border: 1px solid transparent; padding: 2px 8px; cursor: pointer; border-radius: 2px; }
   input { background: var(--vscode-input-background); color: var(--vscode-input-foreground);
@@ -2899,7 +2896,6 @@ function tilesetEditorHtml(webview: vscode.Webview, nonce: string): string {
   <label>Title <input id="hTitle" size="24"></label>
   <button id="refresh" title="Ask the language server again (art, usage, problems)">Refresh</button>
   <button id="openText" title="Edit as text">Text</button>
-  <span class="exp">Experimental</span>
 </div>
 <table>
   <thead><tr><th></th><th>Kind</th><th title="Can be walked on">Walk</th><th title="Can be seen across">See</th>

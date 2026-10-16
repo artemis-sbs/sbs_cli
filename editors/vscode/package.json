@@ -44,7 +44,7 @@
       },
       {
         "viewType": "amd.tilesEditor",
-        "displayName": "Tile Map Editor (experimental)",
+        "displayName": "Tile Map Editor",
         "selector": [
           {
             "filenamePattern": "*.tiles"
@@ -54,7 +54,7 @@
       },
       {
         "viewType": "amd.tilesetEditor",
-        "displayName": "Tileset Editor (experimental)",
+        "displayName": "Tileset Editor",
         "selector": [
           {
             "filenamePattern": "*.tileset"
@@ -114,7 +114,7 @@
       },
       {
         "command": "amd.openTilesEditor",
-        "title": "Open in Tile Map / Tileset Editor (experimental)",
+        "title": "Open in Tile Map / Tileset Editor",
         "category": "Artemis AMD",
         "icon": "$(symbol-color)"
       },

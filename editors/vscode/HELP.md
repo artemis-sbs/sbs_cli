@@ -160,7 +160,7 @@ click it to jump to the target, right-click to edit or delete that link. Great f
 overall shape of a conversation. Same navigation as the map — fit-on-open, zoom, Fit,
 drag-to-pan, and the Overview minimap.
 
-### Tile Map Editor (experimental)
+### Tile Map Editor
 
 **Open a `.tiles` file** (a ground tile map area) and it opens as the **Tile Map
 Editor**; **Text** on its toolbar goes back to the plain text. The legend is the palette:
