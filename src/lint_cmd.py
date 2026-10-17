@@ -256,19 +256,25 @@ def _compile_errors(folder, mission):
 
     A child process, not a call: compiling imports the mission's `script.py` and
     registers its routes, which a lint run that goes on to other passes should not have
-    done to it. Returns None when it cannot be run at all (a source checkout with no
-    zipapp to re-enter).
+    done to it. Run from a source checkout there is no zipapp to re-enter, so the child
+    imports `main` from this file's folder, on this process's own path, and is handed the
+    mission as an absolute path. Returns None only when the child cannot start.
     """
     import subprocess
+    # One encoding for both ends. The child wrote in whatever PYTHONIOENCODING said
+    # and this end read in the console's code page, so a compile error that held a
+    # curly quote came back as `the compile failed` with its line thrown away.
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
     app = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
-    if not (os.path.isfile(app) and app.lower().endswith(".pyz")):
-        return None
+    if os.path.isfile(app) and app.lower().endswith(".pyz"):
+        argv = [sys.executable, app, "compile", folder]
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))
+        env["PYTHONPATH"] = os.pathsep.join([here] + [p for p in sys.path if p])
+        argv = [sys.executable, "-c", "import main; main.cli()", "compile",
+                os.path.abspath(mission)]
     try:
-        # One encoding for both ends. The child wrote in whatever PYTHONIOENCODING said
-        # and this end read in the console's code page, so a compile error that held a
-        # curly quote came back as `the compile failed` with its line thrown away.
-        env = dict(os.environ, PYTHONIOENCODING="utf-8")
-        run = subprocess.run([sys.executable, app, "compile", folder], env=env,
+        run = subprocess.run(argv, env=env,
                              capture_output=True, text=True, encoding="utf-8",
                              errors="replace", timeout=300)
     except Exception:

@@ -3,10 +3,14 @@
 Plain-stdlib `unittest` (no pytest, no extra deps). Run from the repo root:
 
 ```
-python -m unittest discover -s tests
-python -m unittest discover -s tests -v      # verbose
-python -m unittest tests.test_fetch_cmd      # one module
+python -m unittest discover -s tests -t .
+python -m unittest discover -s tests -t . -v      # verbose
+python -m unittest tests.test_fetch_cmd           # one module
 ```
+
+Keep the `-t .`: without it Python 3.14's discover imports each file as a top-level
+module, so `tests/__init__.py` never runs, `src/` is not on the path, and 17 modules
+fail to load.
 
 `tests/__init__.py` puts `src/` on `sys.path` (the modules use flat absolute
 imports like `from file_help import curlretrieve`). It runs automatically when

@@ -10,9 +10,16 @@ import re
 def _missions_dir():
     """The missions folder, in both dev (sbs_cli/) and deployed (missions/) modes."""
     here = os.path.dirname(os.path.realpath(__file__))
-    if os.path.basename(here) != "missions":
-        here = os.path.dirname(here)
-    return here
+    if os.path.basename(here) == "missions":
+        return here
+    # From source this file is `missions/sbs_cli/src/`, two levels down, not one: one
+    # level up is sbs_cli/, which holds no sbs_utils and no __lib__.
+    up = here
+    while up != os.path.dirname(up):
+        up = os.path.dirname(up)
+        if os.path.basename(up) == "missions" or os.path.isdir(os.path.join(up, "__lib__")):
+            return up
+    return os.path.dirname(here)
 
 
 def _find_sbs_utils():

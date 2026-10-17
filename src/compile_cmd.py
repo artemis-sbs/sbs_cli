@@ -44,6 +44,17 @@ def report_compile_errors(errors):
 def compile_impl(folder, compile_only = True, is_sbs=True):
     """Compile (or run) a mission. Returns True when it compiled cleanly."""
     missions = zipapp_dir
+    if os.path.isabs(folder):
+        # An absolute folder (lint run from source re-enters this way): its missions
+        # folder is the first one up that holds `__lib__`, not wherever this code is.
+        up = os.path.dirname(os.path.abspath(folder))
+        while up != os.path.dirname(up) and not os.path.isdir(os.path.join(up, "__lib__")):
+            up = os.path.dirname(up)
+        if os.path.isdir(os.path.join(up, "__lib__")):
+            # A linked `__lib__` (data/missions/_sandbox/__lib__, so the engine loads a
+            # mission nested there) stands for the folder it points into: the install's
+            # PyAddons are found from THAT, not from _sandbox.
+            missions = os.path.dirname(os.path.realpath(os.path.join(up, "__lib__")))
 
     try:
         # Prefer a working-tree sbs_utils, exactly as lint/docs/fmt do. Without

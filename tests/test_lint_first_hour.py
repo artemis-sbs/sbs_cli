@@ -108,6 +108,22 @@ class WhatTheCompilerSaid(unittest.TestCase):
                 self.assertEqual(lint_cmd._compile_errors("MyMission", folder),
                                  lint_cmd.NOT_CHECKED)
 
+    def test_run_from_source_it_still_compiles(self):
+        # `python -c "import main; main.cli()" lint ...` has no .pyz to re-enter. It used
+        # to return None - no check, and no note saying so - so a story that does not
+        # compile linted clean (course re-measure, 2026-10-17).
+        import subprocess
+        from unittest import mock
+        said = "Error: Bad indentation\nat x\\story.mast Line 63 - foo\nFAILED: 1 compile error(s)\n"
+        done = subprocess.CompletedProcess([], 1, stdout=said, stderr="")
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(lint_cmd.sys, "argv", ["-c"]), \
+                mock.patch.object(subprocess, "run", return_value=done) as run:
+            errors = lint_cmd._compile_errors("MyMission", folder)
+            argv = run.call_args[0][0]
+            self.assertEqual(argv[-2:], ["compile", os.path.abspath(folder)])
+        self.assertEqual([(n, w.split(":")[0]) for _, n, w in errors], [(63, "Bad indentation")])
+
 
 class NoFolderName(_Folder):
     def lint(self, args, cwd):
