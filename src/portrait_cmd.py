@@ -43,6 +43,10 @@ DEFAULT_CELL = 256
 DEFAULT_COLS = 16
 MAX_ROWS = 16                 # 16 x 256 = 4096, the safe texture size on any GPU
 EXTRAS = ("unknown",)         # cells every set carries, before any hull
+#: Key prefix for a hull's SILHOUETTE cell (the "contact" stage): its portrait render
+#: flattened to white, alpha kept. Placed after every hull so adding silhouettes to an
+#: existing sheet never moves a portrait.
+SIL = "~"
 
 # Sides that are not ships: crystals, pickups, the cursor. With no `hullpoints` either,
 # they are skipped unless `--all`.
@@ -115,6 +119,11 @@ def signature(root, cell):
     return h.hexdigest()
 
 
+def silhouette_signature(portrait_sig):
+    """A silhouette is redrawn exactly when its portrait is."""
+    return hashlib.sha1(f"{portrait_sig}|silhouette".encode()).hexdigest()
+
+
 def extra_signature(name, cell):
     return hashlib.sha1(f"{RENDERER}|{PRESET}|{cell[0]}x{cell[1]}|extra:{name}".encode()).hexdigest()
 
@@ -141,6 +150,8 @@ def plan(manifest, wanted, cols, cell, force=False, max_rows=MAX_ROWS):
     old = dict((manifest or {}).get("cells") or {})
     for name, at in ((manifest or {}).get("extras") or {}).items():
         old["#" + name] = at
+    for name, at in ((manifest or {}).get("silhouettes") or {}).items():
+        old[SIL + name] = at
     same_grid = bool(manifest) and manifest.get("cols") == cols and \
         list(manifest.get("cell") or []) == list(cell)
     if not same_grid:
@@ -186,12 +197,14 @@ def build_manifest(set_name, alias, cell, cols, cells, arts):
            "cols": cols, "renderer": RENDERER, "preset": PRESET,
            "pages": [{"file": f"{set_name}_{p}", "rows": pages[p]}
                      for p in range(max(pages) + 1 if pages else 0)],
-           "cells": {}, "extras": {}}
+           "cells": {}, "extras": {}, "silhouettes": {}}
     for key in sorted(cells):
         at = cells[key]
         entry = {"page": at["page"], "col": at["col"], "row": at["row"], "sig": at["sig"]}
         if key.startswith("#"):
             out["extras"][key[1:]] = entry
+        elif key.startswith(SIL):
+            out["silhouettes"][key[1:]] = entry
         else:
             entry["art"] = arts.get(key, "")
             out["cells"][key] = entry
@@ -398,6 +411,15 @@ def portraits_impl(folder=None, set_name=None, keys=None, include_all=False, for
     if cosmos is None:
         cosmos, missions = cosmos_root()
     sources, out_dir, default_set, mod_media = _sources(cosmos, missions, folder)
+    if not set_name:
+        # The folder's OWN sheet when it has exactly one, so a rebuild or a check needs no
+        # --set repeated (TNG's is `tng`, not the folder-derived `cosmostngmod`).
+        try:
+            have = sorted(f[:-5] for f in os.listdir(out_dir) if f.endswith(".json"))
+        except OSError:
+            have = []
+        if len(have) == 1:
+            default_set = have[0]
     set_name = set_name or default_set
     alias = "shp_" + set_name
     cell = (int(cell), int(cell))
@@ -419,6 +441,7 @@ def portraits_impl(folder=None, set_name=None, keys=None, include_all=False, for
             missing.append(h)
             continue
         wanted[h["key"]] = signature(root, cell)
+        wanted[SIL + h["key"]] = silhouette_signature(wanted[h["key"]])
         roots[h["key"]] = root
         arts[h["key"]] = h["art"]
     for name in EXTRAS:
@@ -429,9 +452,13 @@ def portraits_impl(folder=None, set_name=None, keys=None, include_all=False, for
             if key not in wanted:
                 wanted[key] = at.get("sig")
                 arts[key] = at.get("art", "")
+        for key, at in (manifest.get("silhouettes") or {}).items():
+            if SIL + key not in wanted:
+                wanted[SIL + key] = at.get("sig")
 
     cells, todo, cleared = plan(manifest, wanted, cols, cell, force)
-    print(f"ship portraits '{set_name}': {len(cells) - len(EXTRAS)} hulls, "
+    hull_count = sum(1 for k in cells if not k.startswith(("#", SIL)))
+    print(f"ship portraits '{set_name}': {hull_count} hulls, "
           f"{len(todo)} to draw, {len(cleared)} freed -> {out_dir}")
     for h in missing:
         print(f"  !!  {h['key']}: no art at '{h['art']}' - skipped")
@@ -459,7 +486,8 @@ def portraits_impl(folder=None, set_name=None, keys=None, include_all=False, for
     for key in todo:
         if key.startswith("#"):
             continue
-        root = os.path.abspath(roots[key])
+        hull = key[1:] if key.startswith(SIL) else key
+        root = os.path.abspath(roots[hull])
         rel = os.path.relpath(root, cosmos).replace("\\", "/") \
             if root.startswith(os.path.abspath(cosmos)) else None
         if rel is None or rel.startswith(".."):
@@ -478,7 +506,8 @@ def portraits_impl(folder=None, set_name=None, keys=None, include_all=False, for
             "clear": [c for c in cleared if c["page"] == p],
             "items": [{"key": k, "col": cells[k]["col"], "row": cells[k]["row"],
                        "root": item_root.get(k),
-                       "extra": k[1:] if k.startswith("#") else None}
+                       "extra": k[1:] if k.startswith("#") else None,
+                       "silhouette": k.startswith(SIL)}
                       for k in todo if cells[k]["page"] == p],
         })
     job = {"cell": list(cell), "cols": cols, "preset": PRESET, "pages": pages,

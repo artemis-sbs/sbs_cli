@@ -128,7 +128,8 @@ class TestEndToEnd(unittest.TestCase):
     def test_FIRST_RUN_DRAWS_ALL_SECOND_DRAWS_NOTHING(self):
         self.assertEqual(self._run(), 0)
         self.assertEqual(sorted(i["key"] for i in self.jobs[0]["pages"][0]["items"]),
-                         ["#unknown", "kra_cruiser", "tsn_cruiser"])
+                         ["#unknown", "kra_cruiser", "tsn_cruiser", "~kra_cruiser",
+                          "~tsn_cruiser"])
         m = self._manifest()
         self.assertEqual(sorted(m["cells"]), ["kra_cruiser", "tsn_cruiser"])
         self.assertEqual(m["alias"], "shp_base")
@@ -140,7 +141,36 @@ class TestEndToEnd(unittest.TestCase):
         with open(os.path.join(self.ships, "kcruiser_diffuse.png"), "wb") as f:
             f.write(b"new paint")
         self._run()
-        self.assertEqual([i["key"] for i in self.jobs[1]["pages"][0]["items"]], ["kra_cruiser"])
+        # ...and its silhouette, which is cut from the same render.
+        self.assertEqual([i["key"] for i in self.jobs[1]["pages"][0]["items"]],
+                         ["kra_cruiser", "~kra_cruiser"])
+
+    def test_SILHOUETTES_come_after_every_hull_and_say_so(self):
+        self._run()
+        m = self._manifest()
+        self.assertEqual(sorted(m["silhouettes"]), ["kra_cruiser", "tsn_cruiser"])
+        last_hull = max((a["page"], a["row"], a["col"]) for a in m["cells"].values())
+        first_sil = min((a["page"], a["row"], a["col"]) for a in m["silhouettes"].values())
+        self.assertLess(last_hull, first_sil)
+        items = {i["key"]: i for i in self.jobs[0]["pages"][0]["items"]}
+        self.assertTrue(items["~kra_cruiser"]["silhouette"])
+        self.assertFalse(items["kra_cruiser"]["silhouette"])
+        self.assertEqual(items["~kra_cruiser"]["root"], items["kra_cruiser"]["root"])
+
+    def test_adding_silhouettes_to_an_OLD_sheet_moves_no_portrait(self):
+        self._run()
+        m = self._manifest()
+        before = {k: (a["col"], a["row"]) for k, a in m["cells"].items()}
+        # The sheet as it was before silhouettes existed.
+        del m["silhouettes"]
+        path = os.path.join(self.missions, "sbs_utils", "media", "ship_portraits", "base.json")
+        with open(path, "w") as f:
+            json.dump(m, f)
+        self._run()
+        self.assertEqual(sorted(i["key"] for i in self.jobs[-1]["pages"][0]["items"]),
+                         ["~kra_cruiser", "~tsn_cruiser"])
+        self.assertEqual({k: (a["col"], a["row"]) for k, a in self._manifest()["cells"].items()},
+                         before)
 
     def test_check_reports_without_drawing(self):
         self.assertEqual(self._run(check=True), 1)
@@ -177,3 +207,33 @@ class TestArtPath(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDefaultSetAndArtCheck(TestEndToEnd):
+    """A folder's own single sheet is the default set; `art check --strict` fails on a
+    stale sheet."""
+
+    def _mod(self):
+        mod = os.path.join(self.missions, "MyMod")
+        os.makedirs(os.path.join(mod, "media", "ships"))
+        with open(os.path.join(mod, "media", "my_ships.json"), "w") as f:
+            f.write('{"#ship-list": [{"key": "m1", "artfileroot": "ships/m1", "hullpoints": 1}]}\n')
+        open(os.path.join(mod, "media", "ships", "m1.obj"), "w").close()
+        return mod
+
+    def test_the_folders_ONE_sheet_is_the_default_set(self):
+        mod = self._mod()
+        P.portraits_impl("MyMod", set_name="mine", cosmos=self.cosmos, missions=self.missions,
+                         renderer=self._renderer)
+        self.assertEqual(P.portraits_impl("MyMod", check=True, cosmos=self.cosmos,
+                                          missions=self.missions), 0)
+        self.assertFalse(os.path.exists(os.path.join(mod, "media", "ship_portraits",
+                                                     "mymod.json")))
+
+    def test_ART_CHECK_STRICT_fails_on_a_stale_sheet(self):
+        import art_cmd
+        from unittest import mock
+        with mock.patch.object(art_cmd, "_cosmos_root", lambda: (self.cosmos, self.missions)):
+            self.assertTrue(art_cmd._portraits_stale(None))     # nothing built yet
+            self._run()
+            self.assertFalse(art_cmd._portraits_stale(None))

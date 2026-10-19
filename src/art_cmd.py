@@ -106,8 +106,34 @@ def art_check(folder, strict):
     install.
     """
     half = _report(_scan(folder))
-    if half and strict:
+    # Ship portraits: cells whose hull art changed since the sheet was drawn, and hulls with
+    # no cell. Stale is not broken - a hull without a portrait draws as a live 3D ship -
+    # so this only counts against --strict, like the bake.
+    stale = _portraits_stale(folder)
+    if (half or stale) and strict:
         raise SystemExit(1)
+
+
+def _portraits_stale(folder):
+    """Report the base portrait sheet, and FOLDER's own when it has one. True if any is
+    stale. Never raises - a check command must not die on a missing sheet."""
+    import portrait_cmd
+    cosmos, missions = _cosmos_root()
+    targets = [None]
+    if folder:
+        base = folder if os.path.isdir(folder) else os.path.join(missions, folder)
+        if os.path.isdir(os.path.join(base, "media", "ship_portraits")):
+            targets.append(folder)
+    stale = False
+    for target in targets:
+        try:
+            stale |= bool(portrait_cmd.portraits_impl(target, check=True, cosmos=cosmos,
+                                                      missions=missions))
+        except Exception as e:                       # noqa: BLE001
+            print(f"  portraits: could not check {target or 'base'}: {e}")
+    if stale:
+        print("  rebuild with `sbs art portraits [FOLDER]` (only stale cells are redrawn)")
+    return stale
 
 
 @art.command("clear")
