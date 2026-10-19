@@ -25,6 +25,7 @@ from cli_cmd import cli
 SBSLIB = "artemis-sbs.sbs_utils.v1.4.0.sbslib"
 MASTLIB = "artemis-sbs.LegendaryMissions.comms.v1.4.0.mastlib"
 DEVLIB = "artemis-sbs.cosmos_dev.v1.4.0.sbslib"
+LIBMEDIA = "artemis-sbs.sbs_utils.media.v1.4.0.zip"
 
 
 def _zip_with(path, text):
@@ -86,7 +87,11 @@ class TheLibrariesArrive(_Missions):
     def test_into_the_tools_lib_not_the_prompts(self):
         result = self.fetch(self.good)
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(sorted(os.listdir(self.lib)), sorted([SBSLIB, MASTLIB, DEVLIB]))
+        # LIBMEDIA too: the library's own art pack comes with the library (no story names
+        # it), and is unpacked beside it under media/.
+        self.assertEqual(sorted(os.listdir(self.lib)),
+                         sorted([SBSLIB, MASTLIB, DEVLIB, LIBMEDIA, "media"]))
+        self.assertTrue(os.path.isdir(os.path.join(self.lib, "media", LIBMEDIA[:-4])))
         self.assertEqual(os.listdir(self.elsewhere), [])
 
     def test_the_dev_library_comes_too_from_the_sbs_utils_release(self):

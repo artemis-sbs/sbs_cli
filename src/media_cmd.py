@@ -30,6 +30,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -242,7 +243,38 @@ def pinned_packs(missions_dir):
                 v = str(v).strip()
                 if v.lower().endswith(".zip"):
                     out.add(v)
+        # The library's OWN pack is pinned by pinning the library - no story names it.
+        library = library_media_for(data.get("sbslib"))
+        if library:
+            out.add(library)
     return out
+
+
+def library_media_for(sbslib_pins):
+    """`artemis-sbs.sbs_utils.media.v1.4.0.zip` for the sbs_utils a story pins, or None.
+
+    Art the LIBRARY needs (xESS icons, the EVA suit, ship portraits) ships in sbs_utils'
+    own media pack, released beside the .sbslib. A mission never declares it; pinning the
+    library pins its art. Libraries before v1.4.0 had no pack, so none is implied for them.
+
+    The runtime derives the same name (`sbs_utils/procedural/media_paths.py`
+    `library_media_pack`) - keep the two in step.
+    """
+    if isinstance(sbslib_pins, str):
+        sbslib_pins = [sbslib_pins]
+    for pin in sbslib_pins or []:
+        m = re.match(r"^(?P<user>[^.]+)\.sbs_utils\.(?P<line>v(?P<ver>[\d.]+?))\.sbslib$",
+                     str(pin).strip())
+        if not m:
+            continue
+        try:
+            ver = tuple(int(x) for x in m.group("ver").split("."))
+        except ValueError:
+            continue
+        if ver < (1, 4, 0):
+            return None
+        return f"{m.group('user')}.sbs_utils.media.{m.group('line')}.zip"
+    return None
 
 
 def prune_media(lib_dir, pinned, quiet=False):

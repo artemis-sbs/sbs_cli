@@ -183,7 +183,12 @@ def fetch_story_deps(deps_file, lib_dir, overwrite_libs, overwrite_sbs_libs):
         shared_media = deps.get("shared_media")
         if shared_media:
             missing_deps += fetch_deps(shared_media, False, overwrite_libs, lib_dir)
-        if resources is not None or shared_media:
+        # The library's own art pack: implied by the sbslib pin, named by no story.
+        from media_cmd import library_media_for
+        library_media = library_media_for(sbs_libs)
+        if library_media:
+            missing_deps += fetch_deps([library_media], False, overwrite_libs, lib_dir)
+        if resources is not None or shared_media or library_media:
             # ...and unpack the art once, beside the libraries, so a fetched dependency
             # lands in the same layout a locally built one does.
             try:

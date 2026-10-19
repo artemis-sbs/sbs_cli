@@ -152,6 +152,31 @@ class Pruning(unittest.TestCase):
         left = sorted(d for d in os.listdir(os.path.join(self.lib, "media")) if not d.startswith("."))
         self.assertEqual(left, ["u.Demo.media.v1.1.0", "u.Demo.media.v1.4.0"])
 
+    def test_the_LIBRARY_pack_is_pinned_by_pinning_the_library(self):
+        """No story names sbs_utils' own art pack; pruning it would blank the xESS icons
+        and the EVA suit in every mission."""
+        d = os.path.join(self.missions, "plain")
+        os.makedirs(d)
+        with open(os.path.join(d, "story.json"), "w", encoding="utf-8") as f:
+            json.dump({"sbslib": ["artemis-sbs.sbs_utils.v1.4.0.sbslib"]}, f)
+        _zip(os.path.join(self.lib, "artemis-sbs.sbs_utils.media.v1.4.0.zip"), ["epadd/icons.png"])
+        pinned = M.pinned_packs(self.missions)
+        self.assertEqual(pinned, {"artemis-sbs.sbs_utils.media.v1.4.0.zip"})
+        M.unpack_all(self.lib, quiet=True, pinned=pinned)
+        self.assertEqual(M.prune_media(self.lib, pinned, quiet=True), 0)
+        self.assertTrue(os.path.isdir(os.path.join(self.lib, "media",
+                                                   "artemis-sbs.sbs_utils.media.v1.4.0")))
+
+    def test_library_media_name(self):
+        self.assertEqual(M.library_media_for(["artemis-sbs.sbs_utils.v1.4.0.sbslib"]),
+                         "artemis-sbs.sbs_utils.media.v1.4.0.zip")
+        self.assertEqual(M.library_media_for("artemis-sbs.sbs_utils.v1.5.2.sbslib"),
+                         "artemis-sbs.sbs_utils.media.v1.5.2.zip")
+        # Before v1.4.0 the library had no pack: asking for one is a failed fetch.
+        self.assertIsNone(M.library_media_for(["artemis-sbs.sbs_utils.v1.3.0.sbslib"]))
+        self.assertIsNone(M.library_media_for(["artemis-sbs.cosmos_dev.v1.4.0.sbslib"]))
+        self.assertIsNone(M.library_media_for(None))
+
     def test_pruning_forgets_the_stamp_too(self):
         _zip(os.path.join(self.lib, "u.Gone.media.v1.0.0.zip"), ["casino/x.png"])
         M.unpack_all(self.lib, quiet=True)

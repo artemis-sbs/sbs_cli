@@ -21,6 +21,7 @@ from dap_cmd import dap
 from swap_cmd import swap
 from site_cmd import site
 from art_cmd import art
+from portrait_cmd import art_portraits
 from osc_cmd import osc
 from osc_layout_cmd import layout as osc_layout
 from osc_web_cmd import web as osc_web
